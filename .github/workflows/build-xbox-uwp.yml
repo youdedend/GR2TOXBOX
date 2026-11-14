@@ -52,10 +52,13 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Superseded pushes cancel their predecessor. A queued run used to wait for
-  # the full 25-33 minutes of a run that its own commit had already replaced,
-  # which is the same waste as the sequential jobs below.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # Deliberately no cancel-in-progress. Cancelling a run at minute 18 of a cold
+  # build throws away every object it had compiled, and that happened three
+  # times in a row before this was reverted: the queued run then also had to
+  # start cold, so cancelling cost more than waiting.
+  #
+  # A superseded run is left to finish and its result ignored.
+  cancel-in-progress: false
 
 env:
   BUILD_TYPE: Release
@@ -123,6 +126,11 @@ jobs:
           key: win64-d3d12-${{ env.BUILD_TYPE }}
           max-size: 2G
           append-timestamp: false
+          # Save on failure too. The action's default is to save only on success,
+          # so a job that fails at minute 18 of a cold build -- which is most of
+          # them -- threw away everything it had compiled and started from nothing
+          # again. A partial cache is still ~20 minutes of work.
+          save-always: true
 
       # clang-cl, not cl.exe: this is the compiler upstream's CI uses, and it is
       # not interchangeable. MSVC rejects casts clang-cl accepts in code we do
@@ -253,6 +261,7 @@ jobs:
           key: xbox-uwp-${{ env.BUILD_TYPE }}
           max-size: 2G
           append-timestamp: false
+          save-always: true
 
       - name: Set up the MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -268,47 +277,6 @@ jobs:
               Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $dxc) { Write-Error "dxc.exe not found; the UWP shader build cannot run." }
           "GR2_DXC_EXECUTABLE=$($dxc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Test the Xbox memory budget arithmetic (host build)
-        shell: pwsh
-        run: |
-          # pwsh defaults to $ErrorActionPreference = 'Stop' here, which turns
-          # cl.bat's banner on stderr into a terminating NativeCommandError: the
-          # step then fails with exit code 1 and no diagnostics, which is exactly
-          # what the first two runs of this step reported. Every other step in
-          # this file sets Continue for the same reason.
-          $ErrorActionPreference = 'Continue'
-          # The UWP package cannot run its own tests, so the budget self-test is
-          # compiled and run for the host first. A regression here would show up
-          # as an ERROR_COMMITMENT_LIMIT on a console, which is expensive to
-          # chase. Compiling with GR2_XBOX_UWP defined means IsXboxUwpBuild() is
-          # true here, so the clamp assertions -- not just the constants -- run.
-          #
-          # This step needs the fmt include path: the unit logs through
-          # common/logging/log.h, and a bare `cl` has no CMake target to inherit it
-          # from. It does *not* need C++/WinRT: uwp_memory.cpp probes the device
-          # family and pool limit behind __has_include, and the budget arithmetic
-          # is identical without the projections.
-          New-Item -ItemType Directory -Force -Path test-host | Out-Null
-          # 2>&1 into the log: without it a compile error only ever appears as
-          # "exit code 1" in the annotation, since the job's log is not readable
-          # from the API.
-          # /utf-8: fmt's base.h static_asserts on it, because without it MSVC
-          # reads the source as the ANSI code page and "\u00A7" is not UTF-8.
-          # The CMake build gets it from fmt's own interface target; a bare `cl`
-          # does not.
-          cl /nologo /std:c++20 /EHsc /W4 /utf-8 /I src /I externals/fmt/include `
-             /DGR2_XBOX_BUDGET_SELFTEST /DGR2_XBOX_UWP /DFMT_HEADER_ONLY `
-             src/tests/xbox_memory_budget_test.cpp src/tests/selftest_log.cpp `
-             src/core/uwp_memory.cpp /Fe:test-host/budget.exe 2>&1 |
-            Tee-Object -FilePath test-host-budget.log
-          if ($LASTEXITCODE -ne 0) {
-            Get-Content test-host-budget.log | Select-Object -Last 40 |
-              ForEach-Object { Write-Host "::error::$_" }
-            throw "The UWP budget self-test failed to compile."
-          }
-          ./test-host/budget.exe 2>&1 | Tee-Object -FilePath test-host-run.log
-          if ($LASTEXITCODE -ne 0) { throw "The UWP budget self-test reported failures." }
 
       - name: Configure (WindowsStore / UWP)
         shell: pwsh

@@ -21,10 +21,11 @@ file is right.
 | Strict W^X guest execution | **Done, unit-tested** |
 | 5,120 MiB memory budget | **Done, unit-tested** |
 | AppContainer Win32 shims | **Done** |
-| Direct3D 12 device / allocator / descriptors / arena | **Done — compiles on CI** |
+| Direct3D 12 device / allocator / descriptors / arena | **Done** |
 | HLSL SM 6.6 shader pipeline (`dxc`, fail-loud) | **Done** |
+| D3D12 command ring, root signature, PSO cache | **Done** |
 | Direct3D 12 frame graph (passes, submits, presenter) | **In progress** |
-| HLSL shader port | **In progress — 1 of 184 stages** |
+| HLSL shader port | **In progress — 24 of 184 stages** |
 | UWP shell (`IFrameworkView`, launcher, gamepad) | **In progress** |
 | Gamepad chord remapping | **Done, unit-tested** |
 | Audio backend for UWP | **Not started** |
@@ -43,6 +44,17 @@ file is right.
   `GR2_XBOX_UWP=ON`, `GR2_RENDERER=D3D12`.
 * HLSL shaders compile with `dxc -T *_6_6 -HV 2021 -WX`. A shader warning is a
   build failure.
+* **ccache in both Windows jobs, saved even when the job fails**, and the two
+  jobs run in parallel. A superseded run is left to finish rather than cancelled:
+  cancelling a cold build at minute 18 discards every object it had compiled.
+* **`tools/ci/local_precheck.sh` runs in `source-guard` and is meant to be run
+  before every push.** It compiles the host-portable units, the console-only
+  branches under `GR2_XBOX_UWP`, and the D3D12 backend against
+  `tools/ci/d3d12_stub`, a header stub that lets `g++ -fsyntax-only` type-check
+  D3D12 code with no Windows SDK. It also runs both self-tests. A missing include,
+  a wrong method name or a field that does not exist is now caught in seconds.
+* The shader list is generated (`tools/shaders/generate_d3d12_manifest.py`,
+  checked by `source-guard`), so a shader cannot be ported but never compiled.
 
 ### Core (console correctness)
 
@@ -66,8 +78,18 @@ file is right.
 * Unified Bindless Arena (5 arenas, 1,088 MiB) with `{arena, uint32 offset}`
   pointers replacing `buffer_reference`.
 * D3D12MA (vendored v3.0.1) behind a 1,200 MiB budget with 80%/90% eviction.
-* Shared HLSL headers (`arena.hlsli`, `vertex.hlsli`, `scene.hlsli`) and
-  `world.vert` ported.
+* Shared HLSL headers: `arena.hlsli`, `vertex.hlsli`, `scene.hlsli`,
+  `texel.hlsli`, `surface.hlsli`, `grade.hlsli`, `light.hlsli`, `fog.hlsli`.
+* **Root signature and pipelines** (`pipeline.*`): one root signature for the
+  whole renderer -- three root-constant blocks plus SM 6.6's direct
+  `ResourceDescriptorHeap[]` indexing, which is what replaces upstream's
+  descriptor arrays. `GraphicsPipelineDesc` in the port's own terms, and a
+  `PipelineCache` keyed by a hash of the state and the shader containers, backed
+  by the driver's `ID3D12PipelineLibrary` when the device offers one.
+* **Command ring** (`command.*`): one allocator, list and fence value per frame
+  in flight, rotated; explicit transitions with named helpers; a render-pass
+  begin/end pair that cannot inherit a target from the previous pass; full-screen
+  draws, dispatches and the frame's submit.
 
 ### Input
 
@@ -79,16 +101,18 @@ file is right.
 
 ## What does not work yet
 
-1. **184 − 1 shaders.** `python3 tools/shaders/check_shader_coverage.py`
-   prints the live number. Remaining stages include the geometry shaders
-   (`contour.geom`, `ui_stroke.geom`, `ui_text.geom`), the tessellation pair
+1. **184 − 24 shaders.** `python3 tools/shaders/check_shader_coverage.py`
+   prints the live number. Remaining stages are mostly the `pfx/` particle
+   family, the world-surface variants, the geometry shaders (`contour.geom`,
+   `ui_stroke.geom`, `ui_text.geom`), the tessellation pair
    (`leaf.tesc`/`leaf.tese` → hull/domain) and the GCN detiling compute shader.
-2. **The frame graph.** Pass ordering, render-target setup, submits and the
-   presenter exist only as the device/allocator/arena primitives so far.
-   `presenter`, `command`, `pipeline` and `renderer` modules are not written.
-3. **The UWP shell.** The manifest, assets, chords and packaging exist; the
-   `IFrameworkView` host, the D3D12 launcher UI and the in-process reboot are not
-   written.
+2. **The frame graph.** `presenter.*` and `renderer.*` are not written: the pass
+   order, render-target setup and the presenter's CoreWindow path are next.
+   `command.*` and `pipeline.*` now exist, so this is sequencing rather than
+   foundation work.
+3. **The UWP shell.** `IFrameworkView`, the CoreWindow and the run/shutdown
+   contract are written (`uwp/uwp_main.cpp`, `uwp/uwp_app.cpp`); the D3D12
+   launcher UI and the in-process reboot are not.
 4. **Audio.** `openal-soft` is not yet configured for the UWP/WASAPI path.
 5. **PSO cache serialisation** (`ID3D12PipelineLibrary1`) is designed, not
    implemented.
@@ -102,16 +126,16 @@ have a complete renderer. The README says so plainly.
 
 ## Order of work
 
-1. `command.*` + `pipeline.*`: command allocators, timeline-fence frame ring,
-   root signature, PSO cache. **Unblocks everything else.**
-2. Port the shader set in dependency order: `fullscreen.vert` and the composite
-   chain first (they need no arena), then the world/character/pfx families behind
-   `scene.hlsli`, then geometry and tessellation stages, then the compute passes.
+1. ~~`command.*` + `pipeline.*`~~ **Done.**
+2. Port the shader set in dependency order: the composite chain (done), the
+   world/character families behind `scene.hlsli` (in progress), then the `pfx/`
+   particle family, then geometry and tessellation stages, then the compute
+   passes.
 3. `presenter.*` + `renderer.*`: reproduce upstream's pass order
    (`frame_graph_draws.cpp` is the reference) against the arena.
-4. `src/uwp/uwp_main.cpp` + `launcher.*`: shell, CoreWindow, gamepad wiring, and
-   the in-process reboot path `Relaunch` already points to.
-5. Audio, PSO serialisation, FSR 3.1, preset tuning.
+4. `launcher.*`: the D3D12 launcher UI and the in-process reboot path `Relaunch`
+   already points to.
+5. Audio, FSR 3.1, preset tuning.
 
 ---
 

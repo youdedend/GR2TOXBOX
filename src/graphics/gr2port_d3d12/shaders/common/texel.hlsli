@@ -16,9 +16,10 @@
 // handle of 0 is the null descriptor slot -- a defined black / clamp result
 // rather than garbage, which is what the backend reserves slot 0 for.
 //
-// Upstream's `texture_sampler` is one sampler shared by every texture; here it is
-// index 1 of the sampler heap (index 0 is the null sampler, indices 2-3 are the
-// point and shadow-comparison samplers the backend creates at startup).
+// Upstream's `texture_sampler` is one sampler shared by every texture; here the
+// indices above name the four the backend creates at startup: a null sampler, a
+// repeating bilinear one, a clamped one, and a comparison sampler for the shadow
+// maps.
 
 #ifndef GR2_COMMON_TEXEL_HLSLI
 #define GR2_COMMON_TEXEL_HLSLI
@@ -29,6 +30,7 @@
 #define SMP_LINEAR_REPEAT 1
 #define SMP_POINT_CLAMP 2
 #define SMP_LINEAR_CLAMP 3
+#define SMP_COMPARISON 4
 
 // A sampled colour at uv, through the repeating bilinear sampler that upstream's
 // texture_sampler is.
@@ -67,6 +69,24 @@ float4 SampleTexGrad(uint handle, float2 uv, float2 dx, float2 dy) {
     Texture2D texture = ResourceDescriptorHeap[NonUniformResourceIndex(handle)];
     SamplerState sampler = SamplerDescriptorHeap[SMP_LINEAR_REPEAT];
     return texture.SampleGrad(sampler, uv, dx, dy);
+}
+
+// A Texture3D, for the volumetric fog: the same bindless heap and the same
+// per-handle indexing, with an explicit mip.
+float4 SampleVolumeLevel(uint handle, float3 uv, float level) {
+    Texture3D volume = ResourceDescriptorHeap[NonUniformResourceIndex(handle)];
+    SamplerState sampler = SamplerDescriptorHeap[SMP_LINEAR_REPEAT];
+    return volume.SampleLevel(sampler, uv, level);
+}
+
+// The mip-0 dimensions of a 2D texture, as a uint2. GLSL's textureSize(s, 0),
+// which the fog shaders use to convert a pixel coordinate into a uv.
+uint2 FetchTexelSize(uint handle) {
+    Texture2D texture = ResourceDescriptorHeap[NonUniformResourceIndex(handle)];
+    uint width;
+    uint height;
+    texture.GetDimensions(0, width, height);
+    return uint2(width, height);
 }
 
 // surface.glsl's `Transformed`: a uv transform of scale and offset.

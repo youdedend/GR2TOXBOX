@@ -85,6 +85,32 @@ else
     echo "  ok   src/core/uwp_memory.cpp (GR2_XBOX_UWP)"
 fi
 
+# The Direct3D 12 backend, against the header stub. There is no Windows SDK here,
+# so this is the only way to type-check a backend file before a Windows runner
+# does it. Errors from the vendored D3D12MA header are filtered: the stub does
+# not declare the whole of d3d12.h, and that header is not ours to change.
+D3D12_UNITS=(
+    src/graphics/gr2port_d3d12/pipeline.cpp
+    src/graphics/gr2port_d3d12/command.cpp
+)
+for file in "${D3D12_UNITS[@]}"; do
+    [ -f "$file" ] || continue
+    if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/d3d12_stub -D_WIN32 -include fcntl.h \
+            -fsyntax-only "$file" 2>"$OUT/err"; then
+        # Only the diagnostics that are not inside the vendored header count.
+        grep -E 'error' "$OUT/err" | grep -v 'd3d12ma/' >"$OUT/ours" || true
+        if [ -s "$OUT/ours" ]; then
+            echo "  FAIL $file"
+            sed 's/^/    /' "$OUT/ours" | head -20
+            failures=$((failures + 1))
+        else
+            echo "  ok   $file (vendored-header diagnostics only)"
+        fi
+    else
+        echo "  ok   $file"
+    fi
+done
+
 if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
     echo "local_precheck: building and running the self-tests"
     for pair in "xbox_chords_test:chords:GR2_CHORDS_SELFTEST" \

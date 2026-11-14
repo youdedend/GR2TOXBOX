@@ -23,6 +23,13 @@ target_sources(gr2port PRIVATE
     ${GR2_D3D12_DIR}/descriptors.h
     ${GR2_D3D12_DIR}/device.cpp
     ${GR2_D3D12_DIR}/device.h
+    ${GR2_D3D12_DIR}/command.cpp
+    ${GR2_D3D12_DIR}/command.h
+    ${GR2_D3D12_DIR}/pipeline.cpp
+    ${GR2_D3D12_DIR}/pipeline.h
+    ${GR2_D3D12_DIR}/uwp/uwp_app.cpp
+    ${GR2_D3D12_DIR}/uwp/uwp_main.cpp
+    ${GR2_D3D12_DIR}/uwp/uwp_main.h
 )
 
 # --- Vendored third-party ---------------------------------------------------
