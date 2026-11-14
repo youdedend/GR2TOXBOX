@@ -1,0 +1,231 @@
+# SPDX-FileCopyrightText: 2024 shadPS4 Emulator Project
+# SPDX-FileCopyrightText: Copyright 2026 GR2port
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+name: Build and Release
+
+on:
+  push:
+    branches-ignore: [Pre-release-shadPS4-*]
+    paths-ignore:
+      - "documents/**"
+      - "**/*.md"
+
+  pull_request:
+    paths-ignore:
+      - "documents/**"
+      - "**/*.md"
+
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' || github.repository != 'shadps4-emu/shadPS4' || github.event_name != 'push' }}
+  queue: ${{ (github.ref != 'refs/heads/main' || github.repository != 'shadps4-emu/shadPS4' || github.event_name != 'push') && 'single' || 'max' }}
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Install
+      run: |
+        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+        sudo add-apt-repository 'deb http://apt.llvm.org/noble/ llvm-toolchain-noble-23 main'
+        sudo apt update
+        sudo apt install clang-format-23
+    - name: Build
+      env:
+        COMMIT_RANGE: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+      run: ./.github/workflows/scripts/clang-format.sh
+
+  get-info:
+    runs-on: ubuntu-latest
+    outputs:
+      date: ${{ steps.vars.outputs.date }}
+      shorthash: ${{ steps.vars.outputs.shorthash }}
+      fullhash: ${{ steps.vars.outputs.fullhash }}
+    steps:
+    - uses: actions/checkout@v6
+    - name: Get date and git hash
+      id: vars
+      run: |
+        echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+        echo "shorthash=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+        echo "fullhash=$(git rev-parse HEAD)" >> $GITHUB_ENV
+        echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+        echo "shorthash=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        echo "fullhash=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+  windows-sdl:
+    runs-on: windows-2025-vs2026
+    needs: get-info
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: recursive
+
+    - name: Cache CMake Configuration
+      uses: actions/cache@v5
+      env:
+          cache-name: ${{ runner.os }}-sdl-ninja-cache-cmake-configuration
+      with:
+          path: |
+            ${{github.workspace}}/build
+          key: ${{ env.cache-name }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
+          restore-keys: |
+            ${{ env.cache-name }}-
+
+    - name: Cache CMake Build
+      uses: hendrikmuhs/ccache-action@v1.2.21
+      env:
+          cache-name: ${{ runner.os }}-sdl-cache-cmake-build
+      with:
+        append-timestamp: false
+        key: ${{ env.cache-name }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
+
+    - name: Print CPU Info
+      run: bash -c "cat /proc/cpuinfo"
+
+    - name: Configure CMake
+      run: cmake --fresh -G Ninja -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=ON -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel $env:NUMBER_OF_PROCESSORS
+
+    - name: Upload Windows SDL artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: gr2port-win64-sdl-${{ needs.get-info.outputs.date }}-${{ needs.get-info.outputs.shorthash }}
+        path: ${{github.workspace}}/build/Gravity Rush 2™.exe
+        retention-days: 7
+
+  linux-sdl:
+    runs-on: ubuntu-24.04
+    needs: get-info
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: recursive
+
+    - name: Add LLVM repository
+      run: |
+        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+        sudo add-apt-repository 'deb http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main'
+
+    - name: Install dependencies
+      run: sudo apt-get update && sudo apt install -y libx11-dev libxext-dev libwayland-dev libdecor-0-dev libxkbcommon-dev libglfw3-dev libgles2-mesa-dev libfuse2 clang-19 mold build-essential libasound2-dev libpulse-dev libopenal-dev libudev-dev libxcursor-dev libxi-dev libxss-dev libxtst-dev libxrandr-dev libxfixes-dev uuid-dev ninja-build qt6-base-dev qt6-wayland
+
+    - name: Cache CMake Configuration
+      uses: actions/cache@v5
+      env:
+          cache-name: ${{ runner.os }}-sdl-cache-cmake-configuration
+      with:
+          path: |
+            ${{github.workspace}}/build
+          key: ${{ env.cache-name }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
+          restore-keys: |
+            ${{ env.cache-name }}-
+
+    - name: Cache CMake Build
+      uses: hendrikmuhs/ccache-action@v1.2.21
+      env:
+          cache-name: ${{ runner.os }}-sdl-cache-cmake-build
+      with:
+        append-timestamp: false
+        key: ${{ env.cache-name }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
+
+    - name: Print CPU Info
+      run: cat /proc/cpuinfo
+
+    # No link-time optimisation here: with it, sceFiberReturnToThread keeps the address of the
+    # thread-local g_curthread across a fiber switch and the game faults on the next thread.
+    - name: Configure CMake
+      run: cmake --fresh -G Ninja -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel $(nproc)
+
+    - name: Run AppImage packaging script
+      run: ./.github/workflows/scripts/linux-appimage-sdl.sh
+
+    - name: Upload Linux SDL artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: gr2port-linux-sdl-${{ needs.get-info.outputs.date }}-${{ needs.get-info.outputs.shorthash }}
+        path: ${{github.workspace}}/Gravity Rush 2™.AppImage
+        retention-days: 7
+
+  pre-release:
+    if: github.ref == 'refs/heads/main' && github.repository == 'junminlee2004/GR2port'
+    needs: [get-info, windows-sdl, linux-sdl]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      FULLHASH: ${{ needs.get-info.outputs.fullhash }}
+      TAG: Pre-release-GR2port-${{ needs.get-info.outputs.date }}-${{ needs.get-info.outputs.fullhash }}
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v8
+      with:
+        path: ./artifacts
+
+    # Each zip holds the executable, the readme and a userdata folder with FSR 4's files; the
+    # Windows zip also has DLSS's. GitHub puts a dot for each space of an asset's file name, so
+    # the file names carry the dots and the labels the release page shows carry the spaces.
+    - name: Make the zips
+      run: |
+        chmod a+x ./artifacts/gr2port-linux-sdl-*/*.AppImage
+        for dir in ./artifacts/gr2port-*-sdl-*/; do
+          case "$dir" in
+            *-win64-*) system=Windows ;;
+            *) system=Linux ;;
+          esac
+          mkdir -p "$dir/userdata/fsr4_v07"
+          tar -xJf third_party/upscaler-files/fsr4_v07.tar.xz -C "$dir/userdata/fsr4_v07"
+          if [ "$system" = Windows ]; then
+            mkdir -p "$dir/userdata/dlss"
+            tar -xJf third_party/upscaler-files/dlss.tar.xz -C "$dir/userdata/dlss"
+            cp third_party/streamline/license.txt "$dir/userdata/dlss/LICENSE-Streamline.txt"
+          fi
+          cp src/dist/README.txt "$dir"
+          (cd "$dir" && zip -r "$GITHUB_WORKSPACE/GR2port.build.${FULLHASH:0:8}.$system.zip" .)
+        done
+
+    - name: Create Pre-Release on GitHub
+      run: |
+        assets=()
+        for system in Windows Linux; do
+          assets+=("GR2port.build.${FULLHASH:0:8}.$system.zip#GR2port build ${FULLHASH:0:8} $system.zip")
+        done
+        if gh release view "$TAG" > /dev/null 2>&1; then
+          gh release upload "$TAG" --clobber "${assets[@]}"
+        else
+          gh release create "$TAG" --target "$FULLHASH" --prerelease \
+            --title "Pre-release-GR2port-${{ needs.get-info.outputs.date }}-${{ needs.get-info.outputs.shorthash }}" \
+            --notes "Commit: [$FULLHASH](https://github.com/${{ github.repository }}/commit/$FULLHASH)" \
+            "${assets[@]}"
+        fi
+
+    # The newest pre-release is the only one kept.
+    - name: Delete old pre-releases and tags
+      run: |
+        releases=$(gh release list --limit 100 --json tagName,isPrerelease,publishedAt)
+        newest=$(echo "$releases" | jq -r '[.[] | select(.isPrerelease and (.tagName | startswith("Pre-release-GR2port-")))] | sort_by(.publishedAt) | last | .tagName')
+        echo "$releases" | jq -r '.[] | select(.isPrerelease and (.tagName | startswith("Pre-release-GR2port-"))) | .tagName' | while read -r tag; do
+          if [[ "$tag" != "$newest" ]]; then
+            echo "Deleting old pre-release with tag: $tag"
+            gh release delete "$tag" --cleanup-tag --yes
+          fi
+        done

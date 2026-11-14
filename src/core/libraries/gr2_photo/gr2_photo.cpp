@@ -1,0 +1,27 @@
+// SPDX-FileCopyrightText: Copyright 2026 GR2port
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+#include "common/gravity_rush.h"
+#include "common/logging/log.h"
+#include "core/libraries/gr2_photo/gr2_photo.h"
+#include "core/libraries/gr2_photo/photo_content.h"
+#include "core/libraries/gr2_photo/photo_gallery.h"
+#include "core/libraries/gr2_photo/photo_jpegdec.h"
+#include "core/libraries/gr2_photo/photo_jpegenc.h"
+
+namespace Libraries::Gr2Photo {
+
+void RegisterLib(Core::Loader::SymbolsResolver* sym) {
+    if (!Common::IsGravityRush2()) {
+        return;
+    }
+    // The linker asks the HLE table before the exports of a loaded module and takes the first
+    // match, so registering here, ahead of every other library, decides what the game calls.
+    LOG_INFO(Lib_Jpeg, "Gravity Rush 2: photo mode runs on HLE");
+    Gallery::Setup();
+    JpegEnc::RegisterLib(sym);
+    JpegDec::RegisterLib(sym);
+    Content::RegisterLib(sym);
+}
+
+} // namespace Libraries::Gr2Photo
