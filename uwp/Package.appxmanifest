@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SPDX-FileCopyrightText: Copyright 2026 GR2toXBOX contributors
+  SPDX-License-Identifier: GPL-2.0-or-later
+
+  Xbox Series X|S Retail Dev Mode package manifest for GR2toXBOX.
+
+  Notes for a reviewer:
+
+  * Application/ApplicationType is "Game". This is what the Xbox Memory Manager
+    reads to grant the title the ~5 GB Game-mode pool instead of the ~1 GB
+    App-mode pool. The Dev Portal also has a per-app "App type" switch and the
+    two must agree: docs/XBOX_DEV_MODE_GUIDE.md covers changing it from App to
+    Game after sideloading. Without it the emulator dies with
+    ERROR_COMMITMENT_LIMIT while committing guest memory.
+
+  * rescap:codeGeneration is mandatory and is what unlocks
+    VirtualAllocFromApp/VirtualProtectFromApp with execute permission. Without
+    it the Xbox Series X|S CPU (Zen 2) cannot run the guest's native x86-64 code
+    at all, because no execute protection can be granted. Note that it does NOT
+    permit PAGE_EXECUTE_READWRITE: the port's strict-W^X loader (src/core/uwp_wx)
+    exists precisely because RWX is still forbidden.
+
+  * rescap:broadFileSystemAccess is what lets the title read the player's own
+    legally-dumped Gravity Rush 2 v1.11 files from a USB SSD at E:\GR2 or D:\GR2
+    without copying a multi-gigabyte dump into LocalState.
+
+  * ProcessorArchitecture is x64 only: Xbox Series X|S are AMD Zen 2 x86-64, and
+    the guest's code runs natively, so an ARM build would have nothing to run on.
+
+  * TargetDeviceFamily is Windows.Universal with the Xbox device family input,
+    so the same package installs on a Windows PC (for the D3D12 desktop build)
+    only if you choose to sideload it; the Xbox is the target.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
+  IgnorableNamespaces="uap rescap mp">
+
+  <Identity
+    Name="GR2toXBOX.GR2port"
+    Publisher="CN=GR2toXBOX Dev Mode"
+    Version="1.0.0.0" />
+
+  <mp:PhoneIdentity PhoneProductId="6f2b1a44-3c9e-4d8b-9a71-2f5c0e8d1b64"
+                    PhonePublisherId="00000000-0000-0000-0000-000000000000" />
+
+  <Properties>
+    <DisplayName>Gravity Rush 2 (Xbox)</DisplayName>
+    <PublisherDisplayName>GR2toXBOX contributors</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily
+      Name="Windows.Universal"
+      MinVersion="10.0.19041.0"
+      MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+    <Resource Language="ja-jp" />
+    <Resource Language="ko-kr" />
+  </Resources>
+
+  <Applications>
+    <Application Id="GR2port"
+                 Executable="GR2port.exe"
+                 EntryPoint="GR2port.App">
+      <uap:VisualElements
+        DisplayName="Gravity Rush 2"
+        Description="Unofficial native Direct3D 12 port of Gravity Rush 2 for Xbox Series X|S."
+        BackgroundColor="#14161A"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile
+          Wide310x150Logo="Assets\Square310x150Logo.png"
+          Square71x71Logo="Assets\Square44x44Logo.png"
+          Square310x310Logo="Assets\Square150x150Logo.png" />
+        <uap:SplashScreen Image="Assets\SplashScreen.png" />
+      </uap:VisualElements>
+
+      <Extensions>
+        <!--
+          The application is a game: this is the declaration the Xbox memory
+          manager uses to place the title in the Game pool.
+        -->
+        <uap:Extension Category="windows.gameOsConfiguration">
+          <uap:GameOsConfiguration>
+            <uap:GameOsConfiguration.Enabled>true</uap:GameOsConfiguration.Enabled>
+          </uap:GameOsConfiguration>
+        </uap:Extension>
+      </Extensions>
+
+      <uap:ApplicationContentUriRules />
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- Online features: trophies and the network discovery layer. -->
+    <Capability Name="internetClient" />
+    <Capability Name="internetClientServer" />
+    <Capability Name="privateNetworkClientServer" />
+
+    <!--
+      Read the player's own dump from a USB SSD (E:\GR2, D:\GR2). Restricted
+      capability: Dev Mode grants it, and it is required for a multi-gigabyte
+      game dump that must not be copied into the app's isolated storage.
+    -->
+    <rescap:Capability Name="broadFileSystemAccess" />
+
+    <!--
+      Native x86-64 guest execution: allows VirtualAllocFromApp and
+      VirtualProtectFromApp to grant execute permission. Strict W^X still
+      applies, so code is never writable and executable at the same time.
+    -->
+    <rescap:Capability Name="codeGeneration" />
+
+    <!-- Save data, screenshots (photo mode) and the log file live here. -->
+    <uap:Capability Name="documentsLibrary" />
+    <uap:Capability Name="picturesLibrary" />
+    <uap:Capability Name="removableStorage" />
+  </Capabilities>
+</Package>

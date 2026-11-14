@@ -1354,7 +1354,17 @@ if (GR2_XBOX_UWP)
     target_compile_definitions(xbox_memory_budget_selftest PRIVATE GR2_XBOX_UWP)
 endif()
 
+add_executable(xbox_chords_selftest
+    src/tests/xbox_chords_test.cpp
+    src/uwp/chords.cpp
+)
+target_include_directories(xbox_chords_selftest PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_compile_definitions(xbox_chords_selftest PRIVATE GR2_CHORDS_SELFTEST)
+
 include(CTest)
 if (BUILD_TESTING)
     add_test(NAME xbox_memory_budget COMMAND xbox_memory_budget_selftest)
+    add_test(NAME xbox_chords COMMAND xbox_chords_selftest)
 endif()
