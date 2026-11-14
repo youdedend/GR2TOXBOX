@@ -99,7 +99,14 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Set up the MSVC developer environment
+      # clang-cl, not cl.exe: this is the compiler upstream's CI uses, and it is
+      # not interchangeable. MSVC rejects casts clang-cl accepts in code we do
+      # not own -- the vendored ImGui demo's `(ImVec4)ImColor::HSV(...)`, made
+      # ambiguous by this project's float ImVec4 constructor -- and upstream's
+      # -march flags are clang spelling, so cl.exe merely warned that it was
+      # ignoring them. Building with the compiler the project targets avoids
+      # patching a dependency over a diagnosable difference.
+      - name: Set up the MSVC developer environment (for clang-cl and the SDK)
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
@@ -128,8 +135,8 @@ jobs:
                 "-DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}" `
                 "-DGR2_RENDERER=D3D12" `
                 "-DGR2_DXC_EXECUTABLE=${{ env.GR2_DXC_EXECUTABLE }}" `
-                "-DCMAKE_C_COMPILER=cl" `
-                "-DCMAKE_CXX_COMPILER=cl" `
+                "-DCMAKE_C_COMPILER=clang-cl" `
+                "-DCMAKE_CXX_COMPILER=clang-cl" `
                 "-DENABLE_UPDATER=OFF" 2>&1 |
               Tee-Object -FilePath configure.log
           if ($LASTEXITCODE -ne 0) {
@@ -244,8 +251,8 @@ jobs:
                 "-DGR2_XBOX_UWP=ON" `
                 "-DGR2_RENDERER=D3D12" `
                 "-DGR2_DXC_EXECUTABLE=${{ env.GR2_DXC_EXECUTABLE }}" `
-                "-DCMAKE_C_COMPILER=cl" `
-                "-DCMAKE_CXX_COMPILER=cl" `
+                "-DCMAKE_C_COMPILER=clang-cl" `
+                "-DCMAKE_CXX_COMPILER=clang-cl" `
                 "-DENABLE_UPDATER=OFF" 2>&1 |
               Tee-Object -FilePath configure-uwp.log
           if ($LASTEXITCODE -ne 0) {
