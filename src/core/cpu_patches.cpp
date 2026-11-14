@@ -28,6 +28,7 @@
 #include "core/emulator_settings.h"
 #include "core/signals.h"
 #include "core/tls.h"
+#include "core/uwp_wx.h"
 #include "cpu_patches.h"
 
 #ifdef _WIN32
@@ -1254,6 +1255,10 @@ struct PatchInfo {
 };
 
 constexpr size_t NearJumpSize = 5;
+/// The longest guest instruction this file rewrites in place. Zydis reports at
+/// most 15 bytes for x86-64, and every patch here either replaces the
+/// instruction or jumps out to a trampoline, so 15 bytes covers the write.
+constexpr size_t MaxPatchedInstructionBytes = 15;
 
 #if defined(_WIN32)
 static const bool need_tcb_trampoline = true;
@@ -1645,7 +1650,20 @@ static bool TryPatchJit(void* code_address) {
         return true;
     }
 
-    return TryPatch(code, module).first;
+    // Strict W^X: the module's executable segments are sealed PAGE_EXECUTE_READ
+    // once Module::LoadModuleToMemory() returns, so an in-place rewrite of a
+    // lazily patched instruction must reopen the page first. The range is acked
+    // before the write and sealed again before the guest can fetch the rewritten
+    // bytes; the module lock keeps two threads from racing on the same page.
+    const bool opened = Core::Wx::OpenForPatch(code, MaxPatchedInstructionBytes);
+    if (!opened) {
+        // The page could not be reopened. Do not leave the guest on a
+        // half-written instruction.
+        return false;
+    }
+    const bool patched = TryPatch(code, module).first;
+    Core::Wx::CloseAfterPatch(code, MaxPatchedInstructionBytes);
+    return patched;
 }
 
 static void TryPatchAot(void* code_address, u64 code_size) {

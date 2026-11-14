@@ -17,6 +17,7 @@
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/kernel/process.h"
 #include "core/memory.h"
+#include "core/uwp_memory.h"
 
 namespace Core {
 
@@ -88,6 +89,14 @@ void MemoryManager::SetupMemoryRegions(u64 flexible_size, bool use_extended_mem1
     if (!use_extended_mem2 && !is_neo) {
         total_size -= 128_MB;
     }
+
+    // Xbox Series X|S: the UWP memory pool is 5,120 MiB in Game mode, shared by
+    // the CPU and the GPU, and the D3D12 backend reserves 1,200 MiB of it. The
+    // PS4 Pro devkit totals above (8+ GiB) would fail the very first commit
+    // with ERROR_COMMITMENT_LIMIT. Clamp before the maps are sized so that the
+    // physical maps, the backing file and the direct-memory view all agree.
+    Core::Xbox::ClampGuestMemoryRegions(total_size, flexible_size,
+                                        ORBIS_KERNEL_FLEXIBLE_MEMORY_BASE);
 
     // Update stored totals
     total_flexible_size = flexible_size - ORBIS_KERNEL_FLEXIBLE_MEMORY_BASE;

@@ -15,6 +15,7 @@
 #include "core/libraries/error_codes.h"
 #include "core/loader/dwarf.h"
 #include "core/memory.h"
+#include "core/uwp_wx.h"
 #include "core/module.h"
 #include "core/prompt_packs/prompt_packs.h"
 #include "core/tls.h"
@@ -132,6 +133,11 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
     // Initialize trampoline generator.
     VAddr trampoline_vaddr = base_virtual_addr + aligned_base_size;
     void* trampoline_addr = std::bit_cast<void*>(trampoline_vaddr);
+    // The trampoline arena holds host code (xbyak output) and guest code that
+    // the static patcher moves out of short instructions. It is committed
+    // writable here, populated during module load, and sealed to execute-read
+    // together with the executable segments below, so it is never both
+    // writable and executable at once (strict W^X).
     result = memory->MapMemory(&trampoline_addr, trampoline_vaddr, TrampolineSize,
                                MemoryProt::CpuReadWrite | MemoryProt::CpuExec,
                                MemoryMapFlags::Fixed, VMAType::Code, name);
@@ -436,6 +442,35 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
         }
     }
 #endif
+
+    // Strict W^X: every executable segment has been populated, relocated and
+    // patched in place while it was writable. Seal the code and the trampoline
+    // arena to PAGE_EXECUTE_READ now, flushing the host instruction cache first.
+    // From this point on the guest can only fetch from these pages; any later
+    // lazy patch reopens the range through Core::Wx::OpenForPatch().
+    u32 sealed_segments = 0;
+    for (u32 i = 0; i < info.num_segments; i++) {
+        const auto& segment = info.segments[i];
+        if ((segment.prot & PF_EXEC) == 0) {
+            continue;
+        }
+        if (!Core::Wx::SealExecutable(reinterpret_cast<void*>(segment.address), segment.size)) {
+            LOG_CRITICAL(Core_Linker, "Failed to seal executable segment of {} at {:#x} ({})",
+                         name, segment.address, Common::GetLastErrorMsg());
+        }
+        sealed_segments++;
+    }
+#ifdef ARCH_X86_64
+    if (sealed_segments != 0) {
+        if (!Core::Wx::SealExecutable(reinterpret_cast<void*>(trampoline_vaddr), TrampolineSize)) {
+            LOG_CRITICAL(Core_Linker, "Failed to seal trampoline arena of {} at {:#x}", name,
+                         trampoline_vaddr);
+        }
+    }
+#endif
+    LOG_INFO(Core_Linker, "W^X: sealed {} executable segment(s) of {} into execute-read",
+             sealed_segments, name);
+
     Gr2Port::Install(base_virtual_addr);
 }
 

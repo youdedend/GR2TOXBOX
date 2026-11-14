@@ -1,0 +1,15 @@
+Upstream: https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator
+Tag:      v3.0.1
+Commit:   (release tag v3.0.1, archive fetched from codeload)
+Fetched:  2026-11-14
+License:  MIT, Copyright (c) 2019-2025 Advanced Micro Devices, Inc.
+
+Vendored files (unmodified):
+  include/D3D12MemAlloc.h   -> D3D12MemAlloc.h
+  src/D3D12MemAlloc.cpp     -> D3D12MemAlloc.cpp
+  src/Common.cpp            -> Common.cpp
+  src/Common.h              -> Common.h
+  LICENSE.txt               -> LICENSE.txt
+  NOTICES.txt               -> NOTICES.txt
+
+Not vendored: samples, tests, docs, build scripts.

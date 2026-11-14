@@ -16,6 +16,8 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/memory.h"
 #include "core/memory.h"
+#include "core/uwp_wx.h"
+#include "core/uwp_memory.h"
 #include "libraries/error_codes.h"
 
 #ifdef _WIN32
@@ -63,7 +65,21 @@ static constexpr u64 SystemReservedSize = SYSTEM_RESERVED_MAX - SYSTEM_RESERVED_
 static constexpr u64 UserSize = USER_MAX - USER_MIN + 1;
 
 // Required backing file size for mapping physical address space.
-static u64 BackingSize = ORBIS_KERNEL_TOTAL_MEM_DEV_PRO + ORBIS_KERNEL_FLEXIBLE_MEMORY_SIZE;
+//
+// On desktop this is the PS4 Pro devkit total (7,936 MiB direct + 512 MiB
+// flexible). On Xbox the UWP pool is 5,120 MiB in Game mode, so the backing
+// file is sized from the console ceiling instead; committing the desktop total
+// inside an AppContainer fails with ERROR_COMMITMENT_LIMIT before the game's
+// first frame.
+static u64 BackingSize = [] {
+    if (Core::Xbox::IsXboxUwpBuild()) {
+        // The base figure the clamp in MemoryManager::SetupMemoryRegions()
+        // produces at most: guest direct memory plus the flexible pool.
+        return Core::Xbox::GuestMemoryCeilingBytes +
+               ::Libraries::Kernel::ORBIS_KERNEL_FLEXIBLE_MEMORY_BASE;
+    }
+    return ORBIS_KERNEL_TOTAL_MEM_DEV_PRO + ORBIS_KERNEL_FLEXIBLE_MEMORY_SIZE;
+}();
 
 #ifdef _WIN32
 
@@ -82,6 +98,14 @@ static u64 BackingSize = ORBIS_KERNEL_TOTAL_MEM_DEV_PRO + ORBIS_KERNEL_FLEXIBLE_
     // All cases involving execute permissions have separate permissions.
     if (execute) {
         if (write) {
+            // Strict W^X (Xbox AppContainer) forbids PAGE_EXECUTE_READWRITE
+            // outright: the request would fail with ERROR_INVALID_PARAMETER and
+            // take the mapping down with it. Hand back a writable, non-executable
+            // mapping instead; AddressSpace::Protect() seals it to
+            // PAGE_EXECUTE_READ once the guest has finished writing code into it.
+            if (Core::Wx::IsStrictWxRequired()) {
+                return PAGE_READWRITE;
+            }
             return PAGE_EXECUTE_READWRITE;
         } else if (read && !write) {
             return PAGE_EXECUTE_READ;
@@ -199,8 +223,16 @@ struct AddressSpace::Impl {
                        EmulatorSettings.GetExtraFmemInMBytes() * 1_MB;
 
         // Allocate backing file that represents the total physical memory.
+        //
+        // PAGE_READWRITE, never PAGE_EXECUTE_READWRITE: the backing section holds
+        // guest data and the *writable* copy of guest code. Execute permission is
+        // granted per-view by Core::Wx once a range is populated and sealed, so
+        // the section itself never has to be executable (and an AppContainer
+        // would refuse it if it were). The backing file is not fully committed
+        // here either: pages are committed as the guest faults them in, which is
+        // what keeps the process inside the Xbox budget.
         backing_handle = CreateFileMapping2(INVALID_HANDLE_VALUE, nullptr, FILE_MAP_ALL_ACCESS,
-                                            PAGE_EXECUTE_READWRITE, SEC_COMMIT, BackingSize,
+                                            PAGE_READWRITE, SEC_COMMIT, BackingSize,
                                             nullptr, nullptr, 0);
 
         ASSERT_MSG(backing_handle, "{}", Common::GetLastErrorMsg());
@@ -213,7 +245,7 @@ struct AddressSpace::Impl {
         // Map backing placeholder. This will commit the pages
         void* const ret =
             MapViewOfFile3(backing_handle, process, backing_base, 0, BackingSize,
-                           MEM_REPLACE_PLACEHOLDER, PAGE_EXECUTE_READWRITE, nullptr, 0);
+                           MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0);
         ASSERT_MSG(ret == backing_base, "{}", Common::GetLastErrorMsg());
     }
 
@@ -562,7 +594,11 @@ struct AddressSpace::Impl {
         if (execute) {
             // If there's some form of write protection requested, provide read-write permissions.
             if (write) {
-                new_flags = PAGE_EXECUTE_READWRITE;
+                // Under strict W^X the range is made writable and non-executable only
+                // for the duration of the write, then sealed back to execute-read by the
+                // caller through Core::Wx::SealExecutable().
+                new_flags = Core::Wx::IsStrictWxRequired() ? PAGE_READWRITE
+                                                           : PAGE_EXECUTE_READWRITE;
             } else if (read && !write) {
                 new_flags = PAGE_EXECUTE_READ;
             } else {
@@ -651,7 +687,10 @@ enum PosixPageProtection {
         LOG_WARNING(Core, "Converting write-only mapping to read-write");
     }
 
-    // All cases involving execute permissions have separate permissions.
+    // All cases involving execute permissions have separate permissions. The
+    // strict-W^X split (writable, non-executable while patching) is applied in
+    // AddressSpace::Protect(), which every guest protection change goes
+    // through, so this converter keeps its plain mapping.
     if (execute) {
         if (write) {
             return PAGE_EXECUTE_READWRITE;
@@ -913,7 +952,24 @@ void AddressSpace::Protect(VAddr virtual_addr, u64 size, MemoryPermission perms)
     const bool write = True(perms & MemoryPermission::Write);
     const bool execute = True(perms & MemoryPermission::Execute);
     NotifyProtectObserver(virtual_addr, size, write);
-    return impl->Protect(virtual_addr, size, read, write, execute);
+
+    if (Core::Wx::IsStrictWxRequired() && execute && write) {
+        // Strict W^X: the guest asked for a writable code page. Grant the write
+        // without execute while it patches, and hand back execute-read when it
+        // drops the write. PAGE_EXECUTE_READWRITE is never requested, so the
+        // AppContainer policy never has a reason to refuse the call.
+        impl->Protect(virtual_addr, size, read, true, false);
+        Core::Wx::FlushInstructionCacheRange(reinterpret_cast<void*>(virtual_addr), size);
+        return;
+    }
+
+    impl->Protect(virtual_addr, size, read, write, execute);
+
+    if (Core::Wx::IsStrictWxRequired() && execute) {
+        // A code range just became executable: make sure the host instruction
+        // cache sees the bytes the loader or the patcher wrote.
+        Core::Wx::FlushInstructionCacheRange(reinterpret_cast<void*>(virtual_addr), size);
+    }
 }
 
 boost::icl::interval_set<VAddr> AddressSpace::GetUsableRegions() {

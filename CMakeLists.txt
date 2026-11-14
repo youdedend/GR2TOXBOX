@@ -1014,6 +1014,10 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/thread.h
          src/core/tls.cpp
          src/core/tls.h
+         src/core/uwp_wx.cpp
+         src/core/uwp_wx.h
+         src/core/uwp_memory.cpp
+         src/core/uwp_memory.h
          src/core/emulator_state.cpp
          src/core/emulator_state.h
          src/core/emulator_settings.cpp
@@ -1328,4 +1332,29 @@ install(TARGETS gr2port BUNDLE DESTINATION .)
 else()
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+# ---------------------------------------------------------------------------
+# Xbox memory budget self-test
+#
+# A dependency-free executable that asserts the Series X|S memory invariants.
+# Built on every platform (it compiles everywhere) and run by CTest and by the
+# GitHub Actions jobs, so a regression in the budget arithmetic fails CI rather
+# than a console at boot.
+# ---------------------------------------------------------------------------
+add_executable(xbox_memory_budget_selftest
+    src/tests/xbox_memory_budget_test.cpp
+    src/core/uwp_memory.cpp
+)
+target_include_directories(xbox_memory_budget_selftest PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_compile_definitions(xbox_memory_budget_selftest PRIVATE GR2_XBOX_BUDGET_SELFTEST)
+if (GR2_XBOX_UWP)
+    target_compile_definitions(xbox_memory_budget_selftest PRIVATE GR2_XBOX_UWP)
+endif()
+
+include(CTest)
+if (BUILD_TESTING)
+    add_test(NAME xbox_memory_budget COMMAND xbox_memory_budget_selftest)
 endif()
