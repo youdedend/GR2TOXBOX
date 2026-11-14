@@ -65,25 +65,24 @@ void Allocator::Destroy() {
     device_ = nullptr;
 }
 
-void ResourceDeleter::operator()(ID3D12Resource* resource) const noexcept {
-    if (resource == nullptr) {
-        return;
+void ResourcePtr::Reset() noexcept {
+    if (resource_ != nullptr) {
+        resource_.Reset();
     }
-    // Release our reference to the resource first; then release the allocation.
-    // After `Allocator::CreateResource` calls `Allocation::SetResource(nullptr)`,
-    // the allocation no longer references the resource, so this order cannot
-    // double-release. `allocation` holds the only remaining reference to the
-    // memory, and dropping it returns the block to D3D12MA.
-    resource->Release();
-    if (allocation != nullptr) {
-        allocation->Release();
+    if (allocation_ != nullptr) {
+        // Clearing the allocation's reference at creation means this is the last
+        // reference to the memory; releasing it returns the block to D3D12MA.
+        allocation_->Release();
+        allocation_ = nullptr;
     }
-    if (released != nullptr) {
-        released->fetch_sub(bytes, std::memory_order_relaxed);
+    if (committed_ != nullptr && bytes_ != 0) {
+        committed_->fetch_sub(bytes_, std::memory_order_relaxed);
+        committed_ = nullptr;
+        bytes_ = 0;
     }
 }
 
-Allocator::ResourcePtr Allocator::CreateResource(const D3D12_RESOURCE_DESC& desc,
+ResourcePtr Allocator::CreateResource(const D3D12_RESOURCE_DESC& desc,
                                                  D3D12_HEAP_TYPE heap_type,
                                                  D3D12_RESOURCE_STATES initial_state,
                                                  const D3D12_CLEAR_VALUE* clear) {
@@ -139,29 +138,19 @@ Allocator::ResourcePtr Allocator::CreateResource(const D3D12_RESOURCE_DESC& desc
         return nullptr;
     }
 
-    // Take ownership of the resource, and break the reference cycle by dropping
-    // the allocation's reference to it: the Allocation would otherwise keep the
-    // resource alive and vice versa. See the Ownership note in allocator.h.
+    // Break the reference cycle: the Allocation holds a reference to the
+    // resource, and the resource's handle will hold the allocation. Dropping the
+    // allocation's side is what D3D12MA's SetResource(nullptr) is for.
     ID3D12Resource* raw = allocation->GetResource();
     allocation->SetResource(nullptr);
 
-    ResourceDeleter deleter;
-    deleter.allocation = allocation;
-    deleter.released = &committed_;
-    deleter.bytes = size;
-
     ResourcePtr resource;
-    // Attach does not AddRef, and D3D12MA's CreateResource hands back a resource
-    // with one reference for us, so there is nothing to add here. WRL's
-    // Attach(pointer, deleter) stores the deleter by value -- including the
-    // allocation pointer it must release.
-    resource.Attach(raw, deleter);
-
+    resource.Adopt(raw, allocation, size, &committed_);
     committed_.fetch_add(size, std::memory_order_relaxed);
     return resource;
 }
 
-Allocator::ResourcePtr Allocator::CreateBuffer(u64 size, D3D12_HEAP_TYPE heap_type,
+ResourcePtr Allocator::CreateBuffer(u64 size, D3D12_HEAP_TYPE heap_type,
                                                D3D12_RESOURCE_FLAGS flags,
                                                D3D12_RESOURCE_STATES initial_state,
                                                const wchar_t* name, bool evictable) {

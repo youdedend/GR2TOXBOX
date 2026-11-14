@@ -59,24 +59,84 @@ namespace Gr2Port::D3D12 {
 ///
 /// ### The type handed out
 ///
-/// `ResourcePtr` is a `ComPtr<ID3D12Resource>` whose deleter also returns the
-/// D3D12MA memory, so a caller can treat it exactly like a plain resource and
-/// still have the allocation accounted for and released.
-struct ResourceDeleter {
-    /// The allocation that owns the memory. `CreateResource` clears the
-    /// allocation's own reference to the resource, so this is what keeps the
-    /// block alive for as long as the resource is.
-    D3D12MA::Allocation* allocation = nullptr;
-    /// The allocator's committed-byte counter, decremented on release so the
-    /// budget reflects the memory actually in use.
-    std::atomic<u64>* released = nullptr;
-    /// The allocation's byte size, filled in at creation.
-    u64 bytes = 0;
+/// `ResourcePtr` is the only thing `Allocator` returns. It owns the resource *and*
+/// the D3D12MA allocation behind it, because releasing the resource alone does not
+/// return the memory (see Ownership above). It is a small explicit type rather than
+/// a `ComPtr` with a custom deleter for two reasons: WRL's `ComPtr` has no
+/// two-argument `Attach` in every SDK, and spelling the ownership out here is what
+/// makes it reviewable.
+///
+/// Move-only: two handles to one allocator allocation would double-release it.
+class ResourcePtr {
+public:
+    ResourcePtr() = default;
+    ~ResourcePtr() {
+        Reset();
+    }
 
-    void operator()(ID3D12Resource* resource) const noexcept;
+    ResourcePtr(const ResourcePtr&) = delete;
+    ResourcePtr& operator=(const ResourcePtr&) = delete;
+
+    ResourcePtr(ResourcePtr&& other) noexcept {
+        MoveFrom(other);
+    }
+    ResourcePtr& operator=(ResourcePtr&& other) noexcept {
+        if (this != &other) {
+            Reset();
+            MoveFrom(other);
+        }
+        return *this;
+    }
+
+    /// Takes ownership of `resource`'s existing reference and of `allocation`.
+    /// `bytes` is returned to `*committed` when the last handle goes away.
+    void Adopt(ID3D12Resource* resource, D3D12MA::Allocation* allocation, u64 bytes,
+               std::atomic<u64>* committed) noexcept {
+        Reset();
+        resource_.Attach(resource);
+        allocation_ = allocation;
+        bytes_ = bytes;
+        committed_ = committed;
+    }
+
+    /// Releases the resource, then the allocation, and decrements the committed
+    /// counter. The order matters: `Allocator` clears the allocation's reference
+    /// to the resource at creation, so the resource must die first.
+    void Reset() noexcept;
+
+    [[nodiscard]] ID3D12Resource* Get() const noexcept {
+        return resource_.Get();
+    }
+    ID3D12Resource* operator->() const noexcept {
+        return resource_.Get();
+    }
+    ID3D12Resource** GetAddressOf() noexcept {
+        return resource_.GetAddressOf();
+    }
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return resource_ != nullptr;
+    }
+    /// The bytes this resource holds, for the allocator's statistics.
+    [[nodiscard]] u64 Bytes() const noexcept {
+        return bytes_;
+    }
+
+private:
+    void MoveFrom(ResourcePtr& other) noexcept {
+        resource_.Attach(other.resource_.Detach());
+        allocation_ = other.allocation_;
+        bytes_ = other.bytes_;
+        committed_ = other.committed_;
+        other.allocation_ = nullptr;
+        other.bytes_ = 0;
+        other.committed_ = nullptr;
+    }
+
+    ComPtr<ID3D12Resource> resource_;
+    D3D12MA::Allocation* allocation_ = nullptr;
+    u64 bytes_ = 0;
+    std::atomic<u64>* committed_ = nullptr;
 };
-
-using ResourcePtr = ComPtr<ID3D12Resource>;
 
 class Allocator {
 public:
