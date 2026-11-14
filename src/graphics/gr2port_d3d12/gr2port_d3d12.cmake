@@ -68,10 +68,16 @@ endif()
 # --- HLSL shaders -----------------------------------------------------------
 gr2port_d3d12_configure_shaders(gr2port)
 
-gr2port_add_hlsl_shader(world.vert.hlsl world_vert)
-# The remaining stages are added by tools/shaders/gr2port_d3d12_manifest.cmake,
-# which is generated from gr2port.cmake so the two backends cannot drift.
-include(${GR2_D3D12_DIR}/shaders_manifest.cmake OPTIONAL)
+# The shader list is generated from the shader directory by
+# tools/shaders/generate_d3d12_manifest.py, so a shader dropped into the tree
+# cannot be silently left out of the build (which would make it look ported in
+# the coverage report and fail only on a console).
+if (NOT EXISTS ${GR2_D3D12_DIR}/shaders_manifest.cmake)
+    message(FATAL_ERROR
+        "src/graphics/gr2port_d3d12/shaders_manifest.cmake is missing.\n"
+        "  Regenerate it: python3 tools/shaders/generate_d3d12_manifest.py")
+endif()
+include(${GR2_D3D12_DIR}/shaders_manifest.cmake)
 
 add_custom_target(gr2port_d3d12_shaders DEPENDS ${GR2_D3D12_SHADER_HEADERS})
 add_dependencies(gr2port gr2port_d3d12_shaders)

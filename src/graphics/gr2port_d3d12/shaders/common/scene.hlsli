@@ -193,4 +193,86 @@ struct Decal {
     float4 gradation;
 };
 
+// ---------------------------------------------------------------------------
+// Shadow casters
+// ---------------------------------------------------------------------------
+
+// Cascades and the caster tables in each, from scene.glsl.
+#define CASCADES 3u
+#define CASTER_TABLES 3u
+
+// One shadow caster, field for field with scene.glsl's Caster.
+//
+//   0  world             float4x4
+//  64  vertices          ArenaRef (8 bytes where the GLSL had a uint64_t)
+//  72  stride
+//  76  position
+//  80  table
+//  84  texture
+//  88  texcoord
+//  92  alpha_reference   float
+//  96  skin              ArenaRef
+// 104  palette           ArenaRef
+// 112  bones
+// = 116, rounded up to the 16-byte alignment of a buffer_reference record: 128.
+#define CASTER_BYTES 128u
+
+struct Caster {
+    float4x4 world;
+    ArenaRef vertices;
+    uint stride;
+    uint position;
+    uint table;
+    uint texture;
+    uint texcoord;
+    float alpha_reference;
+    ArenaRef skin;
+    ArenaRef palette;
+    uint bones;
+};
+
+Caster LoadCasterAt(ArenaRef ref, ArenaTable table) {
+    ByteAddressBuffer buffer = ArenaBuffer(ref, table);
+    Caster caster;
+    caster.world = ArenaLoadMatrix(ref, table);
+    caster.vertices = ArenaMake(ARENA_GEOMETRY, buffer.Load(ref.offset + 64));
+    caster.stride = buffer.Load(ref.offset + 72);
+    caster.position = buffer.Load(ref.offset + 76);
+    caster.table = buffer.Load(ref.offset + 80);
+    caster.texture = buffer.Load(ref.offset + 84);
+    caster.texcoord = buffer.Load(ref.offset + 88);
+    caster.alpha_reference = asfloat(buffer.Load(ref.offset + 92));
+    caster.skin = ArenaMake(ARENA_SKINNING, buffer.Load(ref.offset + 96));
+    caster.palette = ArenaMake(ARENA_SKINNING, buffer.Load(ref.offset + 104));
+    caster.bones = buffer.Load(ref.offset + 112);
+    return caster;
+}
+
+// The shadows block (scene.glsl's Shadows).
+//
+//   0   inverse_view                   float4x4
+//  64   view_projection[Cascades * CasterTables]   (9 matrices, 576 bytes)
+// 640   light_direction                float4
+// 656   key_light_color                float4
+// 672   key_light_direction            float4
+// = 688 bytes.
+#define SHADOW_VIEW_PROJECTION 64u
+#define SHADOW_MATRIX_BYTES 64u
+// The index of a cascade's table: view_projection[cascade * CasterTables + table].
+#define ShadowMatrixOffset(cascade, table_slot)                                                  \
+    (SHADOW_VIEW_PROJECTION + ((cascade) * CASTER_TABLES + (table_slot)) * SHADOW_MATRIX_BYTES)
+
+struct Shadows {
+    float4x4 inverse_view;
+    float4x4 view_projection[CASCADES * CASTER_TABLES];
+    float4 light_direction;
+    float4 key_light_color;
+    float4 key_light_direction;
+};
+
+// Loads only the matrix a caster needs, rather than the whole 688-byte block.
+float4x4 LoadShadowMatrix(Shadows shadows, uint cascade, uint table_slot) {
+    return shadows.view_projection[cascade * CASTER_TABLES + table_slot];
+}
+
 #endif // GR2_COMMON_SCENE_HLSLI

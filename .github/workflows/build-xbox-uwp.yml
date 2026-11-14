@@ -80,6 +80,8 @@ jobs:
         run: tools/ci/check_no_game_data.sh --all
       - name: Verify the shader port's coverage report is honest
         run: python3 tools/shaders/check_shader_coverage.py
+      - name: Verify the D3D12 shader manifest covers every HLSL file
+        run: python3 tools/shaders/generate_d3d12_manifest.py --check
       - name: Compile and run the host-portable units
         run: tools/ci/local_precheck.sh
 
