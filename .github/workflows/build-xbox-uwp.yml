@@ -87,6 +87,17 @@ jobs:
         run: python3 tools/shaders/generate_d3d12_manifest.py --check
       - name: Compile and run the host-portable units
         run: tools/ci/local_precheck.sh
+      # Annotations are capped and the annotations API truncates; the log file is
+      # the one place a compiler's full output survives. Uploaded always, so a
+      # failed run can be read instead of guessed at.
+      - name: Upload the precheck log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-precheck
+          path: |
+            local-precheck.log
+          if-no-files-found: warn
 
   get-info:
     runs-on: ubuntu-latest

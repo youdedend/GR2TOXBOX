@@ -20,8 +20,14 @@ set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
 
-CXX=${CXX:-clang++}
-command -v "$CXX" >/dev/null 2>&1 || CXX=g++
+# g++ first, deliberately. CI's clang++ and the local g++ disagree about
+# transitive includes and about how much of a newer libstdc++ they can parse, and
+# that divergence cost three red runs being chased with a compiler that was not
+# the one failing. Whichever compiler CI uses, it is now the same one this script
+# uses -- gcc, which is installed everywhere and is what has been verified here.
+# Set CXX explicitly to check with something else; the script says which it used.
+CXX=${CXX:-g++}
+command -v "$CXX" >/dev/null 2>&1 || CXX=clang++
 if ! command -v "$CXX" >/dev/null 2>&1; then
     echo "local_precheck: no C++ compiler found (tried clang++ and g++)" >&2
     exit 1
@@ -40,8 +46,25 @@ CXXFLAGS=(-std=c++23 -Wall -Wextra -Wno-unused-parameter
 
 OUT=$(mktemp -d)
 trap 'rm -rf "$OUT"' EXIT
+
+# Everything this script prints also goes to local-precheck.log, which the
+# workflow uploads even when the job fails. Console output in Actions is a stream
+# with annotations layered over it; a file is what survives.
+exec > >(tee local-precheck.log) 2>&1
 failures=0
 syntax_only=0
+
+# Emits one annotation carrying a whole compiler log. GitHub truncates check-run
+# annotations at 200 of them and the runner also synthesises its own from lines
+# containing "error", so per-line annotations drown in noise -- the earlier
+# failures here arrived as a single useless "1 warning and 12 errors generated."
+# One annotation holding everything, newline-escaped, survives intact.
+annotate_log() {
+    [ -s "$2" ] || return 0
+    local text
+    text=$(head -c 60000 "$2" | sed -e 's/%/%25/g' -e 's/\r//g' | awk 'BEGIN{ORS="%0A"}{print}')
+    printf '::error file=%s::%s\n' "$1" "$text"
+}
 [ "${1:-}" = "--syntax" ] && syntax_only=1
 
 # Host-portable translation units. Each entry is "file|defines".
@@ -66,7 +89,7 @@ for entry in "${UNITS[@]}"; do
     if ! "$CXX" "${CXXFLAGS[@]}" $defs -fsyntax-only "$file" 2>"$OUT/err"; then
         echo "  FAIL $file"
         sed 's/^/    /' "$OUT/err" | head -30
-        head -10 "$OUT/err" | while IFS= read -r line; do echo "::error file=$file::$line"; done
+        annotate_log "$file" "$OUT/err"
         failures=$((failures + 1))
     else
         echo "  ok   $file"
@@ -82,7 +105,7 @@ if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/stubs -DGR2_XBOX_UWP=1 -DGR2_HOST_CHECK_
         -fsyntax-only src/core/uwp_memory.cpp 2>"$OUT/err"; then
     echo "  FAIL src/core/uwp_memory.cpp (GR2_XBOX_UWP)"
     sed 's/^/    /' "$OUT/err" | head -30
-    head -10 "$OUT/err" | while IFS= read -r line; do echo "::error file=src/core/uwp_memory.cpp::$line"; done
+    annotate_log "src/core/uwp_memory.cpp" "$OUT/err"
     failures=$((failures + 1))
 else
     echo "  ok   src/core/uwp_memory.cpp (GR2_XBOX_UWP)"
@@ -108,9 +131,7 @@ for file in "${D3D12_UNITS[@]}"; do
             # Emit the workflow-command form as well: the job log is not always
             # reachable, and an unreadable failure costs a whole run. Harmless
             # outside Actions, where it is just a line of text.
-            head -10 "$OUT/ours" | while IFS= read -r line; do
-                echo "::error file=$(printf '%s' "$line" | cut -d: -f1)::$line"
-            done
+            annotate_log "$file" "$OUT/ours"
             failures=$((failures + 1))
         else
             echo "  ok   $file (vendored-header diagnostics only)"
@@ -138,7 +159,7 @@ if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
                 -DFMT_HEADER_ONLY -o "$OUT/$name" 2>"$OUT/err"; then
             echo "  FAIL link $name"
             sed 's/^/    /' "$OUT/err" | head -20
-            head -10 "$OUT/err" | while IFS= read -r line; do echo "::error::$line"; done
+            annotate_log "$name" "$OUT/err"
             failures=$((failures + 1))
             continue
         fi
@@ -147,7 +168,7 @@ if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
         else
             echo "  FAIL run $name"
             sed 's/^/    /' "$OUT/run" | tail -15
-            tail -10 "$OUT/run" | while IFS= read -r line; do echo "::error::$line"; done
+            annotate_log "$name" "$OUT/run"
             failures=$((failures + 1))
         fi
     done

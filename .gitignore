@@ -517,3 +517,4 @@ CMakeCache.txt
 *.snk
 signing/
 secrets/
+local-precheck.log
