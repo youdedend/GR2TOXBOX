@@ -63,14 +63,22 @@ jobs:
   # ---------------------------------------------------------------------------
   # Guardrail: refuse to build a repository that ever gained game data.
   # ---------------------------------------------------------------------------
+  # The cheap gate. Runs before the 25-minute Windows jobs so a missing include or
+  # a wrong method name is caught in under a minute. It compiles and *runs* the
+  # host-portable units with the real fmt and spdlog headers; the same script is
+  # meant to be run locally before every push.
   source-guard:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Verify no copyrighted game data is tracked
         run: tools/ci/check_no_game_data.sh --all
       - name: Verify the shader port's coverage report is honest
         run: python3 tools/shaders/check_shader_coverage.py
+      - name: Compile and run the host-portable units
+        run: tools/ci/local_precheck.sh
 
   get-info:
     runs-on: ubuntu-latest
@@ -98,6 +106,18 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
+
+      # ccache: the single biggest lever on iteration time. A cold build of the
+      # emulator core is ~25 minutes; with a warm cache a one-file change is ~2.
+      # The cache key tracks the CMake files (which decide compile flags) and the
+      # compiler version, and falls back to the newest matching cache, so a change
+      # to one backend still reuses the objects the other shares.
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2.21
+        with:
+          key: win64-d3d12-${{ env.BUILD_TYPE }}
+          max-size: 2G
+          append-timestamp: false
 
       # clang-cl, not cl.exe: this is the compiler upstream's CI uses, and it is
       # not interchangeable. MSVC rejects casts clang-cl accepts in code we do
@@ -137,6 +157,8 @@ jobs:
                 "-DGR2_DXC_EXECUTABLE=${{ env.GR2_DXC_EXECUTABLE }}" `
                 "-DCMAKE_C_COMPILER=clang-cl" `
                 "-DCMAKE_CXX_COMPILER=clang-cl" `
+                "-DCMAKE_C_COMPILER_LAUNCHER=ccache" `
+                "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache" `
                 "-DENABLE_UPDATER=OFF" 2>&1 |
               Tee-Object -FilePath configure.log
           if ($LASTEXITCODE -ne 0) {
@@ -148,7 +170,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
-          cmake --build build-win64 --config ${{ env.BUILD_TYPE }} --parallel 2>&1 |
+          # `-- -k 0`: Ninja keeps going after a failure and reports every
+          # remaining error, both compilers' and dxc's. Without it a run costs 25
+          # minutes and reveals exactly one typo.
+          cmake --build build-win64 --config ${{ env.BUILD_TYPE }} `
+                --parallel -- -k 0 2>&1 |
             Tee-Object -FilePath build.log
           if ($LASTEXITCODE -ne 0) {
             ./scripts/ci/annotate_failure.ps1 -LogFile build.log
@@ -193,9 +219,12 @@ jobs:
   # ---------------------------------------------------------------------------
   # Job 2: Xbox Series X|S UWP package
   # ---------------------------------------------------------------------------
+  # Parallel with windows-d3d12, not after it. The WindowsStore compile is where
+  # UWP-only errors surface, and gating it behind the 25-minute desktop build meant
+  # waiting half an hour for an answer that was available immediately.
   xbox-uwp-msix:
     runs-on: windows-2022
-    needs: [get-info, windows-d3d12]
+    needs: get-info
     if: ${{ !inputs.skip_uwp }}
     permissions:
       contents: read
@@ -208,6 +237,16 @@ jobs:
       - name: Guard against committed game data
         shell: bash
         run: tools/ci/check_no_game_data.sh --all
+
+      # Its own cache key: UWP objects differ from the desktop ones (different
+      # WINAPI_FAMILY, different libs), and sharing a key would make each job
+      # evict the other's work.
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2.21
+        with:
+          key: xbox-uwp-${{ env.BUILD_TYPE }}
+          max-size: 2G
+          append-timestamp: false
 
       - name: Set up the MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -253,6 +292,8 @@ jobs:
                 "-DGR2_DXC_EXECUTABLE=${{ env.GR2_DXC_EXECUTABLE }}" `
                 "-DCMAKE_C_COMPILER=clang-cl" `
                 "-DCMAKE_CXX_COMPILER=clang-cl" `
+                "-DCMAKE_C_COMPILER_LAUNCHER=ccache" `
+                "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache" `
                 "-DENABLE_UPDATER=OFF" 2>&1 |
               Tee-Object -FilePath configure-uwp.log
           if ($LASTEXITCODE -ne 0) {
@@ -264,7 +305,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
-          cmake --build build-uwp --config ${{ env.BUILD_TYPE }} --parallel 2>&1 |
+          cmake --build build-uwp --config ${{ env.BUILD_TYPE }} `
+                --parallel -- -k 0 2>&1 |
             Tee-Object -FilePath build-uwp.log
           if ($LASTEXITCODE -ne 0) {
             ./scripts/ci/annotate_failure.ps1 -LogFile build-uwp.log

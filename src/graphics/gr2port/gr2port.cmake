@@ -1,8 +1,19 @@
 # SPDX-FileCopyrightText: Copyright 2026 GR2port
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+# ---------------------------------------------------------------------------
+# API-agnostic scene capture
+#
+# These files accumulate what Gravity Rush 2 draws; they do not name a graphics
+# API. They are what a second backend (Direct3D 12) consumes, so they are built
+# for every renderer.
+# ---------------------------------------------------------------------------
 target_sources(gr2port PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/camera_reach.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/scene_ring.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/scene_ring.h
+    ${CMAKE_CURRENT_LIST_DIR}/settings.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/settings.h
     ${CMAKE_CURRENT_LIST_DIR}/camera_reach.h
     ${CMAKE_CURRENT_LIST_DIR}/capture.cpp
     ${CMAKE_CURRENT_LIST_DIR}/capture.h
@@ -13,10 +24,6 @@ target_sources(gr2port PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/contours.h
     ${CMAKE_CURRENT_LIST_DIR}/deformers.cpp
     ${CMAKE_CURRENT_LIST_DIR}/deformers.h
-    ${CMAKE_CURRENT_LIST_DIR}/device.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/device_lost.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/device_lost.h
-    ${CMAKE_CURRENT_LIST_DIR}/device.h
     ${CMAKE_CURRENT_LIST_DIR}/exit_rows.cpp
     ${CMAKE_CURRENT_LIST_DIR}/exit_rows.h
     ${CMAKE_CURRENT_LIST_DIR}/fault_report.cpp
@@ -37,12 +44,8 @@ target_sources(gr2port PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/gr2port.h
     ${CMAKE_CURRENT_LIST_DIR}/hooks.cpp
     ${CMAKE_CURRENT_LIST_DIR}/hooks.h
-    ${CMAKE_CURRENT_LIST_DIR}/imgui_relay.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/imgui_relay.h
     ${CMAKE_CURRENT_LIST_DIR}/look.cpp
     ${CMAKE_CURRENT_LIST_DIR}/look.h
-    ${CMAKE_CURRENT_LIST_DIR}/memory.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/memory.h
     ${CMAKE_CURRENT_LIST_DIR}/meshes.cpp
     ${CMAKE_CURRENT_LIST_DIR}/meshes.h
     ${CMAKE_CURRENT_LIST_DIR}/metaballs.cpp
@@ -75,25 +78,15 @@ target_sources(gr2port PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/float_spin.h
     ${CMAKE_CURRENT_LIST_DIR}/pass_times.cpp
     ${CMAKE_CURRENT_LIST_DIR}/pass_times.h
-    ${CMAKE_CURRENT_LIST_DIR}/pipeline.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/presenter.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/presenter.h
     ${CMAKE_CURRENT_LIST_DIR}/player_control.cpp
     ${CMAKE_CURRENT_LIST_DIR}/player_control.h
-    ${CMAKE_CURRENT_LIST_DIR}/pipeline.h
     ${CMAKE_CURRENT_LIST_DIR}/point_lights.cpp
     ${CMAKE_CURRENT_LIST_DIR}/point_lights.h
-    ${CMAKE_CURRENT_LIST_DIR}/renderer.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/renderer.h
     ${CMAKE_CURRENT_LIST_DIR}/scene.h
-    ${CMAKE_CURRENT_LIST_DIR}/scene_ring.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/scene_ring.h
     ${CMAKE_CURRENT_LIST_DIR}/script_timers.cpp
     ${CMAKE_CURRENT_LIST_DIR}/script_timers.h
     ${CMAKE_CURRENT_LIST_DIR}/self_translucent.cpp
     ${CMAKE_CURRENT_LIST_DIR}/self_translucent.h
-    ${CMAKE_CURRENT_LIST_DIR}/settings.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/settings.h
     ${CMAKE_CURRENT_LIST_DIR}/shadow_trace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/shadow_trace.h
     ${CMAKE_CURRENT_LIST_DIR}/shadows.cpp
@@ -123,7 +116,35 @@ target_sources(gr2port PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/water.cpp
     ${CMAKE_CURRENT_LIST_DIR}/water.h
     ${CMAKE_CURRENT_LIST_DIR}/world.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/world.h)
+    ${CMAKE_CURRENT_LIST_DIR}/world.h
+)
+
+# ---------------------------------------------------------------------------
+# Upstream Vulkan renderer
+#
+# Only compiled for GR2_RENDERER=VULKAN. Xbox Series X|S has no Vulkan driver and
+# a UWP process cannot load one, so including these in a console build produces
+# thousands of errors from a backend that can never run. The scene-capture files
+# above stay.
+# ---------------------------------------------------------------------------
+if (GR2_RENDERER STREQUAL "VULKAN")
+target_sources(gr2port PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/device.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/device_lost.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/device_lost.h
+    ${CMAKE_CURRENT_LIST_DIR}/device.h
+    ${CMAKE_CURRENT_LIST_DIR}/imgui_relay.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/imgui_relay.h
+    ${CMAKE_CURRENT_LIST_DIR}/memory.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/memory.h
+    ${CMAKE_CURRENT_LIST_DIR}/pipeline.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/presenter.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/presenter.h
+    ${CMAKE_CURRENT_LIST_DIR}/pipeline.h
+    ${CMAKE_CURRENT_LIST_DIR}/renderer.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/renderer.h
+)
+endif()
 
 # The renderer's shaders: glslang compiles each to a SPIR-V module, spirv-opt optimises the module
 # for speed, and the module's words become a header. A driver's compiler can take minutes over
@@ -160,6 +181,7 @@ function(gr2port_add_shader FILENAME SHADER_NAME)
         VERBATIM)
     set(GR2PORT_SHADER_HEADERS ${GR2PORT_SHADER_HEADERS} ${HEADER_FILE} PARENT_SCOPE)
 endfunction()
+if (GR2_RENDERER STREQUAL "VULKAN")
 gr2port_add_shader(self_translucent.vert self_translucent_vert)
 gr2port_add_shader(self_translucent.frag self_translucent_frag)
 gr2port_add_shader(character.vert character_vert)
@@ -347,3 +369,4 @@ gr2port_add_shader(soft_body_write.comp soft_body_write_comp)
 add_custom_target(gr2port_shaders DEPENDS ${GR2PORT_SHADER_HEADERS})
 target_include_directories(gr2port PRIVATE ${GR2PORT_SHADER_INCLUDE})
 add_dependencies(gr2port gr2port_shaders)
+endif() # GR2_RENDERER == VULKAN

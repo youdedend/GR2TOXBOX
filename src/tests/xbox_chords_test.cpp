@@ -7,7 +7,7 @@
 // borrowed breaks the game's own menus, so each of those is asserted here.
 //
 // Dependency free, like the memory budget test. Build:
-//   c++ -std=c++23 -Isrc -DGR2_CHORDS_SELFTEST \
+//   c++ -std=c++23 -Isrc -DGR2_CHORDS_SELFTEST
 //       src/tests/xbox_chords_test.cpp src/uwp/chords.cpp -o chords_test
 
 #include <cstdio>

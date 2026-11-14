@@ -1108,8 +1108,11 @@ set(IMGUI src/imgui/imgui_config.h
           src/imgui/settings_dialog_layer.h
           src/imgui/renderer/imgui_core.cpp
           src/imgui/renderer/imgui_core.h
-          src/imgui/renderer/imgui_impl_sdl3.cpp
-          src/imgui/renderer/imgui_impl_sdl3.h
+          # Desktop only: imgui_core.cpp drives SDL3's platform layer, and SDL3 has
+          # no UWP backend. The console shell in src/uwp/ presents through
+          # CoreWindow instead.
+          $<$<NOT:$<BOOL:${GR2_XBOX_UWP}>>:src/imgui/renderer/imgui_impl_sdl3.cpp>
+          $<$<NOT:$<BOOL:${GR2_XBOX_UWP}>>:src/imgui/renderer/imgui_impl_sdl3.h>
           src/imgui/renderer/font_data.cpp
           src/imgui/renderer/font_data.h
           src/imgui/renderer/font_stack.cpp
@@ -1198,11 +1201,17 @@ target_link_libraries(gr2port PRIVATE ZArchive::zarchive)
 target_link_libraries(gr2port PRIVATE zstd::libzstd)
 target_include_directories(gr2port PRIVATE "${SHADNET_PROTO_OUT}")
 
-if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
-    target_link_libraries(gr2port PRIVATE "/usr/lib/libusb.so")
-    target_link_libraries(gr2port PRIVATE "/usr/local/lib/libuuid.so")
-else()
-    target_link_libraries(gr2port PRIVATE libusb::usb)
+# libusb drives the DualShock 4 over a USB host controller, which an AppContainer
+# cannot open: the Xbox build takes its pad input from Windows.Gaming.Input
+# instead, in src/uwp/. Linking libusb there would also fail, because the onecore
+# surface has no WinUSB.
+if (NOT GR2_XBOX_UWP)
+    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
+        target_link_libraries(gr2port PRIVATE "/usr/lib/libusb.so")
+        target_link_libraries(gr2port PRIVATE "/usr/local/lib/libuuid.so")
+    else()
+        target_link_libraries(gr2port PRIVATE libusb::usb)
+    endif()
 endif()
 
 target_compile_definitions(gr2port PRIVATE IMGUI_USER_CONFIG="imgui/imgui_config.h")
@@ -1355,13 +1364,25 @@ add_compile_definitions(BOOST_ASIO_STANDALONE)
 
 target_include_directories(gr2port PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-# Shaders sources
-set(HOST_SHADERS_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/src/graphics/host_shaders)
+# ---------------------------------------------------------------------------
+# Vulkan-only pieces
+#
+# Each of these needs a Vulkan loader: the host compute shaders are compiled from
+# GLSL with glslang and consumed through the Vulkan device, and the FSR module's
+# backend is FidelityFX's Vulkan one. A console build has neither, so they are
+# excluded rather than compiled into a backend that cannot run. Everything below
+# this block is renderer-agnostic.
+# ---------------------------------------------------------------------------
+if (GR2_RENDERER STREQUAL "VULKAN")
+    # Shaders sources
+    set(HOST_SHADERS_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/src/graphics/host_shaders)
 
-add_subdirectory(${HOST_SHADERS_INCLUDE})
-add_dependencies(gr2port host_shaders)
-target_include_directories(gr2port PRIVATE ${HOST_SHADERS_INCLUDE})
-include("${CMAKE_CURRENT_SOURCE_DIR}/src/graphics/gr2_fsr3/gr2_fsr3.cmake")
+    add_subdirectory(${HOST_SHADERS_INCLUDE})
+    add_dependencies(gr2port host_shaders)
+    target_include_directories(gr2port PRIVATE ${HOST_SHADERS_INCLUDE})
+    include("${CMAKE_CURRENT_SOURCE_DIR}/src/graphics/gr2_fsr3/gr2_fsr3.cmake")
+endif()
+
 include("${CMAKE_CURRENT_SOURCE_DIR}/src/graphics/gr2port/gr2port.cmake")
 
 # The Direct3D 12 backend replaces the Vulkan device/pipeline/shader compilation.

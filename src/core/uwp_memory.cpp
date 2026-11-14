@@ -137,7 +137,6 @@ void ClampGuestMemoryRegions(u64& total_size, u64& flexible_size, u64 flexible_b
     // Work in committed bytes throughout. The flexible base is address space,
     // not memory, so it never counts against the ceiling.
     const u64 before_total = total_size;
-    const u64 before_flexible = flexible_size;
     if (total_size < flexible_size) {
         return; // malformed request; leave it to the caller's own checks
     }

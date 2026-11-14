@@ -6,12 +6,21 @@ name: Build and Release
 
 on:
   push:
-    branches-ignore: [Pre-release-shadPS4-*]
+    # Not on the console/port work branches. This workflow builds the upstream
+    # Vulkan renderer for Linux, Windows, macOS and FreeBSD -- useful as a
+    # regression signal for main, but it cannot catch a Direct3D 12 or UWP
+    # problem, and running both workflows on every port commit doubled runner
+    # usage for an answer only build-xbox-uwp.yml can give.
+    branches:
+      - main
+      - "v*"
     paths-ignore:
       - "documents/**"
       - "**/*.md"
 
   pull_request:
+    # A PR targeting main is where this workflow earns its cost.
+    branches: [main]
     paths-ignore:
       - "documents/**"
       - "**/*.md"

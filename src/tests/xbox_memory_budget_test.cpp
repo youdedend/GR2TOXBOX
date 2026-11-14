@@ -12,7 +12,7 @@
 // exercises the *console* arithmetic by calling the same functions with the
 // numbers the console passes. Build:
 //
-//   c++ -std=c++23 -Isrc -DGR2_XBOX_BUDGET_SELFTEST \
+//   c++ -std=c++23 -Isrc -DGR2_XBOX_BUDGET_SELFTEST
 //       src/tests/xbox_memory_budget_test.cpp src/core/uwp_memory.cpp -o budget
 //   ./budget
 //
