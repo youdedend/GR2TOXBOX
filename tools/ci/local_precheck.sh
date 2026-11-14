@@ -77,7 +77,8 @@ done
 # empty <windows.h> stub on the include path so the Win32 includes resolve. This
 # is the check that would have caught the UWP job's host build needing the fmt
 # include path and C++/WinRT, before a Windows runner was spent on it.
-if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/stubs -DGR2_XBOX_UWP=1 -DFMT_HEADER_ONLY \
+if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/stubs -DGR2_XBOX_UWP=1 -DGR2_HOST_CHECK_WIN32=1 \
+        -DFMT_HEADER_ONLY \
         -fsyntax-only src/core/uwp_memory.cpp 2>"$OUT/err"; then
     echo "  FAIL src/core/uwp_memory.cpp (GR2_XBOX_UWP)"
     sed 's/^/    /' "$OUT/err" | head -30

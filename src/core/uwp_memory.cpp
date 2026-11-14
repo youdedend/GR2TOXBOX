@@ -6,6 +6,29 @@
 #include "common/logging/log.h"
 #include "core/uwp_memory.h"
 
+// Whether the Win32 fallbacks below are the ones to compile.
+//
+// On a real toolchain that is simply "are we on Windows". The third case is the
+// host compile-only check: it defines GR2_HOST_CHECK_WIN32 and puts a stub
+// <windows.h>/<psapi.h> on the include path so these branches are parsed on
+// Linux. Without it, the check defined GR2_XBOX_UWP on a Linux host and fell
+// through to the POSIX path, which needs _SC_PHYS_PAGES -- gcc's <unistd.h>
+// happens to define it and clang's does not, so the check passed here and failed
+// on the runner twice. Naming the case is better than inferring it from __linux__.
+#if defined(_WIN32) || defined(GR2_HOST_CHECK_WIN32)
+#define GR2_HAS_DESKTOP_WIN32 1
+#else
+#define GR2_HAS_DESKTOP_WIN32 0
+#endif
+
+#if defined(GR2_HOST_CHECK_WIN32)
+// Only the host compile-only check reaches this: it parses the console branch,
+// which never includes these on a real toolchain, so the fallbacks below would go
+// undeclared. The real includes stay at their own site in the desktop branch.
+#include <windows.h>
+#include <psapi.h>
+#endif
+
 #if defined(GR2_XBOX_UWP)
 // Deliberately no <windows.h>. The only Win32 symbols this file needs are in the
 // desktop branch below, and windows.h defines min/max as macros unless NOMINMAX
@@ -29,9 +52,18 @@
 #else
 #define GR2_HAS_WINRT_SYSTEM 0
 #endif
-#elif defined(_WIN32)
+#elif GR2_HAS_DESKTOP_WIN32
+// NOMINMAX before <windows.h>, always. The clamp below is written with std::min,
+// and windows.h defines `min` as a two-argument macro unless this is set, which
+// turns `std::min(a, b)` into `std((' any two tokens '))` and makes MSVC report
+// it as "'take': const object must be initialized". That is unreadable enough
+// that it cost a run; the guard belongs here rather than on one include site.
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
 #include <psapi.h>
+// MEMORYSTATUSEX lives in <winbase.h> via <windows.h> on a real SDK; the stub tree
+// declares it in <psapi.h>, which is where this file already looks.
 #else
 #include <unistd.h>
 #endif
@@ -96,7 +128,7 @@ u64 AppMemoryUsageLimit() noexcept {
     } catch (...) {
         return 0;
     }
-#elif defined(_WIN32)
+#elif GR2_HAS_DESKTOP_WIN32
     // Desktop: report the system commit limit.
     MEMORYSTATUSEX status{};
     status.dwLength = sizeof(status);
@@ -118,7 +150,7 @@ u64 AppMemoryUsage() noexcept {
     } catch (...) {
         return 0;
     }
-#elif defined(_WIN32)
+#elif GR2_HAS_DESKTOP_WIN32
     PROCESS_MEMORY_COUNTERS_EX counters{};
     if (GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),
                              sizeof(counters))) {

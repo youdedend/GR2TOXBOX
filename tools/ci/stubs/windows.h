@@ -10,3 +10,9 @@
 // seen; the declarations they use are all hidden behind __has_include and the
 // Windows-only #elif, so nothing here has to actually work.
 #pragma once
+
+// The memory file needs MEMORYSTATUSEX and GlobalMemoryStatusEx, which the real
+// <windows.h> provides via <winbase.h>. It includes <psapi.h> right after this
+// header, so the declarations live there in the stub tree. Keep the empty-header
+// property otherwise: anything declared here would be invisible to a real build
+// and could hide a missing include.
