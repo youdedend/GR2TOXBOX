@@ -269,6 +269,12 @@ jobs:
       - name: Test the Xbox memory budget arithmetic (host build)
         shell: pwsh
         run: |
+          # pwsh defaults to $ErrorActionPreference = 'Stop' here, which turns
+          # cl.bat's banner on stderr into a terminating NativeCommandError: the
+          # step then fails with exit code 1 and no diagnostics, which is exactly
+          # what the first two runs of this step reported. Every other step in
+          # this file sets Continue for the same reason.
+          $ErrorActionPreference = 'Continue'
           # The UWP package cannot run its own tests, so the budget self-test is
           # compiled and run for the host first. A regression here would show up
           # as an ERROR_COMMITMENT_LIMIT on a console, which is expensive to
@@ -281,13 +287,21 @@ jobs:
           # family and pool limit behind __has_include, and the budget arithmetic
           # is identical without the projections.
           New-Item -ItemType Directory -Force -Path test-host | Out-Null
+          # 2>&1 into the log: without it a compile error only ever appears as
+          # "exit code 1" in the annotation, since the job's log is not readable
+          # from the API.
           cl /nologo /std:c++20 /EHsc /W4 /I src /I externals/fmt/include `
              /DGR2_XBOX_BUDGET_SELFTEST /DGR2_XBOX_UWP /DFMT_HEADER_ONLY `
              src/tests/xbox_memory_budget_test.cpp src/tests/selftest_log.cpp `
-             src/core/uwp_memory.cpp /Fe:test-host/budget.exe
-          if ($LASTEXITCODE -ne 0) { Write-Error "The UWP budget self-test failed to compile." }
-          ./test-host/budget.exe
-          if ($LASTEXITCODE -ne 0) { Write-Error "The UWP budget self-test reported failures." }
+             src/core/uwp_memory.cpp /Fe:test-host/budget.exe 2>&1 |
+            Tee-Object -FilePath test-host-budget.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content test-host-budget.log | Select-Object -Last 40 |
+              ForEach-Object { Write-Host "::error::$_" }
+            throw "The UWP budget self-test failed to compile."
+          }
+          ./test-host/budget.exe 2>&1 | Tee-Object -FilePath test-host-run.log
+          if ($LASTEXITCODE -ne 0) { throw "The UWP budget self-test reported failures." }
 
       - name: Configure (WindowsStore / UWP)
         shell: pwsh
@@ -328,7 +342,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-log-xbox-uwp
-          path: build-uwp.log
+          path: |
+            build-uwp.log
+            configure-uwp.log
+            test-host-budget.log
+            test-host-run.log
           if-no-files-found: ignore
 
       - name: Create the Dev Mode signing certificate
