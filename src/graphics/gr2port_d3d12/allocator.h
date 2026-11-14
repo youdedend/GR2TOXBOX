@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <atomic>
+#include <cstddef>
 #include <functional>
 #include <mutex>
 #include <unordered_map>
@@ -70,6 +72,9 @@ namespace Gr2Port::D3D12 {
 class ResourcePtr {
 public:
     ResourcePtr() = default;
+    /// Lets a creation path say `return nullptr` and still produce an empty
+    /// handle, which reads better than `return {}` at four call sites.
+    ResourcePtr(std::nullptr_t) noexcept {}
     ~ResourcePtr() {
         Reset();
     }
