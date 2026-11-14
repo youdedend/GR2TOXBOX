@@ -10,8 +10,8 @@
 
     Two passes:
 
-      1. Targeted: lines matching a compiler/linker/CMake failure, with the
-         lines that follow them (MSVC puts the note under the error, not above).
+      1. Targeted: each LINE matching a compiler/linker/CMake failure, emitted as
+         its own annotation so that truncation can never eat the message.
       2. Fallback: if the targeted pass found nothing, the tail of the log is
          emitted verbatim. A failure that matches no pattern at all is precisely
          the case where the raw text is the only thing that helps.
@@ -24,7 +24,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 param(
     [Parameter(Mandatory = $true)][string]$LogFile,
-    [int]$Context = 2,
     [int]$FallbackTailLines = 120
 )
 
@@ -38,15 +37,20 @@ if (-not (Test-Path $LogFile)) {
 # Patterns that mean "this is why the build stopped". Ordered loosely by how
 # often they appear in this project's failures.
 $patterns = @(
-    'error C\d+',            # cl.exe
+    'error C\d+',            # cl.exe / clang-cl
     'error LNK\d+',          # link.exe
     'fatal error',
-    'FAILED:',
     'CMake Error',
     'ninja: build stopped',
     'error MSB\d+',
     'D8021', 'D8037',        # compiler invocation failures
-    'dxc.*error'
+    # Not just "error:": dxc and the other LLVM-style tools in the shader
+    # pipeline report 'file(line,col): error: ...' and also plain
+    # "file:line:col: error: ...", and a custom-command failure's only diagnostic
+    # can be the second form.
+    'error:',
+    ': error ',
+    'FAILED:'
 )
 
 function Escape-Command([string]$Text) {
@@ -74,18 +78,33 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
     }
     if (-not $hit) { continue }
 
-    # Context follows the match: MSVC prints "error C2065: ..." and then the
-    # source line and a note underneath.
-    $end = [Math]::Min($i + $Context, $lines.Count - 1)
-    $block = ($lines[$i..$end] | ForEach-Object { $_.TrimEnd() }) -join ' | '
-    if (-not $seen.ContainsKey($block)) {
-        $seen[$block] = $true
-        Write-Host "::error::$(Escape-Command $block)"
-        $emitted++
-        # The annotation API tolerates a few dozen per job; beyond that the
-        # summary stops being readable anyway.
-        if ($emitted -ge 25) { break }
+    # One annotation per diagnostic LINE, not per block.
+    #
+    # It is tempting to attach the following lines as context, because MSVC puts
+    # its note under the error. But the annotation API truncates a message at
+    # about 650 characters, and a block whose first line is a 1200-character
+    # FAILED: command line truncates away the compiler's actual message -- which
+    # is the only line that matters. Line-at-a-time is less pretty and always
+    # survives.
+    $text = $lines[$i].TrimEnd()
+    if ($text.Length -gt 600) {
+        # Keep the diagnostic, drop the command line it is attached to. For a
+        # 'FAILED: <command>' line the command has already been printed by ninja
+        # in the raw log; the interesting part is the diagnostic that follows.
+        if ($text -match '^FAILED:') {
+            Write-Host "::error::FAILED (command line elided; see the diagnostic annotations)"
+            $emitted++
+            continue
+        }
+        $text = $text.Substring(0, 600) + '...'
     }
+    if ($text.Trim() -eq '' -or $seen.ContainsKey($text)) { continue }
+    $seen[$text] = $true
+    Write-Host "::error::$(Escape-Command $text)"
+    $emitted++
+    # The annotation API tolerates a few dozen per job; beyond that the summary
+    # stops being readable anyway.
+    if ($emitted -ge 40) { break }
 }
 
 if ($emitted -eq 0) {

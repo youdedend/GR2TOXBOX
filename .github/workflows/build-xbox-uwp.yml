@@ -140,7 +140,7 @@ jobs:
                 "-DENABLE_UPDATER=OFF" 2>&1 |
               Tee-Object -FilePath configure.log
           if ($LASTEXITCODE -ne 0) {
-            ./scripts/ci/annotate_failure.ps1 -LogFile configure.log -Context 4
+            ./scripts/ci/annotate_failure.ps1 -LogFile configure.log
             exit 1
           }
 
@@ -256,7 +256,7 @@ jobs:
                 "-DENABLE_UPDATER=OFF" 2>&1 |
               Tee-Object -FilePath configure-uwp.log
           if ($LASTEXITCODE -ne 0) {
-            ./scripts/ci/annotate_failure.ps1 -LogFile configure-uwp.log -Context 4
+            ./scripts/ci/annotate_failure.ps1 -LogFile configure-uwp.log
             exit 1
           }
 
