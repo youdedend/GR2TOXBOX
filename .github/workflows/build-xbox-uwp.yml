@@ -52,7 +52,10 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Superseded pushes cancel their predecessor. A queued run used to wait for
+  # the full 25-33 minutes of a run that its own commit had already replaced,
+  # which is the same waste as the sequential jobs below.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   BUILD_TYPE: Release
