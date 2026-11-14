@@ -71,7 +71,7 @@ cbuffer ArenaConstants : register(b1) {
 cbuffer DecalTextures : register(b2) {
     // The scene's depth, which the decal reconstructs a view position from.
     uint g_scene_depth;
-    uint3 g_pad;
+    uint3 g_scene_pad;
 };
 
 struct PsInput {

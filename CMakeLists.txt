@@ -55,6 +55,23 @@ set_property(CACHE GR2_RENDERER PROPERTY STRINGS VULKAN D3D12)
 # W^X / 5,120 MiB memory rules in src/core/uwp_*.cpp.
 option(GR2_XBOX_UWP "Build the Xbox Series X|S UWP package" OFF)
 
+# LibreSSL picks the architecture whose crypto_arch.h goes on the include path
+# from CMAKE_SYSTEM_PROCESSOR. CMake does not set that variable when the target
+# system is named by -DCMAKE_SYSTEM_NAME=WindowsStore instead of by a toolchain
+# file, so LibreSSL takes its unknown-architecture branch: assembly off, and
+# arch/amd64 never added to the include path. Every crypto object then dies on
+# `#include "crypto_arch.h"`, a header that only exists inside the per-
+# architecture directories. Naming the architecture here keeps that guess out of
+# the build. Placed before the GR2_XBOX_UWP checks so it is in scope for them.
+#
+# Matched rather than merely empty-checked: any value LibreSSL does not recognise
+# (it wants x86_64/x64/amd64/AMD64) takes the same branch as no value at all.
+if (CMAKE_SYSTEM_NAME STREQUAL "WindowsStore"
+        AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|x64|amd64|AMD64)")
+    set(CMAKE_SYSTEM_PROCESSOR "AMD64" CACHE STRING "Target processor (set by the UWP build)" FORCE)
+    message(STATUS "GR2toXBOX: CMAKE_SYSTEM_PROCESSOR is AMD64 (required by LibreSSL's arch include)")
+endif()
+
 if (GR2_XBOX_UWP)
     if (NOT GR2_RENDERER STREQUAL "D3D12")
         message(FATAL_ERROR

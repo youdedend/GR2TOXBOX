@@ -15,9 +15,12 @@
 #include "common/fog.hlsli"
 #include "common/texel.hlsli"
 
+// cbuffers share one global namespace in HLSL, so two blocks cannot both declare
+// a member called g_pad -- dxc reports the second as a redefinition with a
+// different type. Each block's padding is named after the block.
 cbuffer FogApplyConstants : register(b0) {
     ArenaRef g_fog;
-    float3 g_pad;
+    float3 g_fog_pad;
 };
 
 cbuffer ArenaConstants : register(b1) {
@@ -28,7 +31,7 @@ cbuffer FogApplyTextures : register(b2) {
     uint g_scene_depth;
     // The scattered light, a Texture3D SRV in the same bindless heap.
     uint g_scattered;
-    uint2 g_pad;
+    uint2 g_textures_pad;
 };
 
 struct PsInput {

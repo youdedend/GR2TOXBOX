@@ -11,6 +11,9 @@
 // both stages read the same cbuffer, so the fragment stage declares the whole
 // struct and uses only the handle.
 
+// common/arena.hlsli for ArenaRef and ArenaTable: texel.hlsli samples through a
+// handle and does not declare either, and including it was not enough.
+#include "common/arena.hlsli"
 #include "common/texel.hlsli"
 
 cbuffer ImGuiConstants : register(b0) {

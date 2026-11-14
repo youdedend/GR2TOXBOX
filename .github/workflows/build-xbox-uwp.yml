@@ -85,6 +85,10 @@ jobs:
         run: python3 tools/shaders/check_shader_coverage.py
       - name: Verify the D3D12 shader manifest covers every HLSL file
         run: python3 tools/shaders/generate_d3d12_manifest.py --check
+      # dxc is Windows-only, so the structural mistakes it reports are cheaper to
+      # find here. Every rule in this script is a failure that cost a Windows run.
+      - name: Check the ported HLSL for structural errors
+        run: python3 tools/shaders/check_hlsl_structure.py
       - name: Compile and run the host-portable units
         run: tools/ci/local_precheck.sh
       # Annotations are capped and the annotations API truncates; the log file is

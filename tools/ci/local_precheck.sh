@@ -141,6 +141,21 @@ for file in "${D3D12_UNITS[@]}"; do
     fi
 done
 
+# The ported HLSL, structurally. dxc only runs on Windows; this catches the
+# mistakes it reports that do not need a compiler, e.g. two cbuffers both
+# declaring g_pad, or a stage using ArenaRef without including the header that
+# declares it. Both of those cost a Windows run.
+if command -v python3 >/dev/null 2>&1; then
+    if ! python3 tools/shaders/check_hlsl_structure.py >"$OUT/err" 2>&1; then
+        echo "  FAIL HLSL structure"
+        sed 's/^/    /' "$OUT/err" | head -30
+        annotate_log "src/graphics/gr2port_d3d12/shaders" "$OUT/err"
+        failures=$((failures + 1))
+    else
+        echo "  ok   HLSL structure ($(ls src/graphics/gr2port_d3d12/shaders/*.hlsl | wc -l) stages)"
+    fi
+fi
+
 if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
     echo "local_precheck: building and running the self-tests"
     for pair in "xbox_chords_test:chords:GR2_CHORDS_SELFTEST" \
