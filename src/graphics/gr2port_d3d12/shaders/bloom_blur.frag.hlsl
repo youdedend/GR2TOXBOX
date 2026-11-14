@@ -31,9 +31,16 @@ cbuffer BloomBlurConstants : register(b0) {
     float g_pad;
 };
 
-cbuffer BloomBlurTextures : register(b1) {
+cbuffer BloomBlurTextures : register(b2) {
     uint g_source;
     uint g_last_bloom;
+};
+
+// The arena table: the SRV index of each arena, the value the arena accessors
+// below index ResourceDescriptorHeap[] with. Declared by every stage that
+// reads the arena, because a cbuffer must be visible where it is used.
+cbuffer ArenaConstants : register(b1) {
+    ArenaTable g_arena;
 };
 
 struct PsInput {

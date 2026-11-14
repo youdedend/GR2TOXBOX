@@ -7,7 +7,11 @@
 #include "core/uwp_memory.h"
 
 #if defined(GR2_XBOX_UWP)
-#include <windows.h>
+// Deliberately no <windows.h>. The only Win32 symbols this file needs are in the
+// desktop branch below, and windows.h defines min/max as macros unless NOMINMAX
+// is set -- which turned `std::min(excess, flex - FlexibleFloor)` in
+// ClampGuestMemoryRegions into a syntax error under MSVC. The console branch
+// needs nothing from it: the projections carry their own declarations.
 // The runtime probes below go through C++/WinRT. The projections are not part of
 // every toolchain's default include path -- a plain `cl` invocation outside the
 // CMake build has neither the NuGet package nor the SDK's cppwinrt folder -- so

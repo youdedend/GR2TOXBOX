@@ -55,7 +55,10 @@ float4 FetchTexel(uint handle, int2 pixel, uint mip) {
     Texture2D texture = ResourceDescriptorHeap[NonUniformResourceIndex(handle)];
     uint width;
     uint height;
-    texture.GetDimensions(mip, width, height);
+    // HLSL's Texture2D overload is (mip, out width, out height). The one that
+    // takes a mip count as its first argument does not exist, and dxc rejects it
+    // -- which is how this was found.
+    texture.GetDimensions(width, height);
     if (pixel.x < 0 || pixel.y < 0 || pixel.x >= int(width) || pixel.y >= int(height)) {
         return float4(0.0, 0.0, 0.0, 0.0);
     }
@@ -80,12 +83,13 @@ float4 SampleVolumeLevel(uint handle, float3 uv, float level) {
 }
 
 // The mip-0 dimensions of a 2D texture, as a uint2. GLSL's textureSize(s, 0),
-// which the fog shaders use to convert a pixel coordinate into a uv.
+// which the fog and decal shaders use to convert a pixel coordinate into a uv.
+// The top level is the default overload's level, so the mip is not passed.
 uint2 FetchTexelSize(uint handle) {
     Texture2D texture = ResourceDescriptorHeap[NonUniformResourceIndex(handle)];
     uint width;
     uint height;
-    texture.GetDimensions(0, width, height);
+    texture.GetDimensions(width, height);
     return uint2(width, height);
 }
 

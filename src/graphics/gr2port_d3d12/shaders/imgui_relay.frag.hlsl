@@ -21,6 +21,13 @@ cbuffer ImGuiConstants : register(b0) {
     uint2 g_pad;
 };
 
+// The arena table: the SRV index of each arena, the value the arena accessors
+// index ResourceDescriptorHeap[] with. Declared by every stage that reads the
+// arena, because a cbuffer has to be visible where it is used.
+cbuffer ArenaConstants : register(b1) {
+    ArenaTable g_arena;
+};
+
 struct PsInput {
     float4 position : SV_Position;
     float2 texcoord : TEXCOORD0;
