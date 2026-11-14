@@ -15,8 +15,12 @@
 // feed (the device family, the pool limit, the current usage) is diagnostic: the
 // budget clamp itself is compile-time arithmetic and behaves identically either
 // way, which is why the CI host build can assert it without the projections.
-#if __has_include(<winrt/Windows.System.h>)
+// Both projections are required: MemoryManager is in Windows.System, and
+// AnalyticsInfo is in Windows.System.Profile. Checking only the first let a
+// build compile with the second missing and fail on the namespace instead.
+#if __has_include(<winrt/Windows.System.h>) && __has_include(<winrt/Windows.System.Profile.h>)
 #include <winrt/Windows.System.h>
+#include <winrt/Windows.System.Profile.h>
 #define GR2_HAS_WINRT_SYSTEM 1
 #else
 #define GR2_HAS_WINRT_SYSTEM 0
@@ -56,8 +60,11 @@ bool IsRunningOnConsole() noexcept {
         // The Xbox device family string is the only reliable way to tell a
         // console from a Windows 11 UWP desktop. On a console the family is
         // "Windows.Xbox"; on desktop it is "Windows.Desktop" or similar.
-        const auto family =
-            winrt::Windows::System::Profile::AnalyticsInfo::VersionInfo().DeviceFamily();
+        // AnalyticsInfo lives in Windows.System.Profile, not Windows.System: the
+        // fully-qualified name is load-bearing and the first CI run that reached
+        // this line failed on it.
+        const auto family = winrt::Windows::System::Profile::AnalyticsInfo::VersionInfo()
+                                .DeviceFamily();
         detected = family == L"Windows.Xbox";
     } catch (...) {
         // A missing analytics contract must not take the emulator down; treat

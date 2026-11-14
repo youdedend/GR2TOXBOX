@@ -157,6 +157,7 @@ jobs:
           cmake -S . -B build-win64 -G Ninja `
                 "-DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}" `
                 "-DGR2_RENDERER=D3D12" `
+                "-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON" `
                 "-DGR2_DXC_EXECUTABLE=${{ env.GR2_DXC_EXECUTABLE }}" `
                 "-DCMAKE_C_COMPILER=clang-cl" `
                 "-DCMAKE_CXX_COMPILER=clang-cl" `
@@ -290,7 +291,11 @@ jobs:
           # 2>&1 into the log: without it a compile error only ever appears as
           # "exit code 1" in the annotation, since the job's log is not readable
           # from the API.
-          cl /nologo /std:c++20 /EHsc /W4 /I src /I externals/fmt/include `
+          # /utf-8: fmt's base.h static_asserts on it, because without it MSVC
+          # reads the source as the ANSI code page and "\u00A7" is not UTF-8.
+          # The CMake build gets it from fmt's own interface target; a bare `cl`
+          # does not.
+          cl /nologo /std:c++20 /EHsc /W4 /utf-8 /I src /I externals/fmt/include `
              /DGR2_XBOX_BUDGET_SELFTEST /DGR2_XBOX_UWP /DFMT_HEADER_ONLY `
              src/tests/xbox_memory_budget_test.cpp src/tests/selftest_log.cpp `
              src/core/uwp_memory.cpp /Fe:test-host/budget.exe 2>&1 |
@@ -313,6 +318,7 @@ jobs:
                 "-DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}" `
                 "-DGR2_XBOX_UWP=ON" `
                 "-DGR2_RENDERER=D3D12" `
+                "-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON" `
                 "-DGR2_DXC_EXECUTABLE=${{ env.GR2_DXC_EXECUTABLE }}" `
                 "-DCMAKE_C_COMPILER=clang-cl" `
                 "-DCMAKE_CXX_COMPILER=clang-cl" `
