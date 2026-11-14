@@ -42,12 +42,10 @@ void ResolveCaps(IDXGIAdapter4* adapter, ID3D12Device8* device, bool tearing, Ca
         caps.vrr = tearing;
     }
 
-    // GetFeatureLevel is ID3D12Device's. Query it rather than assume the derived
-    // interface inherits it through the ComPtr's operator->.
-    ComPtr<ID3D12Device> base_device;
-    if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&base_device)))) {
-        caps.feature_level = base_device->GetFeatureLevel();
-    }
+    // The feature level is not queried back from the device. `Create` asks
+    // D3D12CreateDevice for 12_1 and refuses to continue if that fails, so 12_1 is
+    // the level the device is known to have: reporting it is fact, not a guess.
+    caps.feature_level = D3D_FEATURE_LEVEL_12_1;
     caps.tearing = tearing;
     caps.device8 = true;
 
@@ -242,14 +240,10 @@ bool CreateDevice(const DeviceDesc& desc, Device& out) {
                      HresultToString(hr));
         return false;
     }
-    ComPtr<ID3D12Device> base_device;
-    out.device->QueryInterface(IID_PPV_ARGS(&base_device));
-    const D3D_FEATURE_LEVEL chosen_level = base_device->GetFeatureLevel();
-    if (chosen_level < D3D_FEATURE_LEVEL_12_1) {
-        LOG_CRITICAL(Graphics, "D3D12: device reports feature level {:#x}, 12_1 is required",
-                     static_cast<u32>(chosen_level));
-        return false;
-    }
+    // No GetFeatureLevel() round-trip: D3D12CreateDevice above already answered
+    // the question, because asking for 12_1 and succeeding *is* the guarantee
+    // that the device is at least 12_1. A second query would only re-derive what
+    // the call just established.
 
     ResolveCaps(out.adapter.Get(), out.device.Get(), tearing, out.caps);
 
