@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <utility> // std::move for the arena handles
 
 #include "common/alignment.h"
 #include "common/logging/log.h"
@@ -80,16 +81,18 @@ bool ArenaSet::Create(Device& device, Allocator& allocator, BindlessHeap& descri
             return false;
         }
 
-        resources_[index] = resource;
+        // std::move: ResourcePtr is move-only, and leaving `resource` owning the
+        // same allocation would release it twice.
+        resources_[index] = std::move(resource);
         capacities_[index] = desc.capacity;
         offsets_[index] = 0;
-        gpu_base_[index] = resource->GetGPUVirtualAddress();
+        gpu_base_[index] = resources_[index]->GetGPUVirtualAddress();
         cpu_base_[index] = nullptr;
 
         if (desc.cpu_visible) {
             void* mapped = nullptr;
             const D3D12_RANGE read_range{0, 0};
-            const HRESULT hr = resource->Map(0, &read_range, &mapped);
+            const HRESULT hr = resources_[index]->Map(0, &read_range, &mapped);
             if (FAILED(hr)) {
                 LOG_CRITICAL(Graphics, "D3D12: cannot map arena '{}': {}",
                              static_cast<u32>(desc.kind), HresultToString(hr));
@@ -107,7 +110,7 @@ bool ArenaSet::Create(Device& device, Allocator& allocator, BindlessHeap& descri
                          static_cast<u32>(desc.kind));
             return false;
         }
-        descriptors.WriteBuffer(srv, resource.Get(), 0,
+        descriptors.WriteBuffer(srv, resources_[index].Get(), 0,
                                 static_cast<u32>(desc.capacity / 4), 0);
         srv_[index] = srv;
 
@@ -124,7 +127,7 @@ bool ArenaSet::Create(Device& device, Allocator& allocator, BindlessHeap& descri
                              static_cast<u32>(desc.kind));
                 return false;
             }
-            descriptors.WriteBufferUav(uav, resource.Get(), 0,
+            descriptors.WriteBufferUav(uav, resources_[index].Get(), 0,
                                        static_cast<u32>(desc.capacity / 4), 0);
             uav_[index] = uav;
         }
