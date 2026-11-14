@@ -45,6 +45,22 @@ float3 LoadPosition(ArenaRef vertices, uint stride, uint position, uint vertex_i
     return asfloat(float3(words.x, words.y, words.z));
 }
 
+// Row r of a bone's 3x4 palette matrix, addressed inside the Skin arena.
+//
+// This lives here rather than in scene.hlsli, where the GLSL keeps its
+// equivalent: vertex.hlsli is included *by* scene.hlsli, so a function defined
+// there would be used before it was declared. HLSL, unlike GLSL, requires
+// declaration before use and has no prototype syntax for functions -- so the
+// only options are a circular include (which the include guards turn into a
+// silent no-op) or putting the function in the lower-level header. A bone past
+// the palette reads zeros, matching the game's own loads past its records.
+float4 BoneRow(ArenaRef palette, uint bones, int bone, uint r, ArenaTable table) {
+    if (uint(bone) >= bones) {
+        return float4(0.0, 0.0, 0.0, 0.0);
+    }
+    return ArenaLoadFloat4(ArenaAdd(palette, (uint(bone) * 3u + r) * 16u), table);
+}
+
 // A skinned position: the blend of four bones by their weights, in the order of
 // operations of the game's vertex programs. The skin stream holds four RGBA16
 // FLOAT weights, then four RGBA16 SINT bone indices.
@@ -60,7 +76,7 @@ float3 SkinPosition(float3 p, ArenaRef skin, ArenaRef palette, uint bones, uint 
     int b3 = asint(words.w) >> 16;
 
     float3 skinned;
-    // The palette is three vec4 rows per bone (BoneRow in scene.hlsli).
+    // The palette is three float4 rows per bone (see BoneRow above).
     [unroll] for (uint r = 0u; r < 3u; ++r) {
         float4 row = BoneRow(palette, bones, b0, r, table) * w01.x +
                      BoneRow(palette, bones, b1, r, table) * w01.y +

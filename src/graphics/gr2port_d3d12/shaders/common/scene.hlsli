@@ -142,15 +142,6 @@ Draw LoadDraw(SceneConstants constants, uint base_instance, ArenaTable table) {
     return LoadDrawAt(ArenaAdd(constants.draws, base_instance * DRAW_BYTES), table);
 }
 
-// Row r of a bone, over the arena. A bone past the palette reads zeros, as the
-// game's buffer loads past its records do.
-float4 BoneRow(ArenaRef palette, uint bones, int bone, uint r, ArenaTable table) {
-    if (uint(bone) >= bones) {
-        return float4(0.0, 0.0, 0.0, 0.0);
-    }
-    return ArenaLoadFloat4(ArenaAdd(palette, (uint(bone) * 3u + r) * 16u), table);
-}
-
 // sizeof(Material): 112 bytes of transform rows + 48 of scalars
 // (punch_through..hatching_repeat) + 32 of gradation + 28 of texture indices
 // = 220, rounded up to the 16-byte buffer_reference_align the GLSL declares.
