@@ -163,7 +163,11 @@ jobs:
         retention-days: 7
 
   pre-release:
-    if: github.ref == 'refs/heads/main' && github.repository == 'junminlee2004/GR2port'
+    # Upstream pinned this to junminlee2004/GR2port, which silently disabled
+    # releases on every fork. This repository keeps the pre-release behaviour on
+    # its own default branch instead. The Xbox UWP / D3D12 packages are built and
+    # released by build-xbox-uwp.yml.
+    if: github.ref == 'refs/heads/main'
     needs: [get-info, windows-sdl, linux-sdl]
     runs-on: ubuntu-latest
     permissions:

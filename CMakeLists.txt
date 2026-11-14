@@ -41,6 +41,41 @@ option(ENABLE_UPDATER "Enables the options to updater" ON)
 option(ENABLE_TESTS "Build unit tests (requires GTest)" OFF)
 option(ENABLE_SYSTEM_LIBRARIES "Enable building against system libraries" OFF)
 
+# ---------------------------------------------------------------------------
+# GR2toXBOX: renderer backend and console target
+# ---------------------------------------------------------------------------
+# GR2_RENDERER selects the graphics backend. VULKAN is upstream's renderer and
+# stays the default so a plain configure keeps working. D3D12 is the Xbox
+# backend (and a Windows desktop backend for testing it).
+set(GR2_RENDERER "VULKAN" CACHE STRING "Renderer backend: VULKAN or D3D12")
+set_property(CACHE GR2_RENDERER PROPERTY STRINGS VULKAN D3D12)
+
+# GR2_XBOX_UWP builds the Xbox Series X|S Retail Dev Mode package. It implies
+# D3D12 (Xbox has no Vulkan driver), the WindowsStore system name, and the strict
+# W^X / 5,120 MiB memory rules in src/core/uwp_*.cpp.
+option(GR2_XBOX_UWP "Build the Xbox Series X|S UWP package" OFF)
+
+if (GR2_XBOX_UWP)
+    if (NOT GR2_RENDERER STREQUAL "D3D12")
+        message(FATAL_ERROR
+            "GR2_XBOX_UWP requires GR2_RENDERER=D3D12: Xbox Series X|S has no "
+            "Vulkan driver, so a UWP package built with the Vulkan renderer "
+            "could not present a single frame.")
+    endif()
+    if (NOT CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+        message(FATAL_ERROR
+            "GR2_XBOX_UWP requires -DCMAKE_SYSTEM_NAME=WindowsStore: the Xbox "
+            "package must link the onecore UWP surface (WindowsApp.lib), not "
+            "the desktop Win32 import libraries.")
+    endif()
+    add_compile_definitions(GR2_XBOX_UWP=1 WINAPI_FAMILY=WINAPI_FAMILY_APP)
+    message(STATUS "GR2toXBOX: Xbox Series X|S UWP build (Direct3D 12, strict W^X, 5120 MiB pool)")
+elseif (GR2_RENDERER STREQUAL "D3D12")
+    message(STATUS "GR2toXBOX: Windows desktop Direct3D 12 build")
+else()
+    message(STATUS "GR2toXBOX: upstream Vulkan renderer")
+endif()
+
 # First, determine whether to use CMAKE_OSX_ARCHITECTURES or CMAKE_SYSTEM_PROCESSOR.
 if (APPLE AND CMAKE_OSX_ARCHITECTURES)
     set(BASE_ARCHITECTURE "${CMAKE_OSX_ARCHITECTURES}")
@@ -1018,6 +1053,7 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/uwp_wx.h
          src/core/uwp_memory.cpp
          src/core/uwp_memory.h
+         src/core/uwp_win_compat.h
          src/core/emulator_state.cpp
          src/core/emulator_state.h
          src/core/emulator_settings.cpp
@@ -1240,11 +1276,31 @@ if (WIN32)
         target_link_libraries(gr2port PRIVATE clang_rt.builtins-x86_64.lib)
     endif()
 
-    # Disable ASLR so we can reserve the user area
-    if (MSVC)
-        target_link_options(gr2port PRIVATE /DYNAMICBASE:NO)
+    # -----------------------------------------------------------------------
+    # Image layout: ASLR versus the fixed base
+    #
+    # Upstream disables ASLR and pins the image at 0x700000000000 so that its
+    # preferred user-area reservation does not collide with the host process.
+    # A Store/UWP package is REJECTED by the Windows Store certification and by
+    # Xbox Dev Mode unless the binary is DYNAMICBASE + HIGHENTROPYVA, so the Xbox
+    # build does the opposite and relies on high-entropy 64-bit ASLR instead:
+    # the host modules land in 0x7FF..., well above the guest's user area, and
+    # Core::AddressSpace reserves its guest ranges by querying for free memory
+    # (VirtualQuery + VirtualAlloc2FromApp) rather than assuming an address.
+    #
+    # Desktop keeps the upstream behaviour, which its allocator depends on.
+    # -----------------------------------------------------------------------
+    if (GR2_XBOX_UWP OR GR2_RENDERER STREQUAL "D3D12")
+        if (MSVC)
+            target_link_options(gr2port PRIVATE /DYNAMICBASE /HIGHENTROPYVA /APPCONTAINER)
+        endif()
     else()
-        target_link_options(gr2port PRIVATE -Wl,--disable-dynamicbase)
+        # Disable ASLR so we can reserve the user area
+        if (MSVC)
+            target_link_options(gr2port PRIVATE /DYNAMICBASE:NO)
+        else()
+            target_link_options(gr2port PRIVATE -Wl,--disable-dynamicbase)
+        endif()
     endif()
 
     # Increase stack commit area (Needed, otherwise there are crashes)
@@ -1254,11 +1310,15 @@ if (WIN32)
         target_link_options(gr2port PRIVATE -Wl,--stack,2097152)
     endif()
 
-    # Change base image address
-    if (MSVC)
-        target_link_options(gr2port PRIVATE /BASE:0x700000000000)
-    else()
-        target_link_options(gr2port PRIVATE -Wl,--image-base=0x700000000000)
+    # Change base image address. Only meaningful with ASLR disabled: a
+    # /DYNAMICBASE image ignores /BASE, and /BASE is itself illegal in a UWP
+    # package, so the Xbox build omits it entirely.
+    if (NOT (GR2_XBOX_UWP OR GR2_RENDERER STREQUAL "D3D12"))
+        if (MSVC)
+            target_link_options(gr2port PRIVATE /BASE:0x700000000000)
+        else()
+            target_link_options(gr2port PRIVATE -Wl,--image-base=0x700000000000)
+        endif()
     endif()
 endif()
 
@@ -1293,6 +1353,12 @@ add_dependencies(gr2port host_shaders)
 target_include_directories(gr2port PRIVATE ${HOST_SHADERS_INCLUDE})
 include("${CMAKE_CURRENT_SOURCE_DIR}/src/graphics/gr2_fsr3/gr2_fsr3.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/src/graphics/gr2port/gr2port.cmake")
+
+# The Direct3D 12 backend replaces the Vulkan device/pipeline/shader compilation.
+# The game-facing capture modules above are shared and stay in gr2port.cmake.
+if (GR2_RENDERER STREQUAL "D3D12")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/src/graphics/gr2port_d3d12/gr2port_d3d12.cmake")
+endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/src/core/prompt_packs/prompt_packs.cmake")
 
 # embed resources

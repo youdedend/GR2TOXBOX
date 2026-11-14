@@ -18,6 +18,7 @@
 #include "core/memory.h"
 #include "core/uwp_wx.h"
 #include "core/uwp_memory.h"
+#include "core/uwp_win_compat.h"
 #include "libraries/error_codes.h"
 
 #ifdef _WIN32
@@ -141,6 +142,14 @@ struct AddressSpace::Impl {
 
         // Older Windows builds have a severe performance issue with VirtualAlloc2.
         // We need to get the host's Windows version, then determine if it needs a workaround.
+#if defined(GR2_XBOX_UWP)
+        // An AppContainer gets no ntdll handle, and the Windows-11-22H2
+        // VirtualAlloc2 performance workaround this probe exists for is a
+        // desktop concern. The console keeps the conservative user area
+        // (0x10000000000): the larger speculative reservations that fail inside
+        // the 5,120 MiB pool are exactly what this limit avoids.
+        const u64 supported_user_max = 0x10000000000ULL;
+#else
         auto ntdll_handle = GetModuleHandleW(L"ntdll.dll");
         ASSERT_MSG(ntdll_handle, "Failed to retrieve ntdll handle");
 
@@ -171,6 +180,7 @@ struct AddressSpace::Impl {
                     supported_user_max);
             }
         }
+#endif // GR2_XBOX_UWP
 
         // Determine the free address ranges we can access.
         VAddr next_addr = SYSTEM_MANAGED_MIN;
@@ -201,7 +211,7 @@ struct AddressSpace::Impl {
 
         // Reserve all detected free regions.
         for (auto region : regions) {
-            auto addr = static_cast<u8*>(VirtualAlloc2(
+            auto addr = static_cast<u8*>(WinCompat::VirtualAlloc2Compat(
                 process, reinterpret_cast<PVOID>(region.second.base), region.second.size,
                 MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS, NULL, 0));
             // All marked regions should reserve fine since they're free.
@@ -218,6 +228,7 @@ struct AddressSpace::Impl {
         user_base = reinterpret_cast<u8*>(USER_MIN);
         user_size = supported_user_max - USER_MIN - 1;
 
+
         // Increase BackingSize to account for config options.
         BackingSize += EmulatorSettings.GetExtraDmemInMBytes() * 1_MB +
                        EmulatorSettings.GetExtraFmemInMBytes() * 1_MB;
@@ -231,21 +242,20 @@ struct AddressSpace::Impl {
         // would refuse it if it were). The backing file is not fully committed
         // here either: pages are committed as the guest faults them in, which is
         // what keeps the process inside the Xbox budget.
-        backing_handle = CreateFileMapping2(INVALID_HANDLE_VALUE, nullptr, FILE_MAP_ALL_ACCESS,
-                                            PAGE_READWRITE, SEC_COMMIT, BackingSize,
-                                            nullptr, nullptr, 0);
+        backing_handle = WinCompat::CreateFileMapping2Compat(INVALID_HANDLE_VALUE, nullptr, FILE_MAP_ALL_ACCESS,
+                                                PAGE_READWRITE, SEC_COMMIT, BackingSize);
 
         ASSERT_MSG(backing_handle, "{}", Common::GetLastErrorMsg());
         // Allocate a virtual memory for the backing file map as placeholder
-        backing_base = static_cast<u8*>(VirtualAlloc2(process, nullptr, BackingSize,
+        backing_base = static_cast<u8*>(WinCompat::VirtualAlloc2Compat(process, nullptr, BackingSize,
                                                       MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
                                                       PAGE_NOACCESS, nullptr, 0));
         ASSERT_MSG(backing_base, "{}", Common::GetLastErrorMsg());
 
         // Map backing placeholder. This will commit the pages
         void* const ret =
-            MapViewOfFile3(backing_handle, process, backing_base, 0, BackingSize,
-                           MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0);
+            WinCompat::MapViewOfFile3Compat(backing_handle, process, backing_base, 0, BackingSize,
+                                  MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0);
         ASSERT_MSG(ret == backing_base, "{}", Common::GetLastErrorMsg());
     }
 
@@ -282,7 +292,7 @@ struct AddressSpace::Impl {
             if (fd != -1 && prot == PAGE_READONLY) {
                 // Allocate the memory for the mapping
                 DWORD resultvar;
-                ptr = VirtualAlloc2(process, reinterpret_cast<PVOID>(virtual_addr), size,
+                ptr = WinCompat::VirtualAlloc2Compat(process, reinterpret_cast<PVOID>(virtual_addr), size,
                                     MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER,
                                     PAGE_READWRITE, nullptr, 0);
 
@@ -302,27 +312,28 @@ struct AddressSpace::Impl {
                 ret = SetFilePointer(backing, size_low, &size_high, FILE_CURRENT);
 
                 // Protect the memory area appropriately
-                ret = VirtualProtect(ptr, size, prot, &resultvar);
+                ret = WinCompat::VirtualProtectCompat(ptr, size, prot, &resultvar);
                 ASSERT_MSG(ret, "VirtualProtect failed. {}", Common::GetLastErrorMsg());
             } else {
                 if (prot == PAGE_NOACCESS) {
                     DWORD resultvar;
-                    ptr = MapViewOfFile3(backing, process, reinterpret_cast<PVOID>(virtual_addr),
+                    ptr = WinCompat::MapViewOfFile3Compat(backing, process, reinterpret_cast<PVOID>(virtual_addr),
                                          phys_addr, size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE,
                                          nullptr, 0);
                     ASSERT_MSG(ptr, "MapViewOfFile3 failed. {}", Common::GetLastErrorMsg());
-                    bool ret = VirtualProtect(ptr, size, prot, &resultvar);
+                    bool ret = WinCompat::VirtualProtectCompat(ptr, size, prot, &resultvar);
                     ASSERT_MSG(ret, "VirtualProtect failed. {}", Common::GetLastErrorMsg());
                 } else {
                     ptr =
-                        MapViewOfFile3(backing, process, reinterpret_cast<PVOID>(virtual_addr),
+                        WinCompat::MapViewOfFile3Compat(backing, process,
+                                                        reinterpret_cast<PVOID>(virtual_addr),
                                        phys_addr, size, MEM_REPLACE_PLACEHOLDER, prot, nullptr, 0);
                     ASSERT_MSG(ptr, "MapViewOfFile3 failed. {}", Common::GetLastErrorMsg());
                 }
             }
         } else {
             ptr =
-                VirtualAlloc2(process, reinterpret_cast<PVOID>(virtual_addr), size,
+                WinCompat::VirtualAlloc2Compat(process, reinterpret_cast<PVOID>(virtual_addr), size,
                               MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, prot, nullptr, 0);
         }
         ASSERT_MSG(ptr, "{}", Common::GetLastErrorMsg());
@@ -336,7 +347,7 @@ struct AddressSpace::Impl {
             }
             DWORD old_flags{};
             const bool ret =
-                VirtualProtectEx(process, LPVOID(begin), end - begin, info.Protect, &old_flags);
+                WinCompat::VirtualProtectCompat(LPVOID(begin), end - begin, info.Protect, &old_flags);
             ASSERT_MSG(ret, "VirtualProtectEx failed. {}", Common::GetLastErrorMsg());
         }
         return ptr;
@@ -634,7 +645,7 @@ struct AddressSpace::Impl {
             const u64 range_addr = std::max(region.base, virtual_addr);
             const u64 range_size = std::min(region.base + region.size, virtual_end) - range_addr;
             DWORD old_flags{};
-            if (!VirtualProtectEx(process, LPVOID(range_addr), range_size, new_flags, &old_flags)) {
+            if (!WinCompat::VirtualProtectCompat(LPVOID(range_addr), range_size, new_flags, &old_flags)) {
                 UNREACHABLE_MSG(
                     "Failed to change virtual memory protection for address {:#x}, size "
                     "{:#x}, error {}",

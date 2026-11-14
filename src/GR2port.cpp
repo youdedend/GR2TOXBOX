@@ -73,8 +73,13 @@ Emulator::Emulator() {
     // Initialize NT API functions, set high priority and disable WER
 #ifdef _WIN32
     Common::NtApi::Initialize();
+#if !defined(GR2_XBOX_UWP)
+    // Desktop-only: an AppContainer has no priority class to raise (the console
+    // scheduler owns priority) and does not raise WER boxes, so both calls are
+    // meaningless there and SetPriorityClass is not exported to UWP.
     SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
     SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
+#endif
     // need to init this in order for winsock2 to work
     WORD versionWanted = MAKEWORD(2, 2);
     WSADATA wsaData;
@@ -669,6 +674,22 @@ void Emulator::Restart(std::filesystem::path eboot_path,
 }
 
 [[noreturn]] void Emulator::Relaunch(std::vector<std::string> args) {
+#if defined(GR2_XBOX_UWP)
+    // An AppContainer cannot spawn a process: CreateProcessW is not part of the
+    // UWP surface, and a package that tries is terminated by the platform. The
+    // Xbox shell performs the same settings hand-off in process:
+    // Uwp::App::RequestReboot(args) tears the emulator core down, keeps the
+    // renderer and the device alive, and boots the game again with the new
+    // arguments. Reaching this path on a console therefore means the request was
+    // routed incorrectly, which is a port bug worth reporting rather than a
+    // silent quick_exit.
+    LOG_CRITICAL(Common,
+                 "Relaunch is not available in the Xbox UWP package: the shell must "
+                 "use Uwp::App::RequestReboot() for an in-process settings hand-off. "
+                 "Refusing to continue with arguments: {}",
+                 fmt::join(args, " "));
+    std::quick_exit(1);
+#else
     const auto guest_args = std::find(args.begin(), args.end(), "--");
     args.insert(guest_args, {"--wait-for-pid", std::to_string(Debugger::GetCurrentPid())});
 
@@ -735,6 +756,7 @@ void Emulator::Restart(std::filesystem::path eboot_path,
 #endif
 
     std::quick_exit(0);
+#endif
 }
 
 void Emulator::UpdatePlayTime(const std::string_view serial) {
