@@ -30,6 +30,29 @@ u64 HashBytes(u64 hash, std::span<const u8> bytes) {
     return hash;
 }
 
+/// Opens a wide-character path for binary I/O. The CRT's _wfopen_s on Windows
+/// (which is where this runs); fopen with a converted name everywhere else, so
+/// the file still compiles in the compile-only check.
+FILE* OpenWide(const wchar_t* path, const wchar_t* mode) {
+#if defined(_MSC_VER)
+    FILE* file = nullptr;
+    if (_wfopen_s(&file, path, mode) != 0) {
+        return nullptr;
+    }
+    return file;
+#else
+    char narrow_path[1024]{};
+    char narrow_mode[16]{};
+    for (size_t i = 0; i < 1023 && path[i] != 0; ++i) {
+        narrow_path[i] = path[i] < 128 ? static_cast<char>(path[i]) : '?';
+    }
+    for (size_t i = 0; i < 15 && mode[i] != 0; ++i) {
+        narrow_mode[i] = static_cast<char>(mode[i]);
+    }
+    return std::fopen(narrow_path, narrow_mode);
+#endif
+}
+
 u64 HashScalar(u64 hash, u64 value) {
     for (int i = 0; i < 8; ++i) {
         hash ^= (value >> (i * 8)) & 0xFFu;
@@ -446,8 +469,13 @@ bool PipelineCache::SaveLibrary(const wchar_t* path) const {
     // A plain fopen rather than a Win32 handle: this runs on both the desktop and
     // the console package, and the UWP AllowedPaths for the app's own local
     // folder cover the path the caller passes.
-    FILE* file = nullptr;
-    if (_wfopen_s(&file, path, L"wb") != 0 || file == nullptr) {
+    //
+    // _wfopen_s where the CRT has it, fopen elsewhere, rather than a call to
+    // _wfopen_s throughout: the compile-only check in local_precheck.sh builds
+    // this file on Linux, and a #include <fcntl.h> for the prototype would shadow
+    // the system header that spdlog's file sink needs.
+    FILE* file = OpenWide(path, L"wb");
+    if (file == nullptr) {
         LOG_WARNING(Graphics, "D3D12 pipeline: could not write the pipeline library.");
         return false;
     }
@@ -465,8 +493,8 @@ bool PipelineCache::LoadLibrary(const wchar_t* path) {
     if (!library_ || !path) {
         return false;
     }
-    FILE* file = nullptr;
-    if (_wfopen_s(&file, path, L"rb") != 0 || file == nullptr) {
+    FILE* file = OpenWide(path, L"rb");
+    if (file == nullptr) {
         return false;
     }
     std::vector<u8> bytes;

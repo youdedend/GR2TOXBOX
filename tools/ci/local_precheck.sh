@@ -66,6 +66,7 @@ for entry in "${UNITS[@]}"; do
     if ! "$CXX" "${CXXFLAGS[@]}" $defs -fsyntax-only "$file" 2>"$OUT/err"; then
         echo "  FAIL $file"
         sed 's/^/    /' "$OUT/err" | head -30
+        head -10 "$OUT/err" | while IFS= read -r line; do echo "::error file=$file::$line"; done
         failures=$((failures + 1))
     else
         echo "  ok   $file"
@@ -80,6 +81,7 @@ if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/stubs -DGR2_XBOX_UWP=1 -DFMT_HEADER_ONLY
         -fsyntax-only src/core/uwp_memory.cpp 2>"$OUT/err"; then
     echo "  FAIL src/core/uwp_memory.cpp (GR2_XBOX_UWP)"
     sed 's/^/    /' "$OUT/err" | head -30
+    head -10 "$OUT/err" | while IFS= read -r line; do echo "::error file=src/core/uwp_memory.cpp::$line"; done
     failures=$((failures + 1))
 else
     echo "  ok   src/core/uwp_memory.cpp (GR2_XBOX_UWP)"
@@ -95,13 +97,19 @@ D3D12_UNITS=(
 )
 for file in "${D3D12_UNITS[@]}"; do
     [ -f "$file" ] || continue
-    if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/d3d12_stub -D_WIN32 -include fcntl.h \
+    if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/d3d12_stub -D_WIN32 \
             -fsyntax-only "$file" 2>"$OUT/err"; then
         # Only the diagnostics that are not inside the vendored header count.
         grep -E 'error' "$OUT/err" | grep -v 'd3d12ma/' >"$OUT/ours" || true
         if [ -s "$OUT/ours" ]; then
             echo "  FAIL $file"
             sed 's/^/    /' "$OUT/ours" | head -20
+            # Emit the workflow-command form as well: the job log is not always
+            # reachable, and an unreadable failure costs a whole run. Harmless
+            # outside Actions, where it is just a line of text.
+            head -10 "$OUT/ours" | while IFS= read -r line; do
+                echo "::error file=$(printf '%s' "$line" | cut -d: -f1)::$line"
+            done
             failures=$((failures + 1))
         else
             echo "  ok   $file (vendored-header diagnostics only)"
@@ -129,6 +137,7 @@ if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
                 -DFMT_HEADER_ONLY -o "$OUT/$name" 2>"$OUT/err"; then
             echo "  FAIL link $name"
             sed 's/^/    /' "$OUT/err" | head -20
+            head -10 "$OUT/err" | while IFS= read -r line; do echo "::error::$line"; done
             failures=$((failures + 1))
             continue
         fi
@@ -137,6 +146,7 @@ if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
         else
             echo "  FAIL run $name"
             sed 's/^/    /' "$OUT/run" | tail -15
+            tail -10 "$OUT/run" | while IFS= read -r line; do echo "::error::$line"; done
             failures=$((failures + 1))
         fi
     done

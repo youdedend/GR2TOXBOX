@@ -24,6 +24,12 @@ What it cannot catch: anything about the real SDK's enum values or the semantics
 of a call. CI is still the oracle for those; this only removes the cheap
 mistakes from the expensive loop.
 
+It must never gain a file that a host header of the same name lives in. There was
+a `fcntl.h` here, to supply the `_wfopen_s` prototype; putting it on the include
+path with `-I` shadowed the system header, and spdlog's file sink includes that,
+so every unit in the precheck stopped compiling. `pipeline.cpp` now takes the
+`_wfopen_s` path only under `_MSC_VER` and nothing needs the shim.
+
 Run it through `tools/ci/local_precheck.sh`, which does so automatically when the
 backend's files change. Vendored D3D12MA's own errors are filtered out: the stub
 does not declare the whole of `d3d12.h`, and that header is not ours to change.
