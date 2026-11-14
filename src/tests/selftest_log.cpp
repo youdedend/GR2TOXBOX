@@ -21,7 +21,10 @@
 #include <string>
 #include <vector>
 
-#include <fmt/base.h>
+// fmt/base.h is enough to *declare* the logging surface, but vformat lives with
+// the formatted-argument machinery in format.h. The real log.cpp includes
+// <fmt/std.h> and spdlog on top of that; a test does not need either.
+#include <fmt/format.h>
 
 #include "common/logging/log.h"
 
