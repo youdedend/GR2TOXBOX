@@ -142,13 +142,21 @@ struct AddressSpace::Impl {
 
         // Older Windows builds have a severe performance issue with VirtualAlloc2.
         // We need to get the host's Windows version, then determine if it needs a workaround.
+        // The PS4 firmware version matters on every platform: a guest compiled
+        // for firmware 3.00+ only ever sees the reduced user area, and reserving
+        // more than that is wasted address space. It is read here, before the
+        // #if, because both branches need it and it does not depend on the host.
+        const s32 sdk_ver = Common::ElfInfo::Instance().CompiledSdkVer();
+
 #if defined(GR2_XBOX_UWP)
         // An AppContainer gets no ntdll handle, and the Windows-11-22H2
         // VirtualAlloc2 performance workaround this probe exists for is a
         // desktop concern. The console keeps the conservative user area
         // (0x10000000000): the larger speculative reservations that fail inside
         // the 5,120 MiB pool are exactly what this limit avoids.
-        const u64 supported_user_max = 0x10000000000ULL;
+        u64 supported_user_max = 0x10000000000ULL;
+        LOG_INFO(Core, "Xbox: guest user area limited to {:#x} (firmware SDK {})",
+                 supported_user_max, sdk_ver);
 #else
         auto ntdll_handle = GetModuleHandleW(L"ntdll.dll");
         ASSERT_MSG(ntdll_handle, "Failed to retrieve ntdll handle");
@@ -167,7 +175,6 @@ struct AddressSpace::Impl {
         static constexpr s32 AffectedBuildNumber = 22621;
 
         // Higher PS4 firmware versions prevent higher address mappings too.
-        s32 sdk_ver = Common::ElfInfo::Instance().CompiledSdkVer();
         if (os_version_info.dwBuildNumber <= AffectedBuildNumber ||
             sdk_ver >= Common::ElfInfo::FW_300) {
             supported_user_max = 0x10000000000ULL;

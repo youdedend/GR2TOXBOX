@@ -133,10 +133,7 @@ jobs:
                 "-DENABLE_UPDATER=OFF" 2>&1 |
               Tee-Object -FilePath configure.log
           if ($LASTEXITCODE -ne 0) {
-            Get-Content configure.log |
-              Select-String -Pattern 'CMake Error|error:|FATAL_ERROR|GR2_' -Context 0,3 |
-              Select-Object -First 40 |
-              ForEach-Object { Write-Host "::error::$($_ -replace "`r?`n", ' ')" }
+            ./scripts/ci/annotate_failure.ps1 -LogFile configure.log -Context 4
             exit 1
           }
 
@@ -147,12 +144,20 @@ jobs:
           cmake --build build-win64 --config ${{ env.BUILD_TYPE }} --parallel 2>&1 |
             Tee-Object -FilePath build.log
           if ($LASTEXITCODE -ne 0) {
-            Get-Content build.log |
-              Select-String -Pattern 'error C|error LNK|fatal error|FAILED:' |
-              Select-Object -Unique -First 40 |
-              ForEach-Object { Write-Host "::error::$_" }
+            ./scripts/ci/annotate_failure.ps1 -LogFile build.log
             exit 1
           }
+
+      # A failed build's log is the whole diagnosis, and the raw job log of a
+      # large matrix run is not always retrievable. Upload it unconditionally so
+      # it is always there.
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-win64-d3d12
+          path: build.log
+          if-no-files-found: ignore
 
       - name: Run the Xbox budget and chord self-tests
         run: |
@@ -244,10 +249,7 @@ jobs:
                 "-DENABLE_UPDATER=OFF" 2>&1 |
               Tee-Object -FilePath configure-uwp.log
           if ($LASTEXITCODE -ne 0) {
-            Get-Content configure-uwp.log |
-              Select-String -Pattern 'CMake Error|error:|FATAL_ERROR|GR2_' -Context 0,3 |
-              Select-Object -First 40 |
-              ForEach-Object { Write-Host "::error::$($_ -replace "`r?`n", ' ')" }
+            ./scripts/ci/annotate_failure.ps1 -LogFile configure-uwp.log -Context 4
             exit 1
           }
 
@@ -258,12 +260,17 @@ jobs:
           cmake --build build-uwp --config ${{ env.BUILD_TYPE }} --parallel 2>&1 |
             Tee-Object -FilePath build-uwp.log
           if ($LASTEXITCODE -ne 0) {
-            Get-Content build-uwp.log |
-              Select-String -Pattern 'error C|error LNK|fatal error|FAILED:' |
-              Select-Object -Unique -First 40 |
-              ForEach-Object { Write-Host "::error::$_" }
+            ./scripts/ci/annotate_failure.ps1 -LogFile build-uwp.log
             exit 1
           }
+
+      - name: Upload UWP build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-xbox-uwp
+          path: build-uwp.log
+          if-no-files-found: ignore
 
       - name: Create the Dev Mode signing certificate
         shell: pwsh
