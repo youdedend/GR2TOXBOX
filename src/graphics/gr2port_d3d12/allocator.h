@@ -6,6 +6,7 @@
 #include <functional>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "core/uwp_memory.h"
@@ -32,6 +33,21 @@ namespace Gr2Port::D3D12 {
 /// workable: Gravity Rush 2's texture cache wants far more than 1,200 MiB at 4K,
 /// so the cache has to be a soft cache, not a hard one.
 ///
+/// ### Ownership
+///
+/// D3D12MA ties the memory to the `D3D12MA::Allocation`, not to the resource:
+/// `Allocation::GetResource()` is a *borrowed* pointer, and releasing the resource
+/// alone leaks every byte. But keeping the `Allocation` alive through a
+/// `ComPtr` with a custom deleter creates a cycle, because the `Allocation`
+/// itself holds a reference to the resource.
+///
+/// The cycle is broken the way D3D12MA intends: once the resource has been
+/// created and a reference taken, `Allocation::SetResource(nullptr)` drops the
+/// allocation's reference to it. The resource is then owned by the caller's
+/// `ComPtr`, the allocation is owned by that `ComPtr`'s deleter, and releasing
+/// the resource destroys the allocation and returns the memory. Nothing leaks and
+/// nothing dangles.
+///
 /// ### Eviction contract
 ///
 /// A resource is either **evictable** (the renderer can rebuild it from the
@@ -40,6 +56,28 @@ namespace Gr2Port::D3D12 {
 /// reading). Only evictable resources are ever dropped, and only when the GPU is
 /// not using them — the callback receives the frame number the resource was last
 /// used in and refuses anything newer than the last completed frame.
+///
+/// ### The type handed out
+///
+/// `ResourcePtr` is a `ComPtr<ID3D12Resource>` whose deleter also returns the
+/// D3D12MA memory, so a caller can treat it exactly like a plain resource and
+/// still have the allocation accounted for and released.
+struct ResourceDeleter {
+    /// The allocation that owns the memory. `CreateResource` clears the
+    /// allocation's own reference to the resource, so this is what keeps the
+    /// block alive for as long as the resource is.
+    D3D12MA::Allocation* allocation = nullptr;
+    /// The allocator's committed-byte counter, decremented on release so the
+    /// budget reflects the memory actually in use.
+    std::atomic<u64>* released = nullptr;
+    /// The allocation's byte size, filled in at creation.
+    u64 bytes = 0;
+
+    void operator()(ID3D12Resource* resource) const noexcept;
+};
+
+using ResourcePtr = ComPtr<ID3D12Resource>;
+
 class Allocator {
 public:
     /// Called when the budget passes a trim threshold. The renderer registers
@@ -55,18 +93,15 @@ public:
 
     /// Creates a committed resource inside the budget. `kind` is the D3D12MA
     /// heap class: Default (GPU-only), Upload (CPU-write), Readback.
-    ComPtr<ID3D12Resource> CreateResource(const D3D12_RESOURCE_DESC& desc,
-                                          D3D12_HEAP_TYPE heap_type,
-                                          D3D12_RESOURCE_STATES initial_state,
-                                          const D3D12_CLEAR_VALUE* clear = nullptr);
+    ResourcePtr CreateResource(const D3D12_RESOURCE_DESC& desc, D3D12_HEAP_TYPE heap_type,
+                               D3D12_RESOURCE_STATES initial_state,
+                               const D3D12_CLEAR_VALUE* clear = nullptr);
 
     /// A committed buffer with a known size, the common case for the arenas and
     /// for upload staging.
-    ComPtr<ID3D12Resource> CreateBuffer(u64 size, D3D12_HEAP_TYPE heap_type,
-                                        D3D12_RESOURCE_FLAGS flags,
-                                        D3D12_RESOURCE_STATES initial_state,
-                                        const wchar_t* name = nullptr,
-                                        bool evictable = false);
+    ResourcePtr CreateBuffer(u64 size, D3D12_HEAP_TYPE heap_type, D3D12_RESOURCE_FLAGS flags,
+                             D3D12_RESOURCE_STATES initial_state, const wchar_t* name = nullptr,
+                             bool evictable = false);
 
     /// The renderer installs its texture-cache trimmer here.
     void SetEvictionCallback(EvictionCallback callback) {

@@ -169,7 +169,10 @@ public:
     [[nodiscard]] RootArenaTable BuildRootTable() const;
 
 private:
-    ComPtr<ID3D12Resource> resources_[static_cast<u32>(ArenaKind::Count)];
+    // Allocator::ResourcePtr, not ComPtr<ID3D12Resource>: the arenas are a MiB of
+    // D3D12MA memory each, and a plain ComPtr would release the resource without
+    // returning the allocation behind it.
+    Allocator::ResourcePtr resources_[static_cast<u32>(ArenaKind::Count)];
     D3D12_GPU_VIRTUAL_ADDRESS gpu_base_[static_cast<u32>(ArenaKind::Count)]{};
     u8* cpu_base_[static_cast<u32>(ArenaKind::Count)]{};
     u64 capacities_[static_cast<u32>(ArenaKind::Count)]{};

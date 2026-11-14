@@ -29,11 +29,17 @@ bool Allocator::Create(Device& device) {
     allocator_desc_ = {};
     allocator_desc_.pDevice = device.device.Get();
     allocator_desc_.PreferredBlockSize = 64_MB;
-    allocator_desc_.FrameInUseCount = FramesInFlight;
-    // No DXGI adapter is needed: the device has one, and passing it would let
-    // D3D12MA query the adapter again on a console where that is restricted.
+    // No FrameInUseCount: this D3D12MA (v3) dropped it from ALLOCATOR_DESC. A
+    // block is free once every fence value passed to AllocateMemory has been
+    // reached, which this backend drives from its own timeline fence rather than
+    // from a frame counter the allocator guesses at.
+    //
+    // No DXGI adapter either: the device already has one, and passing it would
+    // let D3D12MA query the adapter again on a console where that is restricted.
     allocator_desc_.pAdapter = nullptr;
-    allocator_desc_.Flags = D3D12MA::ALLOCATOR_FLAG_NONE;
+    // The default pools are not zeroed: a zeroed pool would cost a full clear on
+    // every 64 MiB block, and this backend writes every byte it reads.
+    allocator_desc_.Flags = D3D12MA::ALLOCATOR_FLAG_DEFAULT_POOLS_NOT_ZEROED;
 
     const D3D12MA::ALLOCATION_CALLBACKS* callbacks = nullptr;
     HRESULT hr = D3D12MA::CreateAllocator(&allocator_desc_, &d3d12ma_);
@@ -59,7 +65,25 @@ void Allocator::Destroy() {
     device_ = nullptr;
 }
 
-ComPtr<ID3D12Resource> Allocator::CreateResource(const D3D12_RESOURCE_DESC& desc,
+void ResourceDeleter::operator()(ID3D12Resource* resource) const noexcept {
+    if (resource == nullptr) {
+        return;
+    }
+    // Release our reference to the resource first; then release the allocation.
+    // After `Allocator::CreateResource` calls `Allocation::SetResource(nullptr)`,
+    // the allocation no longer references the resource, so this order cannot
+    // double-release. `allocation` holds the only remaining reference to the
+    // memory, and dropping it returns the block to D3D12MA.
+    resource->Release();
+    if (allocation != nullptr) {
+        allocation->Release();
+    }
+    if (released != nullptr) {
+        released->fetch_sub(bytes, std::memory_order_relaxed);
+    }
+}
+
+Allocator::ResourcePtr Allocator::CreateResource(const D3D12_RESOURCE_DESC& desc,
                                                  D3D12_HEAP_TYPE heap_type,
                                                  D3D12_RESOURCE_STATES initial_state,
                                                  const D3D12_CLEAR_VALUE* clear) {
@@ -70,8 +94,9 @@ ComPtr<ID3D12Resource> Allocator::CreateResource(const D3D12_RESOURCE_DESC& desc
     // Budget check before the allocation, not after: a failed D3D12
     // allocation inside an AppContainer leaves the device in a state where the
     // next commit also fails, so the refusal has to happen here.
-    const D3D12_RESOURCE_ALLOCATION_INFO info = device_->device->GetResourceAllocationInfo(0, 1, &desc);
-    u64 size = info.SizeInBytes;
+    const D3D12_RESOURCE_ALLOCATION_INFO info =
+        device_->device->GetResourceAllocationInfo(0, 1, &desc);
+    const u64 size = info.SizeInBytes;
     if (size == UINT64_MAX) {
         LOG_CRITICAL(Graphics, "D3D12: resource allocation info is invalid for this descriptor");
         return nullptr;
@@ -87,7 +112,7 @@ ComPtr<ID3D12Resource> Allocator::CreateResource(const D3D12_RESOURCE_DESC& desc
             freed = eviction_(needed);
         }
         const u64 now = committed_.load(std::memory_order_relaxed);
-        if (budget_ != 0 && now + size > budget_) {
+        if (now + size > budget_) {
             refused_++;
             LOG_CRITICAL(Graphics,
                          "D3D12: refusing a {} KiB resource: the {} MiB heap budget is full "
@@ -102,32 +127,49 @@ ComPtr<ID3D12Resource> Allocator::CreateResource(const D3D12_RESOURCE_DESC& desc
     // resource must land in.
     alloc_desc.HeapType = heap_type;
 
-    ComPtr<D3D12MA::Allocation> allocation;
-    const D3D12_HEAP_PROPERTIES props = HeapProperties(heap_type);
-    HRESULT hr = d3d12ma_->CreateResource(
-        &alloc_desc, &props, D3D12_HEAP_FLAG_NONE, &desc, initial_state, clear, &allocation,
-        nullptr);
-    if (FAILED(hr)) {
+    D3D12MA::Allocation* allocation = nullptr;
+    // D3D12MA v3's signature: the heap properties are implied by
+    // alloc_desc.HeapType, and the resource is returned through the IID.
+    HRESULT hr = d3d12ma_->CreateResource(&alloc_desc, &desc, initial_state, clear, &allocation,
+                                          __uuidof(ID3D12Resource), nullptr);
+    if (FAILED(hr) || allocation == nullptr) {
         refused_++;
         LOG_CRITICAL(Graphics, "D3D12: CreateResource({} KiB) failed: {}", size / 1_KB,
                      HresultToString(hr));
         return nullptr;
     }
 
+    // Take ownership of the resource, and break the reference cycle by dropping
+    // the allocation's reference to it: the Allocation would otherwise keep the
+    // resource alive and vice versa. See the Ownership note in allocator.h.
+    ID3D12Resource* raw = allocation->GetResource();
+    allocation->SetResource(nullptr);
+
+    ResourceDeleter deleter;
+    deleter.allocation = allocation;
+    deleter.released = &committed_;
+    deleter.bytes = size;
+
+    ResourcePtr resource;
+    // Attach does not AddRef, and D3D12MA's CreateResource hands back a resource
+    // with one reference for us, so there is nothing to add here. WRL's
+    // Attach(pointer, deleter) stores the deleter by value -- including the
+    // allocation pointer it must release.
+    resource.Attach(raw, deleter);
+
     committed_.fetch_add(size, std::memory_order_relaxed);
-    // The Allocation owns the resource; D3D12MA keeps the resource alive as long
-    // as the allocation exists. The caller only sees the resource, and the
-    // allocation's lifetime is tied to it by D3D12MA's own bookkeeping in
-    // ReleaseAllocation when the resource's final reference drops.
-    ComPtr<ID3D12Resource> resource;
-    allocation->GetResource(IID_PPV_ARGS(&resource));
     return resource;
 }
 
-ComPtr<ID3D12Resource> Allocator::CreateBuffer(u64 size, D3D12_HEAP_TYPE heap_type,
+Allocator::ResourcePtr Allocator::CreateBuffer(u64 size, D3D12_HEAP_TYPE heap_type,
                                                D3D12_RESOURCE_FLAGS flags,
                                                D3D12_RESOURCE_STATES initial_state,
                                                const wchar_t* name, bool evictable) {
+    // Evictability is a renderer-side property: an evictable buffer is one the
+    // renderer is willing to drop and rebuild, which the frame graph tracks. The
+    // allocator only needs to know the byte size, so it records nothing here --
+    // but the parameter stays in the signature because the alternative is every
+    // caller forgetting which of its buffers may be reclaimed.
     (void)evictable;
     D3D12_RESOURCE_DESC desc{};
     desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;

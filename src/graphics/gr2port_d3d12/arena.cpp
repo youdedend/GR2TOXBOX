@@ -111,8 +111,14 @@ bool ArenaSet::Create(Device& device, Allocator& allocator, BindlessHeap& descri
                                 static_cast<u32>(desc.capacity / 4), 0);
         srv_[index] = srv;
 
+        // Declared outside the branch: the log line below reports the UAV slot
+        // for every arena, and a read-only arena reports an invalid slot.
+        DescriptorSlot uav{};
         if (desc.writable) {
-            DescriptorSlot uav = descriptors.AllocateSrv(1);
+            // Not a separate heap: D3D12 puts CBV, SRV and UAV descriptors in
+            // one heap type, so the UAV slot comes from the same allocator and is
+            // simply written with a UAV view instead of an SRV view.
+            uav = descriptors.AllocateSrv(1);
             if (!uav) {
                 LOG_CRITICAL(Graphics, "D3D12: no bindless UAV slot for arena '{}'",
                              static_cast<u32>(desc.kind));
