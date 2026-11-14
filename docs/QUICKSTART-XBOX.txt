@@ -1,0 +1,140 @@
+================================================================================
+  GR2toXBOX - Xbox Series X|S Quick Start
+  Gravity Rush 2 (PS4 v1.11) on Xbox Series X / Series S Dev Mode
+================================================================================
+
+WHAT THIS IS
+------------
+An unofficial, native Direct3D 12 port of Gravity Rush 2 for Xbox Series X|S
+Retail Dev Mode, built from the open-source GR2port project. The game's own
+x86-64 code runs natively on the console's AMD Zen 2 CPU - there is no emulation
+layer and no CPU translation.
+
+THIS PACKAGE CONTAINS NO GAME DATA.
+You must supply your own legally dumped Gravity Rush 2 (PS4) v1.11 files.
+
+
+WHAT YOU NEED
+-------------
+  * An Xbox Series X or Series S with Developer Mode activated
+  * A PC on the same network, for Xbox Device Portal
+  * Your Gravity Rush 2 v1.11 dump on a USB 3.0 SSD (recommended) or internal
+  * This bundle: the .msix, the .cer and this file
+
+
+STEP 1 - INSTALL THE CERTIFICATE (once per console)
+----------------------------------------------------
+  1. On your PC, open a browser to  https://<your-xbox-ip>:11443
+     (find the IP in the Dev Mode home screen on the console)
+  2. Sign in with your Dev Mode account.
+  3. Go to  Home > "My games & apps" > Certificates  (wording varies slightly)
+  4. Upload  GR2port-XboxDevMode.cer
+  5. The console now trusts packages this build signed.
+
+  If you see "0x800B0109" later, this step was skipped.
+
+
+STEP 2 - INSTALL THE PACKAGE
+-----------------------------
+  1. Still in Xbox Device Portal, go to  Home > "My games & apps" > Add
+  2. Choose  GR2port-XboxSeriesXS-UWP_x64.msix
+  3. Wait for "Package installed".
+
+
+STEP 3 - CHANGE THE APP TYPE TO "GAME"   *** DO NOT SKIP THIS ***
+------------------------------------------------------------------
+  This is the single most common reason the port fails to start.
+
+  On Xbox, a title installed as an "App" gets roughly 1 GB of memory. Gravity
+  Rush 2 needs the ~5 GB "Game" pool. Left as App, the port exits during boot
+  with  ERROR_COMMITMENT_LIMIT  and an out-of-memory message in its log.
+
+  1. In Xbox Device Portal go to the installed app's details.
+  2. Find "App type" (or "Application type").
+  3. Change it from  App  to  Game.
+  4. Save, then launch the title again.
+
+  The package manifest already declares itself a Game; the Dev Portal switch
+  must agree with it.
+
+
+STEP 4 - PUT THE GAME FILES ON THE CONSOLE
+-------------------------------------------
+  Recommended: a USB 3.0 SSD formatted by the console, with the dump at
+
+      E:\GR2\        (or D:\GR2\ - whichever letter the console assigns)
+
+  The folder must contain the game's own layout, i.e. an "app0" folder with
+  eboot.bin inside it, or a .zar archive if you dumped it compressed:
+
+      E:\GR2\app0\eboot.bin
+      E:\GR2\app0\sce_sys\...
+      E:\GR2\app0\...      (the rest of the game's files)
+
+  Alternatively copy the dump into the app's own storage:
+      LocalState\GR2\app0\eboot.bin
+  This costs internal space and is slower to load; USB first is better.
+
+
+STEP 5 - LAUNCH AND PICK A PRESET
+----------------------------------
+  1. Start "Gravity Rush 2" from Dev Mode home.
+  2. A controller-driven launcher appears. Choose:
+       - the game path  (E:\GR2, D:\GR2, LocalState\GR2, or select a .zar)
+       - a graphics preset:
+           Xbox Series X : 4K 60 FPS        (recommended)
+                           1440p 120 FPS
+           Xbox Series S : 1080p 60 FPS     (recommended)
+                           1440p 60 FPS (with FSR)
+  3. Choose "Launch". The game boots in-process.
+
+
+CONTROLLER CHORDS (replacing the DualShock 4 touchpad)
+-------------------------------------------------------
+Gravity Rush 2 uses the PS4 touchpad for flicks and Panther mode. On an Xbox pad:
+
+    View + LB          Lunar style
+    View + RB          Jupiter style
+    View + B           Normal style
+    View + L3 (hold)   Panther / touchpad click (hold)
+    View + Y (hold)    Motion tilt, driven by the right stick
+    View + D-Pad       Flick up/down/left/right  (OFF by default)
+
+  Flicks start disabled because the D-Pad is the game's own photo-mode, map,
+  gesture and first-person input. Enable them and choose different buttons in
+  the launcher if you want touchpad flicks on the pad.
+
+
+TROUBLESHOOTING
+---------------
+  * "Package failed to install / 0x800B0109"
+        The certificate was not installed. Redo Step 1.
+
+  * Exit during boot, "ERROR_COMMITMENT_LIMIT", or an out-of-memory message
+        The app type is still "App". Redo Step 3.
+
+  * Black screen, no game window
+        The renderer could not create a device. Check Xbox Device Portal's log
+        for the "D3D12 device:" line, and see docs/TROUBLESHOOTING.md.
+
+  * "Game files not found"
+        Your path is wrong or the dump is not v1.11. The dump must contain
+        app0/eboot.bin.
+
+  * It runs but looks wrong
+        Please attach log.txt and a screenshot to the "shader_visual_issue"
+        issue template - the D3D12 shader port is tracked shader by shader.
+
+  Full guide:        docs/XBOX_DEV_MODE_GUIDE.md
+  All troubleshooting: docs/TROUBLESHOOTING.md
+
+
+LEGAL
+-----
+GR2toXBOX is an unofficial fan-made compatibility project. It contains no
+copyrighted material and no game data. You are responsible for owning and
+dumping your own copy of Gravity Rush 2. This project is not affiliated with
+Sony, Japan Studio, or Microsoft.
+
+Source: https://github.com/youdedend/GR2TOXBOX  (GPL-2.0)
+Upstream: https://github.com/junminlee2004/GR2port  (GPL-2.0, shadPS4 lineage)

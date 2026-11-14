@@ -1,0 +1,107 @@
+name: Xbox bug report
+description: The port crashes, fails to install, runs slowly, or ignores the controller on an Xbox.
+title: "[Xbox] "
+labels: ["bug", "xbox"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, please check [TROUBLESHOOTING.md](https://github.com/youdedend/GR2TOXBOX/blob/main/docs/TROUBLESHOOTING.md).
+
+        **The most common "crash" is the app type still being `App`.** In Xbox
+        Device Portal, open the app and change *App type* from **App** to **Game**.
+        Without it the console gives the title ~1 GB instead of the ~5 GB pool and
+        the port exits during boot with `ERROR_COMMITMENT_LIMIT`.
+
+        Do not attach game data or copyrighted screenshots.
+
+  - type: dropdown
+    id: console
+    attributes:
+      label: Console model
+      options:
+        - Xbox Series X
+        - Xbox Series S
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: apptype
+    attributes:
+      label: App type in Xbox Device Portal
+      description: The memory mode the title is registered as. This decides how much memory the console gives it.
+      options:
+        - Game  (correct — ~5 GB pool)
+        - App  (wrong — ~1 GB pool)
+        - I have not checked
+    validations:
+      required: true
+
+  - type: dropdown
+    id: preset
+    attributes:
+      label: Resolution / frame-rate preset
+      options:
+        - Series X — 4K 60
+        - Series X — 1440p 120
+        - Series S — 1080p 60
+        - Series S — 1440p 60 (FSR)
+        - PC — Direct3D 12 build
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: storage
+    attributes:
+      label: Where the game files are
+      options:
+        - USB SSD (E:\GR2 or D:\GR2)
+        - App LocalState\GR2
+        - .zar archive
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Release / package version
+      description: From the release page or the package filename.
+      placeholder: "1.0.0.0-xbox — build 2026-11-14"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      placeholder: |
+        The port reaches the launcher, starts the game, then exits after about five
+        seconds. I expected it to keep running.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: log.txt
+      description: |
+        From Xbox Device Portal → File Explorer → the app's LocalState folder.
+        Paste the first ~80 lines at minimum — they contain the device, memory
+        pool, W^X mode and arena sizes, which identify most problems.
+      render: text
+    validations:
+      required: true

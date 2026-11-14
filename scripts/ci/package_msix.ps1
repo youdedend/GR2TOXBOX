@@ -1,5 +1,3 @@
-# SPDX-FileCopyrightText: Copyright 2026 GR2toXBOX contributors
-# SPDX-License-Identifier: GPL-2.0-or-later
 <#
 .SYNOPSIS
     Stages, packs and signs the Xbox Series X|S UWP package.
@@ -13,6 +11,8 @@
     Every step fails the job on error: a partially signed or wrongly staged
     package is worse than no package, because it installs and then crashes.
 #>
+# SPDX-FileCopyrightText: Copyright 2026 GR2toXBOX contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
 param(
     [string]$BuildDir = "build-uwp",
     [string]$ExeName = "GR2port.exe",

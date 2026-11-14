@@ -1,5 +1,3 @@
-# SPDX-FileCopyrightText: Copyright 2026 GR2toXBOX contributors
-# SPDX-License-Identifier: GPL-2.0-or-later
 <#
 .SYNOPSIS
     Creates the ephemeral self-signed certificate that signs the Xbox Dev Mode
@@ -22,6 +20,8 @@
     because a private key in a public release would let anyone sign a package the
     user's console trusts.
 #>
+# SPDX-FileCopyrightText: Copyright 2026 GR2toXBOX contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
 param(
     [string]$Subject = "CN=GR2toXBOX Dev Mode",
     [string]$OutDir = "xbox-package/signing",

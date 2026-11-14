@@ -1,136 +1,232 @@
-<!--
-SPDX-FileCopyrightText: 2026 GR2port
-SPDX-License-Identifier: GPL-2.0-or-later
--->
-<h1 align="center">
-  <b>GR2port - a genuine native PC port for Gravity Rush 2</b>
-</h1>
+<div align="center">
 
-**No CPU emulation, no GPU emulation, no GPU command translation, no shader recompiler:** GR2port executes the x86-64 instructions in the Gravity Rush 2 game executable natively on PC. **The game's graphics were completely rewritten for PC** via a native Vulkan renderer (the game’s render passes have been rebuilt as its own Vulkan code) that runs **handwritten plus recompiled GLSL shaders** that recreate visuals produced by the original GCN shaders. 
-Each frame, GR2port takes the game's scene at the start of its frame graph and draws it on its own render thread, so it never builds or translates per-draw PS4 GPU commands. **The CPU overhead of the native renderer was measured as only 0.8ms in frame time**.<b>
-<b>
-**All shader pipelines are precompiled** at boot and stored on disk so there is no shader stutter during gameplay. A runtime translates the firmware libraries the game calls on the PS4's operating system into native PC operating system solutions (little to no performance overhead like WINE).
+# GR2toXBOX
 
-<img width="1904" height="1200" alt="ep03_5_12" src="https://github.com/user-attachments/assets/39858c3f-7500-4adb-ab9b-ecb0614aa6f8" /></b>
-Screenshot © Sony Interactive Entertainment LLC. Not covered by this project's GPL 2.0 license.
-</b>
+**A native Direct3D 12 and Xbox Series X|S (Dev Mode) port of *Gravity Rush 2*.**
 
-**Check out the following playlist if your dump is in .PKG format:**
-[https://www.youtube.com/watch?v=O8z6QPOaGDg&list=PLOgHncbXc__M&pp=sAgC](https://www.youtube.com/watch?v=rZ5jZToJVHE&list=PLOgHncbXc__M&index=9)
+No emulation. No CPU translation. The game's own x86-64 code running on the
+console's AMD Zen 2 cores, drawn by a ground-up Direct3D 12 renderer.
 
-**Join the GR2fork discord server** (new) here for extended support. Anyone who wants to lurk for general game discussion surrounding gravity rush 1 and 2 are also welcome -> https://discord.gg/hnHRpzxGzG
+[![Xbox UWP (MSIX) and Windows D3D12](https://github.com/youdedend/GR2TOXBOX/actions/workflows/build-xbox-uwp.yml/badge.svg?branch=main)](https://github.com/youdedend/GR2TOXBOX/actions/workflows/build-xbox-uwp.yml)
+[![Latest release](https://img.shields.io/github/v/release/youdedend/GR2TOXBOX?include_prereleases&color=e0a020&label=download)](https://github.com/youdedend/GR2TOXBOX/releases)
+[![License: GPL-2.0](https://img.shields.io/badge/license-GPL--2.0-blue.svg)](LICENSE)
+[![Target](https://img.shields.io/badge/target-Xbox%20Series%20X%7CS%20Dev%20Mode-107C10?logo=xbox&logoColor=white)](#)
+[![Renderer](https://img.shields.io/badge/renderer-Direct3D%2012%20%C2%B7%20SM%206.6-0078D4?logo=windows&logoColor=white)](#)
 
-**Support Me Here** for more features and projects in the Future: https://ko-fi.com/junminlee2004
+</div>
 
--------
-<img width="256" height="256" alt="20261025_030106_001" src="https://github.com/user-attachments/assets/5f28141c-570b-4010-9cd6-4ddb573217d6" /><img width="256" height="256![Uploading 20260525_051655_001.jpg…]()
-" alt="20261025_031040_001" src="https://github.com/user-attachments/assets/fb09aaee-6adb-415c-9206-d292dd9e8cb5" /><img width="256" height="256" alt="20260705_103536_001" src="https://github.com/user-attachments/assets/b2f5e6f9-75f1-4548-9c19-e61deb38d46f" /><br>
-Screenshots © Sony Interactive Entertainment LLC. Not covered by this project's GPL 2.0 license.
+---
 
-**System Requirements**
+## Overview
 
-| | 720p 60 (locked) LOW PRESET | 800p 60 (locked) STEAM DECK PRESET | 4K 60 (locked) PS4 ORIGINAL PRESET | 4K 120 (locked) PS4 ORIGINAL PRESET |
-|---|---|---|---|---|
-| CPU | intel i5 3470 | STEAM DECK | Ryzen 5 1600 | Ryzen 5 3600 |
-| GPU | GTX 1050 2 GB | STEAM DECK | RTX 3060 8 GB | RTX 3080 Ti 12 GB |
-| RAM | 8 GB | 16 GB | 12 GB | 12 GB |
-| Storage | HDD | SSD | HDD | HDD |
+GR2toXBOX takes [GR2port](https://github.com/junminlee2004/GR2port) — a native
+PC port of *Gravity Rush 2* descended from [shadPS4](https://github.com/shadps4-emu/shadPS4)
+— and makes it run on an **Xbox Series X|S in Retail Dev Mode**, packaged as a
+signed UWP `.msix` that GitHub Actions builds for you.
 
-> [!NOTE]
-> Upscaling is NOT considered for these fps targets but may be used to optionally improve fps further.
-> Currently, Windows and Linux are supported. MacOS release is planned.
+Three things had to change to make that possible.
 
-**Included Features for Gravity Rush 2**
-- Fully game region-agnostic (Asia, Europe, USA, Japan regions all supported); **update v1.11 is required**.
-- Launcher GUI contains all 31 console region languages.
-- Native mouse input (controls camera)
-- Fully bindable gamepad and keyboard bindings and button prompts
-- Fully customizable graphics presets
-- Steam Deck preset
-- Impeccable performance, graphical accuracy, and stability
-- 30-360fps supported
-- 544p-8k resolution supported
-- Ultrawide and 16:10 supported
-- Feature-complete online mode
-- Feature-complete photo mode, photo export, and in-game photo gallery
-- All GR2fork patches
-- GR2fork Halloween items
-- FSR 3.1 + FSR 4.1 support (Windows + Linux) + DLSS support (Windows Only)
-- Keyboard, XBOX, NINTENDO and STEAM (Steam Deck, Steam Controller) button prompts for GR2
+### 1. The CPU needs no help — the *memory* does
 
-<img width="789" height="523" alt="image" src="https://github.com/user-attachments/assets/38b3f128-b28f-4862-b502-2a0ce746af1e" /> <b>
+Both consoles use an **AMD Zen 2 x86-64** CPU, which natively executes the PS4's
+instruction set, including the AMD extensions Intel parts lack (`SSE4a`,
+`AVX2`, `BMI1/2`, `MOVBE`, `LZCNT`). There is no interpreter and no recompiler on
+the hot path: the guest's `.text` is loaded, relocated, patched and executed.
 
-<b>
-  
-> [!NOTE]
-> You can launch Gravity Rush 2 without the launcher by using the -nolauncher launch option.
+What the console does **not** allow is easy memory. An AppContainer forbids
+`PAGE_EXECUTE_READWRITE` outright. The port therefore implements **strict W^X**:
 
+```
+reserve PAGE_NOACCESS  →  commit PAGE_READWRITE  →  relocate + patch
+     →  FlushInstructionCache  →  seal PAGE_EXECUTE_READ
+```
 
+Every guest code page is executable **only** after it has been written and
+flushed, and a lazily patched instruction briefly drops execute permission while
+it is rewritten. See [`src/core/uwp_wx.cpp`](src/core/uwp_wx.cpp).
 
-# Keyboard and Mouse + Controller Mappings
+### 2. Xbox has no Vulkan driver
 
-| Button | Function |
-|-------------|-------------|
-F10 | FPS Counter
-Ctrl+F10 | Video Debug Info
-F11 | Fullscreen
+Upstream's renderer is Vulkan, all the way down — including its *shaders*, which
+pass raw 64-bit GPU pointers inside `buffer_reference` structs and index draws by
+`gl_BaseInstance`. None of that exists in HLSL.
 
-> [!NOTE]
-> Xbox and DualShock controllers work out of the box.
+So GR2toXBOX grows a second, native **Direct3D 12** backend
+([`src/graphics/gr2port_d3d12/`](src/graphics/gr2port_d3d12)) on Feature Level
+12_1 with Shader Model 6.6, and solves the two Vulkan-isms properly:
 
-## Controls
+| Upstream (Vulkan) | This port (D3D12) |
+| --- | --- |
+| `layout(buffer_reference)` + `uint64_t` GPU pointers | **Unified Bindless Arena**: one `ByteAddressBuffer`, pointers become `{ arena, uint32 offset }` |
+| `gl_BaseInstance` (no HLSL equivalent) | `uint base_instance` **root constant**, and inline in the `ExecuteIndirect` signature |
+| `vk::Pipeline` + dynamic state | 64-bit state-keyed **PSO cache** in `ID3D12PipelineLibrary1` |
+| Per-draw descriptor sets | SM 6.6 `ResourceDescriptorHeap[]` **bindless** table |
 
-The mouse turns the camera (native mouse input). Keys can be changed in the launcher under Setup > Mouse & Keyboard > Key Bindings, and controller buttons under Setup > Controller > Button Bindings.
+Because the whole guest GPU budget is under 4 GiB, a 32-bit offset addresses
+every byte losslessly — and is *faster* than the Vulkan path on GCN, which pays
+for 64-bit address arithmetic.
 
-| Game Function | Controller | Keyboard & Mouse |
-|---|---|---|
-| Move Forward | Left stick up | W |
-| Move Back | Left stick down | S |
-| Move Left | Left stick left | A |
-| Move Right | Left stick right | D |
-| Jump | Cross | Space |
-| Normal Attack | Square | Left Mouse Button |
-| Special Attack | Triangle | F |
-| Stasis Field (Grab) | Circle | R |
-| Shift Gravity | R1 | Right Mouse Button |
-| Return Gravity | L1 | Q |
-| Gravity Slide (Hold) | L2 | Left Shift |
-| Evade | See below | E |
-| Lunar Style | See below | Mouse Wheel Up |
-| Jupiter Style | See below | Mouse Wheel Down |
-| Normal Style | See below | Middle Mouse Button |
-| Panther Mode (Hold) | Hold the touch pad | C |
-| Reset Camera | R3 | None |
-| Enter Photo Mode | D-pad up | 1 |
-| Display the Map | D-pad right | 2 |
-| Initiate Gesture | D-pad down | 3 |
-| First-person View | D-pad left | 4 |
-| Pause | OPTIONS | Esc |
-| Zoom In (Photo Mode) | R2 | None |
-| Flick Up (Touch Pad) | Flick the touch pad up | None |
-| Flick Down (Touch Pad) | Flick the touch pad down | None |
-| Flick Left (Touch Pad) | Flick the touch pad left | Z |
-| Flick Right (Touch Pad) | Flick the touch pad right | X |
+### 3. The console has a hard 5,120 MiB pool
 
-### Controller buttons that depend on the control type (Options > Controls)
+Upstream sizes its guest backing at the PS4 Pro **devkit** figure, ≈8.25 GiB.
+Committing that inside an AppContainer fails immediately with
+`ERROR_COMMITMENT_LIMIT`. GR2toXBOX enforces a console budget
+([`src/core/uwp_memory.cpp`](src/core/uwp_memory.cpp)):
 
-Each key keeps its function in every type.
+| Allocation | Budget |
+| --- | --- |
+| Guest direct + flexible memory | **3,200 MiB** |
+| Direct3D 12 resource heap | **1,200 MiB**, LRU eviction at 80% / 90% |
+| Total process commit target | **< 4,600 MiB** of the 5,120 MiB pool |
 
-| Game Function | Type A | Type B | Type C | Type D | Type E |
-|---|---|---|---|---|---|
-| Evade | R2 | Flick the touch pad | Flick the touch pad | Flick the touch pad | Flick the touch pad |
-| Lunar Style | Flick the touch pad up | R2 until Lunar | R2 + left stick up | R2 + right stick up | R2 + triangle |
-| Jupiter Style | Flick the touch pad down | R2 until Jupiter | R2 + left stick down | R2 + right stick down | R2 + cross |
-| Normal Style | Tap the touch pad | R2 until Normal | R2 | R2 | R2 |
+The arithmetic is asserted by a dependency-free self-test that runs in CI.
 
 
+## Performance and preset matrix
 
-# Contributing
+| Platform | Preset | Resolution | Target | Notes |
+| --- | --- | --- | --- | --- |
+| **Xbox Series X** | Quality | 3840×2160 | **60 FPS** | Native 4K, 1,200 MiB heap |
+| **Xbox Series X** | Performance | 2560×1440 | **120 FPS** | VRR recommended |
+| **Xbox Series S** | Quality | 1920×1080 | **60 FPS** | Native 1080p |
+| **Xbox Series S** | Upscaled | 2560×1440 | **60 FPS** | FSR 3.1 from 1080p; 10 GiB-class GPU |
+| **Windows PC** | D3D12 | Any | Unbounded | Tests the same backend desktop CI builds |
+| **Windows PC** | Vulkan | Any | Unbounded | Upstream path, unchanged |
 
-If you want to contribute, please feel free to do so by reporting issues or submitting pull requests :)
-
-# Special Thanks
-
-- [**ShadPS4**](https://github.com/shadps4-emu/shadps4): An open source PS4 emulator written in C++. ShadPS4 along with my fork, GR2fork, provided the basic structure for this codebase, tooling necessary for research and development, and served as reference for this project's native execution of x64 code of PS4 binaries and graphical output.
+Frame-pacing work is the same as upstream (its vblank and frame-rate patches);
+the CPU cost of the port's own layers is a small fraction of a millisecond per
+frame and is not the bottleneck at these targets.
 
 
+## Quick start (Xbox)
+
+```
+1.  Dev Mode on  →  Xbox Device Portal at  https://<xbox-ip>:11443
+2.  Certificates  →  install   GR2port-XboxDevMode.cer
+3.  My games & apps  →  Add  →  GR2port-XboxSeriesXS-UWP_x64.msix
+4.  Change the app's type from "App" to "GAME"       ← mandatory, see below
+5.  Put your dump on a USB SSD at   E:\GR2\app0\eboot.bin
+6.  Launch, pick Series X / Series S, resolution and frame rate
+```
+
+> **Step 4 is not optional.** An Xbox title registered as an *App* gets roughly
+> 1 GB of memory; the game needs the ~5 GB *Game* pool. Left as App, the port
+> exits during boot with `ERROR_COMMITMENT_LIMIT`.
+
+Full walkthrough: **[docs/XBOX_DEV_MODE_GUIDE.md](docs/XBOX_DEV_MODE_GUIDE.md)** ·
+Nothing working? **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**
+
+
+## Controller mapping
+
+*Gravity Rush 2* uses the DualShock 4 touchpad (flicks, Panther) and its motion
+sensors. Xbox pads have neither, so the port turns them into chords:
+
+| Chord | Produces | Game action |
+| --- | --- | --- |
+| **View + LB** | `gr2_lunar_style` | Switch to Lunar style |
+| **View + RB** | `gr2_jupiter_style` | Switch to Jupiter style |
+| **View + B** | `gr2_normal_style` | Switch to Normal style |
+| **View + L3** *(hold)* | `touchpad_center` | Panther transform |
+| **View + Y** *(hold)* | motion tilt from right stick | Gravity slide / photo tilt |
+| **View + D-Pad Up/Down/Left/Right** | `touchpad_swipe_*` | Frisk flicks *(off by default)* |
+
+Flick chords start **disabled** because the D-Pad is the game's own photo-mode,
+map, gesture and first-person-view input. Enable them — and rebind any chord —
+in the launcher. Chords that borrow a button swallow it, so a chord never also
+opens a menu. Implementation: [`src/uwp/chords.cpp`](src/uwp/chords.cpp).
+
+
+## Building
+
+Everything the console package needs is built by GitHub Actions:
+the [`Xbox UWP (MSIX) and Windows D3D12`](.github/workflows/build-xbox-uwp.yml)
+workflow compiles the Direct3D 12 backend, compiles every HLSL shader with
+`dxc -T *_6_6 -HV 2021 -WX`, packs and signs the `.msix`, and publishes
+`GR2port-XboxSeriesXS-UWP.zip` (`.msix` + `.cer` + quick start).
+
+Locally, see **[docs/BUILDING_FROM_SOURCE.md](docs/BUILDING_FROM_SOURCE.md)**:
+
+```bash
+# Windows PC, Direct3D 12
+cmake -S . -B build -G Ninja -DGR2_RENDERER=D3D12 -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+
+# Xbox Series X|S UWP package
+cmake -S . -B build-uwp -G Ninja \
+      -DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION=10.0.22621.0 \
+      -DGR2_XBOX_UWP=ON -DGR2_RENDERER=D3D12
+cmake --build build-uwp --parallel
+```
+
+
+## Repository layout
+
+```
+src/core/uwp_wx.*            strict W^X code generation for the guest
+src/core/uwp_memory.*        5,120 MiB pool budgeting and clamping
+src/core/uwp_win_compat.h    AppContainer-safe memory/file API shims
+src/graphics/gr2port/        upstream's Vulkan renderer (still supported on PC)
+src/graphics/gr2port_d3d12/  the Direct3D 12 backend
+  ├── device.*               ID3D12Device8, flip-model swapchain (HWND + CoreWindow)
+  ├── allocator.*            D3D12MA + the 1,200 MiB budget and LRU eviction
+  ├── descriptors.*          SM 6.6 bindless heaps
+  ├── arena.*                Unified Bindless Arena (replaces buffer_reference)
+  └── shaders/               HLSL SM 6.6 sources + common arena/vertex/scene headers
+src/uwp/                     Xbox shell: manifest, chords, launcher
+cmake/GR2D3D12Shaders.cmake  offline dxc pipeline -> embedded DXIL headers
+uwp/                         Package.appxmanifest and MSIX visual assets
+docs/                        architecture, installation, build and troubleshooting
+tools/shaders/               shader-port coverage checker
+```
+
+Docs: [Implementation plan](docs/IMPLEMENTATION_PLAN.md) ·
+[D3D12/UWP architecture](docs/ARCHITECTURE_D3D12_UWP.md) ·
+[Port status](docs/PORT_STATUS.md)
+
+
+## Project status
+
+This is a **work in progress**, tracked honestly in
+**[docs/PORT_STATUS.md](docs/PORT_STATUS.md)**. The infrastructure (W^X loader,
+memory budgeting, D3D12 device/allocator/arena layer, SM 6.6 shader pipeline,
+UWP manifest, CI packaging, controller chords) is in place and tested. The
+remaining work is the long tail this project is honest about: porting the
+renderer's frame graph and the ~184 shaders from GLSL to HLSL SM 6.6. The
+coverage checker, `python3 tools/shaders/check_shader_coverage.py`, prints the
+current number at any time.
+
+**No prebuilt binary in this repository can play the game yet, and the release
+artifacts say so.** What CI proves today is that the console toolchain, the
+Direct3D 12 device layer, the W^X loader and the memory budget all build and pass
+their tests.
+
+
+## Legal
+
+GR2toXBOX is an **unofficial, non-commercial compatibility project**. It ships
+**no game data** — no `eboot.bin`, no `.pkg`, no `.zar`, no `.prx`, no
+copyrighted assets. A `.gitignore` guardrail and a CI check
+([`tools/ci/check_no_game_data.sh`](tools/ci/check_no_game_data.sh)) make that
+structural, not a promise.
+
+You must own *Gravity Rush 2* and dump your own copy (v1.11) to use this. It is
+not affiliated with, endorsed by, or supported by Sony Interactive
+Entertainment, Japan Studio, or Microsoft. Xbox, Xbox Series X|S and DirectX are
+trademarks of Microsoft; PlayStation and Gravity Rush are trademarks of Sony.
+Respect your local law.
+
+## Credits and license
+
+GPL-2.0-or-later. See [LICENSE](LICENSE), [LICENSES/](LICENSES/) and
+[REUSE.toml](REUSE.toml).
+
+* **[GR2port](https://github.com/junminlee2004/GR2port)** — the port this
+  project builds on. Its emulator core, Gravity Rush 2 hooks, scene capture and
+  Vulkan renderer are the foundation of everything here.
+* **[shadPS4](https://github.com/shadps4-emu/shadPS4)** — the PS4 emulator whose
+  core GR2port descends from.
+* **[D3D12MemoryAllocator](https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator)**
+  — MIT, vendored at v3.0.1 (see `src/graphics/gr2port_d3d12/d3d12ma`).
+* **[DirectXShaderCompiler](https://github.com/microsoft/DirectXShaderCompiler)**
+  — used at build time, not distributed.

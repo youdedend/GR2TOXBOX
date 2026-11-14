@@ -1,0 +1,66 @@
+name: Shader visual issue
+description: Something on screen looks wrong — missing, flickering, miscoloured or exploded geometry.
+title: "[Shader] "
+labels: ["shader", "graphics"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The Direct3D 12 renderer is a port of ~184 GLSL shaders to HLSL SM 6.6, tracked
+        one stage at a time. `python3 tools/shaders/check_shader_coverage.py --missing`
+        lists what is still outstanding — if your problem is a known-unported stage it
+        may already be in progress.
+
+  - type: input
+    id: stage
+    attributes:
+      label: Suspected shader or stage (if you know)
+      description: Leave blank if unknown — a screenshot usually identifies it.
+      placeholder: "e.g. contour.geom, leaf.tesc/tese, character skinning"
+
+  - type: input
+    id: where
+    attributes:
+      label: Where in the game
+      placeholder: "e.g. Auldnoir plaza, third chapter cutscene, photomode"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: preset
+    attributes:
+      label: Preset
+      options:
+        - Series X — 4K 60
+        - Series X — 1440p 120
+        - Series S — 1080p 60
+        - Series S — 1440p 60 (FSR)
+        - PC — Direct3D 12 build
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What is wrong
+      value: |
+        What you see:
+        What it should look like:
+        Always, or intermittent?
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: Drag an image in. Screenshots of gameplay are fine to attach to an issue; they must never be committed to the repository.
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: log.txt
+      description: From the app's LocalState folder. The D3D12 lines show shader compilation and arena state.
+      render: text

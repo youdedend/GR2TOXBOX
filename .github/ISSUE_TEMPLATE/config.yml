@@ -1,10 +1,8 @@
-# SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-# SPDX-License-Identifier: GPL-2.0-or-later
 blank_issues_enabled: false
 contact_links:
-  - name: Discord
-    url: https://discord.gg/bFJxfftGW6
-    about: Get direct support and hang out with us
-  - name: Wiki
-    url: https://github.com/shadps4-emu/shadPS4/wiki
-    about: Information, guides, etc.
+  - name: Installation and setup questions
+    url: https://github.com/youdedend/GR2TOXBOX/blob/main/docs/XBOX_DEV_MODE_GUIDE.md
+    about: Dev Mode activation, certificates, the App→Game memory switch and dump prep.
+  - name: Something is not working
+    url: https://github.com/youdedend/GR2TOXBOX/blob/main/docs/TROUBLESHOOTING.md
+    about: Start here — install errors, black screens, stutter and controller chords.

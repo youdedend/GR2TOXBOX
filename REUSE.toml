@@ -99,3 +99,15 @@ SPDX-License-Identifier = "MIT"
 path = "cmake/CMakeRC.cmake"
 SPDX-FileCopyrightText = "Copyright (c) 2017 vector-of-bool <vectorofbool@gmail.com>"
 SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = "docs/QUICKSTART-XBOX.txt"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright 2026 GR2toXBOX contributors"
+SPDX-License-Identifier = "GPL-2.0-or-later"
+
+[[annotations]]
+path = ["uwp/Assets/*.png", "uwp/Package.appxmanifest"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright 2026 GR2toXBOX contributors"
+SPDX-License-Identifier = "GPL-2.0-or-later"
