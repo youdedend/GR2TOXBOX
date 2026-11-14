@@ -4,6 +4,11 @@
 #include <algorithm>
 #include <cmath>
 #include <mutex>
+// Spelled out rather than relied on transitively: <mutex> happens to pull in
+// <string> with libstdc++ but not with every standard library, and that is a
+// clang-only build failure that gcc will never show you.
+#include <string>
+#include <string_view>
 
 #include "common/logging/log.h"
 #include "uwp/chords.h"

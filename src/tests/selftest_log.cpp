@@ -17,6 +17,7 @@
 /// the array directly, and `CapturedMessages()` returns what would have been
 /// logged.
 
+#include <array>
 #include <cstdio>
 #include <string>
 #include <vector>
