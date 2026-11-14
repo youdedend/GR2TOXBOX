@@ -76,8 +76,9 @@ static u64 BackingSize = [] {
     if (Core::Xbox::IsXboxUwpBuild()) {
         // The base figure the clamp in MemoryManager::SetupMemoryRegions()
         // produces at most: guest direct memory plus the flexible pool.
-        return Core::Xbox::GuestMemoryCeilingBytes +
-               ::Libraries::Kernel::ORBIS_KERNEL_FLEXIBLE_MEMORY_BASE;
+        // ORBIS_KERNEL_FLEXIBLE_MEMORY_BASE is a global constant in
+        // core/libraries/kernel/memory.h, not a member of Libraries::Kernel.
+        return Core::Xbox::GuestMemoryCeilingBytes + ORBIS_KERNEL_FLEXIBLE_MEMORY_BASE;
     }
     return ORBIS_KERNEL_TOTAL_MEM_DEV_PRO + ORBIS_KERNEL_FLEXIBLE_MEMORY_SIZE;
 }();
