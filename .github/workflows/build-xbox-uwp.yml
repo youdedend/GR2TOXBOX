@@ -270,17 +270,24 @@ jobs:
         shell: pwsh
         run: |
           # The UWP package cannot run its own tests, so the budget self-test is
-          # compiled for the host first. A regression here would show up as an
-          # ERROR_COMMITMENT_LIMIT on a console, which is expensive to chase.
+          # compiled and run for the host first. A regression here would show up
+          # as an ERROR_COMMITMENT_LIMIT on a console, which is expensive to
+          # chase. Compiling with GR2_XBOX_UWP defined means IsXboxUwpBuild() is
+          # true here, so the clamp assertions -- not just the constants -- run.
+          #
+          # This step needs the fmt include path: the unit logs through
+          # common/logging/log.h, and a bare `cl` has no CMake target to inherit it
+          # from. It does *not* need C++/WinRT: uwp_memory.cpp probes the device
+          # family and pool limit behind __has_include, and the budget arithmetic
+          # is identical without the projections.
           New-Item -ItemType Directory -Force -Path test-host | Out-Null
-          cl /nologo /std:c++20 /EHsc /I src /DGR2_XBOX_BUDGET_SELFTEST /DGR2_XBOX_UWP `
-             src/tests/xbox_memory_budget_test.cpp src/core/uwp_memory.cpp `
-             /Fe:test-host/budget.exe
+          cl /nologo /std:c++20 /EHsc /W4 /I src /I externals/fmt/include `
+             /DGR2_XBOX_BUDGET_SELFTEST /DGR2_XBOX_UWP /DFMT_HEADER_ONLY `
+             src/tests/xbox_memory_budget_test.cpp src/tests/selftest_log.cpp `
+             src/core/uwp_memory.cpp /Fe:test-host/budget.exe
           if ($LASTEXITCODE -ne 0) { Write-Error "The UWP budget self-test failed to compile." }
-          # GR2_XBOX_UWP in the test build pulls WinRT; run the desktop-mode test
-          # binary instead for the executable check and rely on the compiled-in
-          # constants for the console path (also asserted by ctest on Job 1).
-          Write-Host "Budget self-test compiled for the UWP configuration."
+          ./test-host/budget.exe
+          if ($LASTEXITCODE -ne 0) { Write-Error "The UWP budget self-test reported failures." }
 
       - name: Configure (WindowsStore / UWP)
         shell: pwsh

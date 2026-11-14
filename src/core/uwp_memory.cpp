@@ -7,10 +7,20 @@
 #include "core/uwp_memory.h"
 
 #if defined(GR2_XBOX_UWP)
-// C++/WinRT headers are only pulled in for the UWP package; the desktop build
-// must not depend on them.
-#include <winrt/Windows.System.h>
 #include <windows.h>
+// The runtime probes below go through C++/WinRT. The projections are not part of
+// every toolchain's default include path -- a plain `cl` invocation outside the
+// CMake build has neither the NuGet package nor the SDK's cppwinrt folder -- so
+// they are used when the toolchain can see them and skipped otherwise. What they
+// feed (the device family, the pool limit, the current usage) is diagnostic: the
+// budget clamp itself is compile-time arithmetic and behaves identically either
+// way, which is why the CI host build can assert it without the projections.
+#if __has_include(<winrt/Windows.System.h>)
+#include <winrt/Windows.System.h>
+#define GR2_HAS_WINRT_SYSTEM 1
+#else
+#define GR2_HAS_WINRT_SYSTEM 0
+#endif
 #elif defined(_WIN32)
 #include <windows.h>
 #include <psapi.h>
@@ -40,7 +50,7 @@ bool IsRunningOnConsole() noexcept {
     if (g_console_probed.load(std::memory_order_acquire)) {
         return g_console_detected.load(std::memory_order_relaxed);
     }
-#if defined(GR2_XBOX_UWP)
+#if GR2_HAS_WINRT_SYSTEM
     bool detected = false;
     try {
         // The Xbox device family string is the only reliable way to tell a
@@ -55,6 +65,11 @@ bool IsRunningOnConsole() noexcept {
         // the console package.
         detected = true;
     }
+#elif defined(GR2_XBOX_UWP)
+    // Built for the console, but this toolchain cannot query the device family.
+    // GR2_XBOX_UWP is only defined for the console package, so the answer is the
+    // compile-time one.
+    constexpr bool detected = true;
 #else
     constexpr bool detected = false;
 #endif
@@ -64,7 +79,7 @@ bool IsRunningOnConsole() noexcept {
 }
 
 u64 AppMemoryUsageLimit() noexcept {
-#if defined(GR2_XBOX_UWP)
+#if GR2_HAS_WINRT_SYSTEM
     try {
         return winrt::Windows::System::MemoryManager::AppMemoryUsageLimit();
     } catch (...) {
@@ -86,7 +101,7 @@ u64 AppMemoryUsageLimit() noexcept {
 }
 
 u64 AppMemoryUsage() noexcept {
-#if defined(GR2_XBOX_UWP)
+#if GR2_HAS_WINRT_SYSTEM
     try {
         return winrt::Windows::System::MemoryManager::AppMemoryUsage();
     } catch (...) {

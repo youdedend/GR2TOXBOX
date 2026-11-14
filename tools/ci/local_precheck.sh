@@ -72,6 +72,19 @@ for entry in "${UNITS[@]}"; do
     fi
 done
 
+# The console-only branches. Same translation unit, GR2_XBOX_UWP defined, with an
+# empty <windows.h> stub on the include path so the Win32 includes resolve. This
+# is the check that would have caught the UWP job's host build needing the fmt
+# include path and C++/WinRT, before a Windows runner was spent on it.
+if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/stubs -DGR2_XBOX_UWP=1 -DFMT_HEADER_ONLY \
+        -fsyntax-only src/core/uwp_memory.cpp 2>"$OUT/err"; then
+    echo "  FAIL src/core/uwp_memory.cpp (GR2_XBOX_UWP)"
+    sed 's/^/    /' "$OUT/err" | head -30
+    failures=$((failures + 1))
+else
+    echo "  ok   src/core/uwp_memory.cpp (GR2_XBOX_UWP)"
+fi
+
 if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
     echo "local_precheck: building and running the self-tests"
     for pair in "xbox_chords_test:chords:GR2_CHORDS_SELFTEST" \
