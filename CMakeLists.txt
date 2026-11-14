@@ -1288,11 +1288,21 @@ if (WIN32)
     # Core::AddressSpace reserves its guest ranges by querying for free memory
     # (VirtualQuery + VirtualAlloc2FromApp) rather than assuming an address.
     #
-    # Desktop keeps the upstream behaviour, which its allocator depends on.
-    # -----------------------------------------------------------------------
-    if (GR2_XBOX_UWP OR GR2_RENDERER STREQUAL "D3D12")
+    # The Vulkan build keeps the upstream behaviour, which its allocator
+    # depends on.
+    #
+    # /APPCONTAINER is only correct for the packaged build: it marks the image as
+    # requiring an app container, and a desktop .exe launched normally would be
+    # refused by the loader. The desktop D3D12 build therefore keeps DYNAMICBASE
+    # and high-entropy VA (which it wants anyway, since it no longer has a fixed
+    # base) but not the container flag.
+    if (GR2_XBOX_UWP)
         if (MSVC)
             target_link_options(gr2port PRIVATE /DYNAMICBASE /HIGHENTROPYVA /APPCONTAINER)
+        endif()
+    elseif (GR2_RENDERER STREQUAL "D3D12")
+        if (MSVC)
+            target_link_options(gr2port PRIVATE /DYNAMICBASE /HIGHENTROPYVA)
         endif()
     else()
         # Disable ASLR so we can reserve the user area

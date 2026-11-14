@@ -75,7 +75,18 @@ endfunction()
 
 # Maps an HLSL file's extension to its dxc profile suffix.
 function(gr2_hlsl_stage filename out_stage out_suffix)
-    get_filename_component(ext "${filename}" EXT)
+    # Sources are named after the GLSL stage they replace and carry an .hlsl
+    # suffix: world.vert.hlsl, ui_text.geom.hlsl, leaf.tesc.hlsl. The trailing
+    # .hlsl must be stripped before the stage can be read, or every file looks
+    # like an unknown ".hlsl" stage.
+    string(TOLOWER "${filename}" lower_name)
+    if (lower_name MATCHES "\\.hlsl$")
+        # world.vert.hlsl -> world.vert -> ".vert"
+        string(REGEX REPLACE "\\.hlsl$" "" staged "${filename}")
+    else()
+        set(staged "${filename}")
+    endif()
+    get_filename_component(ext "${staged}" EXT)
     string(TOLOWER "${ext}" ext)
     if (ext STREQUAL ".vert")
         set(stage "vs")
@@ -98,8 +109,9 @@ function(gr2_hlsl_stage filename out_stage out_suffix)
     else()
         message(FATAL_ERROR
             "gr2port_add_hlsl_shader: '${filename}' has no stage. "
-            "Use .vert/.frag/.comp/.geom/.hull/.dom (or .tesc/.tese), "
-            "which map to HLSL vs/ps/cs/gs/hs/ds.")
+            "Name the file after the GLSL stage it replaces, with an .hlsl "
+            "suffix: world.vert.hlsl, ui_text.geom.hlsl, leaf.tesc.hlsl. "
+            "The stage maps to HLSL vs/ps/cs/gs/hs/ds.")
     endif()
     set(${out_stage} "${stage}" PARENT_SCOPE)
     # DXR / mesh shaders are 6.3+; everything else is 6.6.
@@ -202,6 +214,11 @@ function(gr2port_d3d12_configure_shaders target)
             "proceed without it.")
     endif()
     message(STATUS "GR2toXBOX: using dxc at ${GR2_DXC_EXECUTABLE}")
+    # Propagate the resolved path to the caller's scope: gr2port_add_hlsl_shader
+    # reads it when it builds the custom command, and if dxc was found by the
+    # search below (not passed with -D) a function-scope-only value would leave
+    # that command with an empty program name.
+    set(GR2_DXC_EXECUTABLE "${GR2_DXC_EXECUTABLE}" PARENT_SCOPE)
 
     set(GR2_D3D12_SHADER_DIR "${PROJECT_SOURCE_DIR}/src/graphics/gr2port_d3d12/shaders"
         PARENT_SCOPE)
