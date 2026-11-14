@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <atomic>
+#include <fmt/format.h> // fmt::ptr; log.h only pulls in <fmt/base.h>
 #include "common/error.h"
 #include "common/logging/log.h"
 #include "core/uwp_wx.h"

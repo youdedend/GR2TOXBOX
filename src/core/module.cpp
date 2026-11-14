@@ -6,6 +6,7 @@
 #include "common/alignment.h"
 #include "common/arch.h"
 #include "common/assert.h"
+#include "common/error.h" // Common::GetLastErrorMsg, used by the W^X seal failure path
 #include "common/logging/log.h"
 #include "common/memory_patcher.h"
 #include "common/sha1.h"
