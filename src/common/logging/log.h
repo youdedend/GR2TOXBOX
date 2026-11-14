@@ -6,6 +6,8 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
+#include <vector>
 #include <fmt/base.h>
 
 #include "common/logging/classes.h"
@@ -38,6 +40,15 @@ void UpdateLogFlushLevel(std::string_view log_flush_level);
 
 void VLog(Class log_class, Level level, const char* file, int line, const char* func,
           fmt::string_view format, fmt::format_args args);
+
+#if defined(GR2_XBOX_BUDGET_SELFTEST) || defined(GR2_CHORDS_SELFTEST)
+// The self-tests link src/tests/selftest_log.cpp instead of the real log.cpp,
+// which would pull in the file sinks, the emulator settings singleton and path
+// handling just to print a line. These accessors let a test assert on a message.
+// Declared in this header so the test back end and the tests cannot drift.
+const std::vector<std::string>& CapturedMessages();
+void ClearCapturedMessages();
+#endif
 
 template <typename... Args>
 void Log(Class log_class, Level level, const char* file, int line, const char* func,

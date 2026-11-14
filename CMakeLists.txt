@@ -1420,6 +1420,7 @@ endif()
 # ---------------------------------------------------------------------------
 add_executable(xbox_memory_budget_selftest
     src/tests/xbox_memory_budget_test.cpp
+    src/tests/selftest_log.cpp
     src/core/uwp_memory.cpp
 )
 target_include_directories(xbox_memory_budget_selftest PRIVATE
@@ -1428,10 +1429,13 @@ target_include_directories(xbox_memory_budget_selftest PRIVATE
 target_compile_definitions(xbox_memory_budget_selftest PRIVATE GR2_XBOX_BUDGET_SELFTEST)
 # src/core/uwp_memory.cpp reaches the logger, which is spdlog+fmt based. The
 # tests are "dependency-free" in the sense that they need no test framework, not
-# that they need no includes: link the same interface target every other consumer
-# of common/logging/log.h gets, rather than relying on a transitive accident.
+# that they need no includes: link fmt and the same spdlog interface target every
+# other consumer of common/logging/log.h gets, rather than relying on a
+# transitive accident. src/tests/selftest_log.cpp supplies the two symbols
+# log.h requires (g_class_levels, VLog) without dragging in the file sinks and
+# the emulator settings singleton that the real log.cpp needs.
 if (TARGET spdlog)
-    target_link_libraries(xbox_memory_budget_selftest PRIVATE spdlog::spdlog)
+    target_link_libraries(xbox_memory_budget_selftest PRIVATE spdlog::spdlog fmt::fmt)
 endif()
 if (GR2_XBOX_UWP)
     target_compile_definitions(xbox_memory_budget_selftest PRIVATE GR2_XBOX_UWP)
@@ -1439,6 +1443,7 @@ endif()
 
 add_executable(xbox_chords_selftest
     src/tests/xbox_chords_test.cpp
+    src/tests/selftest_log.cpp
     src/uwp/chords.cpp
 )
 target_include_directories(xbox_chords_selftest PRIVATE
@@ -1446,7 +1451,7 @@ target_include_directories(xbox_chords_selftest PRIVATE
 )
 target_compile_definitions(xbox_chords_selftest PRIVATE GR2_CHORDS_SELFTEST)
 if (TARGET spdlog)
-    target_link_libraries(xbox_chords_selftest PRIVATE spdlog::spdlog)
+    target_link_libraries(xbox_chords_selftest PRIVATE spdlog::spdlog fmt::fmt)
 endif()
 
 include(CTest)

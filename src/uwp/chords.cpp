@@ -139,7 +139,7 @@ void Apply(const Bindings& bindings) {
     std::scoped_lock lock{g_mutex};
     g_bindings = bindings;
     g_initialised = true;
-    LOG_INFO(Input, "Xbox chords applied: %u of %u enabled",
+    LOG_INFO(Input, "Xbox chords applied: {} of {} enabled",
              static_cast<u32>(std::count_if(bindings.chords.begin(), bindings.chords.end(),
                                             [](const Binding& b) { return b.enabled; })),
              static_cast<u32>(Chord::Count));
