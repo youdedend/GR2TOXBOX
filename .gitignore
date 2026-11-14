@@ -421,3 +421,99 @@ cmake-build-*
 
 # Nix Result symlink
 result
+
+# =====================================================================================
+# GR2toXBOX: copyright and build-artifact guardrails
+#
+# This repository contains SOURCE CODE ONLY. It never carries Sony/PS4 game data.
+# The patterns below make it impossible to commit a game dump, a decryption key
+# material dumper or an Xbox/Windows package output by accident.
+# =====================================================================================
+
+# --- PS4 / PS5 game data: copyrighted, never committed -------------------------------
+*.pkg
+*.PKG
+*.zar
+*.ZAR
+*.ffpkg
+*.prx
+*.sprx
+*.prx.bin
+*.sprx.bin
+*.self
+*.sfo
+*.pfs
+*.gp4
+eboot.bin
+EBOOT.BIN
+eboot.elf
+*.pup
+*.pkgs
+sce_sys/
+sce_module/
+sce_discmap.plt
+sce_discmap.iso
+# Gravity Rush 2 assets that could be extracted next to the executable
+/app0/
+# Local game dumps used for testing
+/game/
+/gamedata/
+/games/
+GR2/
+GravityRush2/
+
+# --- Xbox / MSIX packaging output ----------------------------------------------------
+AppPackages/
+*.msix
+*.msixbundle
+*.msixupload
+*.appx
+*.appxupload
+BundleArtifacts/
+Package.StoreAssociation.xml
+_pkginfo.txt
+*.cer
+*.pfx
+*.pvk
+*.spc
+priconfig.pri
+resources.pri
+*.pri
+# Generated UWP packaging staging area
+uwp/staging/
+uwp/Generated Files/
+uwp/bin/
+uwp/obj/
+xbox-package/
+
+# --- Shader build output -------------------------------------------------------------
+# HLSL shaders are compiled at build time by dxc; the binaries are never committed.
+*.dxil
+*.dxco
+*.cso
+*.dxbc
+*.pdb.dxc
+# Generated embedded-shader headers
+/generated/
+*_dxil.h
+shader_manifest.json
+
+# --- Build trees ---------------------------------------------------------------------
+build*/
+Build*/
+out/
+Output/
+cmake-build-*/
+/build-uwp/
+/build-win64/
+/.cmake/
+CMakeFiles/
+CMakeCache.txt
+*.ninja
+.ninja_deps
+.ninja_log
+
+# --- Certificates and signing material: never commit --------------------------------
+*.snk
+signing/
+secrets/
