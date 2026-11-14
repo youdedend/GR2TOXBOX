@@ -216,6 +216,8 @@ std::string_view NameOf(Class log_class) {
         return "Render";
     case Class::Render_Vulkan:
         return "Render.Vulkan";
+    case Class::Graphics:
+        return "Graphics";
     case Class::Render_Recompiler:
         return "Render.Recompiler";
     case Class::Render_Skipcache:

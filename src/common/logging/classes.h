@@ -117,6 +117,7 @@ enum class Class {
     NpHandler,               ///< NpHandler shadNet manager
     Render,                  ///< Video Core
     Render_Vulkan,           ///< Vulkan backend
+    Graphics,                ///< Direct3D 12 backend and the UWP render shell
     Render_Recompiler,       ///< Shader recompiler
     Render_Skipcache,        ///< Adaptive skip caches
     ShadNet,                 ///< shadNet binary protocol client
