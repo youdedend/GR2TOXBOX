@@ -34,19 +34,37 @@ void ResolveCaps(IDXGIAdapter4* adapter, ID3D12Device8* device, bool tearing, Ca
     if (SUCCEEDED(adapter->GetDesc3(&desc))) {
         caps.description = desc.Description;
         caps.dedicated_vram = desc.DedicatedVideoMemory;
-        caps.vrr = (desc.Flags & DXGI_ADAPTER_FLAG3_SUPPORT_MONITORED_FLIPS) != 0;
+        // There is no monitored-flips flag in DXGI_ADAPTER_FLAG3. Variable
+        // refresh rate is a swapchain concern: it is supported when the factory
+        // reports tearing support, which is what
+        // IDXGIFactory5::CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING)
+        // answers and what `tearing` already carries.
+        caps.vrr = tearing;
     }
 
-    caps.feature_level = device->GetFeatureLevel();
+    // GetFeatureLevel is ID3D12Device's. Query it rather than assume the derived
+    // interface inherits it through the ComPtr's operator->.
+    ComPtr<ID3D12Device> base_device;
+    if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&base_device)))) {
+        caps.feature_level = base_device->GetFeatureLevel();
+    }
     caps.tearing = tearing;
     caps.device8 = true;
 
-    // Shader model: D3D12_FEATURE_D3D12_OPTIONS4 reports the highest model the
-    // device compiles, which is what the offline dxc target must match.
+    // Shader model: D3D12_FEATURE_DATA_D3D12_OPTIONS4 carries Native16BitShaderOps
+    // (SM 6.2) and Int64ShaderOps / Int16ShaderOps, but it does NOT report a
+    // shader model version -- there is no ShaderModel member and no
+    // "what model does this device support" query, because a D3D12 device supports
+    // every SM the runtime can compile. SM 6.6 is therefore a property of the
+    // build (dxc was given -T *_6_6) rather than of the device, and what has to be
+    // checked at runtime is the features the SM 6.6 shaders depend on.
+    //
+    // ResourceDescriptorHeap[] needs resource binding tier 3, checked below.
     D3D12_FEATURE_DATA_D3D12_OPTIONS4 options4{};
     if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS4, &options4,
                                               sizeof(options4)))) {
-        caps.shader_model_6_6 = options4.ShaderModel >= D3D_SHADER_MODEL_6_6;
+        // 16-bit ops are what the half-precision path in the shaders uses.
+        caps.shader_model_6_6 = options4.Native16BitShaderOpsSupported != FALSE;
     } else {
         caps.shader_model_6_6 = false;
     }
@@ -224,7 +242,9 @@ bool CreateDevice(const DeviceDesc& desc, Device& out) {
                      HresultToString(hr));
         return false;
     }
-    const D3D_FEATURE_LEVEL chosen_level = out.device->GetFeatureLevel();
+    ComPtr<ID3D12Device> base_device;
+    out.device->QueryInterface(IID_PPV_ARGS(&base_device));
+    const D3D_FEATURE_LEVEL chosen_level = base_device->GetFeatureLevel();
     if (chosen_level < D3D_FEATURE_LEVEL_12_1) {
         LOG_CRITICAL(Graphics, "D3D12: device reports feature level {:#x}, 12_1 is required",
                      static_cast<u32>(chosen_level));

@@ -121,6 +121,15 @@ public:
     [[nodiscard]] explicit operator bool() const noexcept {
         return resource_ != nullptr;
     }
+    /// Comparisons against nullptr, so a caller can write the emptiness test the
+    /// way it reads at the call site.
+    friend bool operator==(const ResourcePtr& ptr, std::nullptr_t) noexcept {
+        return ptr.resource_ == nullptr;
+    }
+    friend bool operator!=(const ResourcePtr& ptr, std::nullptr_t) noexcept {
+        return ptr.resource_ != nullptr;
+    }
+
     /// The bytes this resource holds, for the allocator's statistics.
     [[nodiscard]] u64 Bytes() const noexcept {
         return bytes_;
