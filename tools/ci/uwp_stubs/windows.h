@@ -22,7 +22,9 @@ constexpr LONG EXCEPTION_CONTINUE_SEARCH=0;
 constexpr DWORD UNW_FLAG_NHANDLER=0, CP_UTF8=65001;
 struct IMAGE_DOS_HEADER { std::int32_t e_lfanew; };
 struct IMAGE_NT_HEADERS64 { struct { DWORD SizeOfImage; } OptionalHeader; };
+#if !defined(GR2_XBOX_UWP)
 BOOL SetThreadStackGuarantee(ULONG*);
+#endif
 struct CREATEFILE2_EXTENDED_PARAMETERS {
  DWORD dwSize, dwFileAttributes, dwFileFlags, dwSecurityQosFlags;
  void* lpSecurityAttributes; HANDLE hTemplateFile;
@@ -45,7 +47,9 @@ DWORD GetLastError();
 DWORD GetCurrentThreadId();
 ULONGLONG GetTickCount64();
 DWORD GetEnvironmentVariableW(const wchar_t*,wchar_t*,DWORD);
+#if !defined(GR2_XBOX_UWP)
 PVOID AddVectoredExceptionHandler(unsigned long, LONG(CALLBACK*)(EXCEPTION_POINTERS*));
+#endif
 RUNTIME_FUNCTION* RtlLookupFunctionEntry(DWORD64,DWORD64*,void*);
 void* RtlVirtualUnwind(DWORD,DWORD64,DWORD64,RUNTIME_FUNCTION*,CONTEXT*,void**,DWORD64*,void*);
 int WideCharToMultiByte(unsigned,DWORD,const wchar_t*,int,char*,int,const char*,BOOL*);

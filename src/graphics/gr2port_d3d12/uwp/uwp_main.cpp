@@ -87,7 +87,9 @@ public:
         // RunGame blocks for the whole session: it drives the frame loop and
         // returns when the game exits or the window closes, at which point the
         // app model tears the view down through Uninitialize.
-        Gr2Port::Uwp::RunGame(winrt::get_abi(window_));
+        Gr2Port::Blackbox::RunGuarded([](void* window) {
+            Gr2Port::Uwp::RunGame(window);
+        }, winrt::get_abi(window_));
     }
 
     void Uninitialize() {
@@ -133,7 +135,9 @@ int __stdcall wWinMain(void* /*hInstance*/, void* /*hPrevInstance*/,
     Gr2Port::Blackbox::RecordGuestArena(reinterpret_cast<void*>(Core::Xbox::EarlyGuestBase),
                                       Core::Xbox::EarlyGuestBytes, reserved);
     if (!reserved) return 1;
-    winrt::Windows::ApplicationModel::Core::CoreApplication::Run(GameViewSource{});
+    Gr2Port::Blackbox::RunGuarded([](void*) {
+        winrt::Windows::ApplicationModel::Core::CoreApplication::Run(GameViewSource{});
+    }, nullptr);
     return 0;
 }
 

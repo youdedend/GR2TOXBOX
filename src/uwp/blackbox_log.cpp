@@ -137,14 +137,20 @@ const char* ExceptionName(DWORD code) noexcept {
     default: return nullptr;
     }
 }
-// VEH is first-chance: records diagnostic candidates, never swallows exceptions
-// or claims that an exception was unhandled. Intentional guest faults can resume.
+// Desktop VEH is first-chance; UWP calls this as an SEH filter at explicit
+// boundaries. Always continue search: never swallow or relabel recoverable faults.
 LONG CALLBACK OnException(EXCEPTION_POINTERS* info) noexcept {
     const auto* record = info->ExceptionRecord;
     const char* name = ExceptionName(record->ExceptionCode);
     if (!name || crashing.test_and_set(std::memory_order_acquire)) return EXCEPTION_CONTINUE_SEARCH;
     const auto module = reinterpret_cast<std::uint64_t>(&__ImageBase);
-    Line head; head.Text("FIRST_CHANCE "); head.Text(name); head.Text(" code="); head.Hex(record->ExceptionCode);
+    Line head;
+#if defined(GR2_XBOX_UWP)
+    head.Text("SEH_BOUNDARY ");
+#else
+    head.Text("FIRST_CHANCE ");
+#endif
+     head.Text(name); head.Text(" code="); head.Hex(record->ExceptionCode);
     head.Text(" thread="); head.Dec(GetCurrentThreadId()); head.Text(" module_base="); head.Hex(module);
     head.Text(" rip="); head.Hex(info->ContextRecord->Rip);
     if (info->ContextRecord->Rip >= module && info->ContextRecord->Rip - module < module_size) {
@@ -205,6 +211,18 @@ class Sink final : public spdlog::sinks::base_sink<std::mutex> {
     void flush_() override { Write("", 0, true); }
 };
 }
+void RunGuarded(void (*callback)(void*), void* context) {
+#if defined(_MSC_VER) && defined(GR2_XBOX_UWP)
+    // This function deliberately has no objects needing C++ unwinding (C2712).
+    __try {
+        callback(context);
+    } __except (OnException(GetExceptionInformation())) {
+        // OnException always returns EXCEPTION_CONTINUE_SEARCH.
+    }
+#else
+    callback(context);
+#endif
+}
 void Initialize() noexcept {
     try { std::call_once(initialized, [] {
         start_tick = GetTickCount64();
@@ -226,9 +244,13 @@ void Initialize() noexcept {
         const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
             reinterpret_cast<const char*>(&__ImageBase) + __ImageBase.e_lfanew);
         module_size = nt->OptionalHeader.SizeOfImage;
+#if !defined(GR2_XBOX_UWP)
         ULONG guarantee = 32 * 1024;
         SetThreadStackGuarantee(&guarantee);
         AddVectoredExceptionHandler(1, OnException);
+#else
+        Milestone("crash_capture=SEH_boundaries; no public UWP VEH/stack-guarantee API; worker/stack-overflow capture not guaranteed");
+#endif
         Line l; l.Text("boot commit="); l.Text(Common::g_scm_rev);
 #if defined(NDEBUG)
         l.Text(" config=Release");

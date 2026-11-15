@@ -155,3 +155,11 @@ inside the MSIX and need not be copied to the console. On a PC with Python 3:
   python symbolicate_crash.py GR2port.map gr2toxbox_crash.log
 The standalone resolver annotates main-module RVAs with nearest MAP symbols.
 PDB-aware debugger tools provide source lines and inline frames when needed.
+
+CRASH-CAPTURE LIMITS
+The UWP SDK excludes AddVectoredExceptionHandler and SetThreadStackGuarantee.
+The console build uses legal SEH filters around CoreApplication::Run and the
+view's RunGame callback; it logs faults escaping those covered boundaries and
+continues exception search. It is NOT process-wide first-chance VEH coverage:
+worker-thread faults, fast-fail and exhausted-stack logging are not guaranteed.
+Use platform crash capture/debugging for uncovered failures. Desktop keeps VEH.
