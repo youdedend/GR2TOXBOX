@@ -27,6 +27,7 @@ file is right.
 | Direct3D 12 frame graph (passes, submits, presenter) | **In progress** |
 | HLSL shader port | **In progress — 24 of 184 stages** |
 | UWP shell (`IFrameworkView`, launcher, gamepad) | **In progress** |
+| **UWP package builds at all** | **Blocked — SDL3 has no UWP support** |
 | Gamepad chord remapping | **Done, unit-tested** |
 | Audio backend for UWP | **Not started** |
 | Playable on a console | **No** |
@@ -110,13 +111,34 @@ file is right.
    order, render-target setup and the presenter's CoreWindow path are next.
    `command.*` and `pipeline.*` now exist, so this is sequencing rather than
    foundation work.
-3. **The UWP shell.** `IFrameworkView`, the CoreWindow and the run/shutdown
-   contract are written (`uwp/uwp_main.cpp`, `uwp/uwp_app.cpp`); the D3D12
-   launcher UI and the in-process reboot are not.
-4. **Audio.** `openal-soft` is not yet configured for the UWP/WASAPI path.
-5. **PSO cache serialisation** (`ID3D12PipelineLibrary1`) is designed, not
+3. **SDL3, and therefore the whole UWP package.** SDL 3 deleted WinRT/UWP
+   support during its development and has never had it back: its own header says
+   so, in an `#error`, from `SDL_platform_defines.h`. The emulator's frontend is
+   SDL3 end to end -- the window, the event loop, the gamepad, the audio device,
+   ImGui's platform layer -- and every one of those files is compiled into the
+   UWP package. So the UWP job cannot get past vendored SDL, no matter what this
+   project's own code does.
+
+   This is a decision, not a bug, and it has three ways out:
+   * pin SDL 2.x for the UWP configuration only (it has UWP support, and this
+     project's use of SDL is a small subset);
+   * write a CoreWindow/WinRT platform layer behind the same small interface the
+     emulator uses, which `uwp/uwp_main.cpp` already starts;
+   * drop the UWP package and target GDK, which SDL3 does support and which is
+     the supported path for Xbox.
+
+   Everything the UWP job was failing on *before* SDL is fixed: LibreSSL's
+   architecture include path, protobuf's child-process compiler, FreeType's
+   `CreateFileA`, and the checked-in protobuf sources. The job stops at SDL.
+
+4. **The ImGui relay's shared half.** `imgui_relay.cpp` mixes capture (no API)
+   with Vulkan drawing, so the D3D12 desktop link still wants nine ImGuiRelay
+   symbols. Separating them means reproducing ImGui's texture-backend contract
+   exactly, which is a change with its own verification rather than a bundle.
+5. **Audio.** `openal-soft` is not yet configured for the UWP/WASAPI path.
+6. **PSO cache serialisation** (`ID3D12PipelineLibrary1`) is designed, not
    implemented.
-6. **Fsr 3.1 on D3D12** is not wired up.
+7. **Fsr 3.1 on D3D12** is not wired up.
 
 **Therefore: no released artifact can play the game yet.** The `.msix` CI
 produces is a real, signed, installable package — of a build that does not yet
@@ -126,6 +148,11 @@ have a complete renderer. The README says so plainly.
 
 ## Order of work
 
+0. **Decide what the UWP package is for.** SDL3 has no UWP support, so the
+   package cannot build until either SDL 2.x is pinned for it, a CoreWindow
+   platform layer replaces SDL there, or the target moves to GDK. Nothing else
+   in this list is reachable on a console until that is settled, and the desktop
+   D3D12 build -- which does work -- is what can be developed against meanwhile.
 1. ~~`command.*` + `pipeline.*`~~ **Done.**
 2. Port the shader set in dependency order: the composite chain (done), the
    world/character families behind `scene.hlsli` (in progress), then the `pfx/`
