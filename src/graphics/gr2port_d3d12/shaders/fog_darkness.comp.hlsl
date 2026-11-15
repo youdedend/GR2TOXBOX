@@ -12,12 +12,12 @@
 #include "common/fog.hlsli"
 #include "common/texel.hlsli"
 
-cbuffer FogDarknessConstants : register(b0) {
+cbuffer FogDarknessConstants : register(b1) {
     ArenaRef g_fog;
     FogGrid g_grid;
 };
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 

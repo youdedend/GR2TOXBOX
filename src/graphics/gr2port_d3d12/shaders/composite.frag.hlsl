@@ -20,7 +20,7 @@
 #include "common/grade.hlsli"
 #include "common/texel.hlsli"
 
-cbuffer CompositeConstants : register(b0) {
+cbuffer CompositeConstants : register(b1) {
     // Read-only per-frame grading data, an arena ref rather than a cbuffer so
     // the std430 layout is preserved exactly (common/grade.hlsli).
     ArenaRef g_grade;
@@ -29,7 +29,7 @@ cbuffer CompositeConstants : register(b0) {
     uint3 g_pad;
 };
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 

@@ -25,7 +25,8 @@ namespace Gr2Port::D3D12 {
 ///     vec3 p = LoadPosition(vertices, stride, offset);
 ///
 /// HLSL has no equivalent of `GL_EXT_buffer_reference`: there is no way to
-/// dereference an arbitrary 64-bit address held in a struct, and SM 6.6 DXIL
+/// dereference an arbitrary 64-bit address held in a struct, and the SM 6.4
+/// ceiling the console targets
 /// deliberately has no generic pointer type. `shaderInt64` buys arithmetic, not
 /// dereferencing.
 ///

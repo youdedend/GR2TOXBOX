@@ -14,7 +14,7 @@
 
 #include "common/grade.hlsli"
 
-cbuffer ExposureConstants : register(b0) {
+cbuffer ExposureConstants : register(b1) {
     // Read-only per-frame grading data, an arena ref rather than a cbuffer so
     // the std430 layout is preserved exactly (common/grade.hlsli).
     ArenaRef g_grade;
@@ -24,7 +24,7 @@ cbuffer ExposureConstants : register(b0) {
     float3 g_pad;
 };
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 

@@ -16,13 +16,13 @@
 #include "common/grade.hlsli"
 #include "common/texel.hlsli"
 
-cbuffer LuminanceConstants : register(b0) {
+cbuffer LuminanceConstants : register(b1) {
     ArenaRef g_meter;
     uint2 g_size;
     uint2 g_offset;
 };
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 

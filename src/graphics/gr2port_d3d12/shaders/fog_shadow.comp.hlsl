@@ -18,13 +18,13 @@
 #include "common/light.hlsli"
 #include "common/texel.hlsli"
 
-cbuffer FogShadowConstants : register(b0) {
+cbuffer FogShadowConstants : register(b1) {
     ArenaRef g_fog;
     ArenaRef g_light;
     FogGrid g_grid;
 };
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 

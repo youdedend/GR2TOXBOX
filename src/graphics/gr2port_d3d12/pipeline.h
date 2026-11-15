@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "common/types.h"
+#include "graphics/gr2port_d3d12/descriptors.h"
 #include "graphics/gr2port_d3d12/device.h"
 
 namespace Gr2Port::D3D12 {
@@ -23,16 +24,19 @@ namespace Gr2Port::D3D12 {
 /// reproduces that shape in D3D12 with **one** root signature for the whole
 /// renderer:
 ///
-///   b0  ArenaConstants   the arena table (SRV index per arena), 5 uints
-///   b1  root constants   32-bit draw constants (the shaders' b1 blocks)
-///   b2  root constants   texture handles and the like
-///   Heap  ResourceDescriptorHeap[]   -- SM 6.6 direct indexing, needs no root
-///                                       parameter and no descriptor table
+///   b0  ArenaConstants   ArenaTable g_arena, 5 uints (20 bytes)
+///   b1  root constants   the per-draw block (32..128 bytes, see DrawBytes)
+///   b2  root constants   texture handles and the like (16 bytes)
+///   12x descriptor tables, one per descriptor kind, each over the whole heap and
+///       in its own register space
 ///
-/// `ResourceDescriptorHeap[]` is the important part: with it the shaders index
-/// the bindless heap directly, so there is no per-draw descriptor table, no root
-/// signature churn and no descriptor copy in the hot path, which is the same
-/// property upstream gets from a runtime descriptor array.
+/// The descriptor tables are the part that replaces upstream's runtime descriptor
+/// array. Shader Model 6.4, which is the console driver's ceiling, has no
+/// `ResourceDescriptorHeap[]`, so a shader cannot index the heap directly; it
+/// declares `Texture2D` / `SamplerState` / `ByteAddressBuffer` arrays in distinct
+/// `register(..., spaceN)` spaces and indexes them with
+/// `NonUniformResourceIndex(...)`. That is Resource Binding Tier 3's answer to the
+/// same problem, and it keeps a handle a single u32 index into the heap.
 ///
 /// The root constants are raw 32-bit values, not a cbuffer, so a draw sets them
 /// with SetGraphicsRoot32BitConstants and they cost no descriptor.
@@ -50,35 +54,58 @@ struct RootSignature {
 /// D3D12 validates the root signature against the DXIL's declared resource
 /// bindings.
 namespace RootConstants {
-// Each of these must be at least as large as the biggest cbuffer any shader
-// declares at that register. It is not a "typical" size and a smaller one is not
-// merely tight: a root parameter binds exactly its declared number of 32-bit
-// values, and a shader cbuffer larger than that is truncated at bind time. The
-// renderer sets fewer constants than the shader reads and the surplus is
-// whatever was in the root argument space -- silently, with no error from D3D12
-// and nothing in a capture that looks wrong until the picture does.
+// The authoritative register layout. Every shader and every caller has to agree
+// with this, and tools/shaders/check_cbuffer_registers.py checks the HLSL half of
+// it.
 //
-// Measured, not guessed (tools/shaders/check_cbuffer_registers.py computes these
-// from the declarations):
+//   b0  ArenaTable g_arena      5 DWORDs   the arena table, SetArenaTable
+//   b1  per-draw / per-pass     8 DWORDs   SetDrawConstants
+//   b2  texture handles         4 DWORDs   SetPassConstants
+//   descriptor tables          kCount      one root parameter each
 //
-//   b0  the arena table (ArenaTable: 5 uints = 20) in most shaders, but the
-//       per-draw block in several, and ShadowConstants is 128 bytes.
-//   b1  32 bytes: SceneConstants is two ArenaRefs + base_instance + one uint of
-//       padding, and LambertSceneRoot is the same shape.
-//   b2  16 bytes: the largest texture-handle block.
-//
-// The blocks are not uniform across shaders -- b0 holds the arena table in one
-// family and per-draw constants in another -- so each parameter has to fit the
-// largest block any shader puts there.
+// b0 is 20 bytes and not one byte more: SetArenaTable passes
+// ArenaSet::RootArenaTable::srv_index, a five-element array on the stack, and the
+// count it hands D3D12 is ArenaBytes / 4. Make ArenaBytes bigger than that struct
+// and SetArenaTable reads past the end of it -- which is what happened when this
+// was raised to 128 to accommodate ShadowConstants. A 128-byte b0 over a 20-byte
+// source is a 108-byte stack overread on every pass, fed straight into the root
+// signature. The static_assert in command.cpp is what now prevents it.
 
-/// b0. Arena table (20 bytes) in most shaders; the largest block here is
-/// ShadowConstants at 128 bytes (two Matrix4s of cascade data).
-inline constexpr u32 ArenaBytes = 128;
-/// b1. Two ArenaRefs, the base instance and padding: 32 bytes.
-inline constexpr u32 DrawBytes = 32;
-/// b2. Texture and sampler handles for the passes that are not per-draw.
+/// b0: ArenaKind::Count uints, the same five the shaders' ArenaTable declares.
+inline constexpr u32 ArenaBytes = 20;
+
+/// b1: the largest per-draw block any shader declares here.
+///
+/// 128 bytes is ShadowConstants: an ArenaRef (8) + the inline `Shadows` struct
+/// (112: one float4x4 inverse view plus three float4x4 cascade matrices, plus a
+/// light direction and two light colours) + the cascade index, rounded to 16.
+///
+/// The tighter shape is to move `Shadows` into an ArenaRef of its own, which
+/// would bring this block down to about 32 bytes and match how every other pass
+/// reaches bulk data. It is NOT done yet, and deliberately: nothing writes b1 at
+/// all today -- SetDrawConstants has no caller -- so restructuring it would make
+/// `shadow.vert` read a root constant that no code ever sets, turning a
+/// size-overshoot into a garbage-render bug. The block has room; the caller comes
+/// first, and the restructuring is then a change with a test behind it.
+inline constexpr u32 DrawBytes = 128;
+
+/// b2: texture and sampler handles for the passes that are not per-draw. The
+/// largest block is four handles, in TonemapTextures and FogApplyTextures.
 inline constexpr u32 PassBytes = 16;
 } // namespace RootConstants
+
+// D3D12 caps a root signature at 64 DWORDs on the hardware path. Each 32-bit
+// constant parameter contributes its size in DWORDs and each descriptor table
+// contributes one, so this is the whole budget:
+//
+//   5 (b0) + 8 (b1) + 4 (b2) + 12 (tables) = 29 of 64.
+//
+// Exceeding it fails root signature creation at device start with no useful
+// message, so it is checked here rather than discovered on a console.
+static_assert((RootConstants::ArenaBytes / 4) + (RootConstants::DrawBytes / 4) +
+                      (RootConstants::PassBytes / 4) + DescriptorTables::kCount <=
+                  64,
+              "the root signature exceeds D3D12's 64-DWORD limit");
 
 /// Serialises the root signature the shaders were compiled against and creates
 /// it. Called once, after the device exists.

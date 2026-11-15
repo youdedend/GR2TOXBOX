@@ -73,13 +73,13 @@ WorldDecal LoadWorldDecalAt(ArenaRef ref, ArenaTable table) {
     return decal;
 }
 
-cbuffer DecalConstants : register(b0) {
+cbuffer DecalConstants : register(b1) {
     // The decal table, an ArenaRef where the GLSL had a buffer_reference.
     ArenaRef g_decals;
     uint3 g_pad;
 };
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 

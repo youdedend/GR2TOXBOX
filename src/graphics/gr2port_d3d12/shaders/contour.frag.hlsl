@@ -20,11 +20,11 @@
 
 #include "common/arena.hlsli"
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 
-cbuffer ContourRoot : register(b0) {
+cbuffer ContourRoot : register(b1) {
     ArenaRef g_contours;
     uint g_contour_index;
     uint3 g_contour_pad;

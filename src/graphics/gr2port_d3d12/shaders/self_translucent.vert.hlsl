@@ -17,11 +17,11 @@
 
 #include "common/scene.hlsli"
 
-cbuffer SceneRoot : register(b0) {
+cbuffer SceneRoot : register(b1) {
     SceneConstants g_scene;
 };
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 

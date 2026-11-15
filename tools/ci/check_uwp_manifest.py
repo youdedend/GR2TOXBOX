@@ -167,7 +167,11 @@ def main():
     static_crt = re.search(
         r'set\(CMAKE_MSVC_RUNTIME_LIBRARY\s+"MultiThreaded', cmake
     ) is not None
-    vclibs = re.search(r'<PackageDependency\s+Name="Microsoft\.VCLibs', raw)
+    # XML comments are prose, not declarations. The manifest documents the
+    # dynamic-CRT fallback inside a comment (so switching is a two-line change),
+    # and matching that text would report a dependency the package does not have.
+    live = re.sub(r"<!--.*?-->", "", raw, flags=re.S)
+    vclibs = re.search(r'<PackageDependency\s+Name="Microsoft\.VCLibs', live)
     if static_crt and vclibs:
         problems.append(
             "the build links the static CRT but the manifest declares a "

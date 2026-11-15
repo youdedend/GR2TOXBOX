@@ -136,7 +136,7 @@ disagree, which is cheaper than decoding `signtool`'s `0x8007000B`.
 Every HLSL shader compiles at build time. To compile one by hand while iterating:
 
 ```powershell
-dxc -T vs_6_6 -E main -HV 2021 -O3 -WX `
+dxc -T vs_6_4 -E main -HV 2021 -O3 -WX `
     -I src/graphics/gr2port_d3d12/shaders `
     src/graphics/gr2port_d3d12/shaders/world.vert.hlsl -Fo world.dxil
 ```

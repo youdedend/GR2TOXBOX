@@ -66,24 +66,31 @@ MAX_REGISTER = 2
 # and set_arena_table in command.cpp sets that parameter. So the arena table is b0.
 ARENA_REGISTER = 0
 
-# Which blocks belong at which register.
+# The authoritative layout, applied uniformly to the C++ and every shader:
 #
-# Unlike a conventional renderer, the mapping is NOT uniform across shaders: the
-# arena table is b1 in most and b0 in the world/lambert family, where the *first*
-# block is genuinely the arena and the per-draw constants follow at b1. What is
-# uniform is the size budget each register has (RootConstants), so that is what
-# this checks -- plus the two structural rules below, which do hold everywhere:
+#   b0  ArenaConstants                 ArenaTable g_arena, 20 bytes
+#   b1  the per-draw / per-pass block  SceneRoot, LambertSceneRoot, ShadowConstants...
+#   b2  the texture-handle block       *Textures, PresentConstants, BloomDepthTextures
 #
-#   * ArenaConstants always contains nothing but the arena table; and
-#   * a shader that declares ArenaConstants declares it in the register the
-#     renderer sets the arena table to for that family. Since b0 and b1 are both
-#     32-bit constant parameters of sufficient size, either placement works at
-#     bind time; what does not work is a register the signature does not declare.
+# So the register is decided by what the block IS, not by which file it is in.
+# That uniformity is the point: the renderer writes one value per register
+# (SetArenaTable -> parameter 0, SetDrawConstants -> 1, SetPassConstants -> 2), so
+# a shader that puts its arena table at b1 reads a register nothing writes.
+ARENA_REGISTER = 0
+DRAW_REGISTER = 1
+PASS_REGISTER = 2
 
-# No per-shader name list. A block is "the per-draw block" if it is the one that
-# is not ArenaConstants or a *Textures handle block; that is all the structure
-# the C++ side relies on, and inventing a name list here was what made the first
-# version of this check disagree with pipeline.h.
+# Blocks that carry GPU handles rather than per-draw constants.
+TEXTURE_BLOCK_NAMES = {"PresentConstants", "BloomDepthTextures"}
+
+
+def expected_register(block_name: str) -> int | None:
+    """The register a cbuffer belongs at, given what it holds."""
+    if block_name == "ArenaConstants":
+        return ARENA_REGISTER
+    if block_name in TEXTURE_BLOCK_NAMES or block_name.endswith("Textures"):
+        return PASS_REGISTER
+    return DRAW_REGISTER
 
 
 def strip_comments(text: str) -> str:
@@ -113,8 +120,12 @@ def cbuffer_size(body: str, struct_sizes: dict[str, int]) -> tuple[int, list[str
     """Packed size of a cbuffer body, plus a list of types it could not size."""
     offset = 0
     unknown: list[str] = []
+    # `Type name;` and `Type name[N];` only. The leading group must not itself be
+    # a known field name, or a statement like `ArenaTable g_arena;` matches twice:
+    # once correctly, and once with "ArenaTable" as the field of an unknown type.
     for decl in re.finditer(
-        r"([A-Za-z_][\w]*)\s+([A-Za-z_]\w*)\s*(?:\[\s*(\d+)\s*\])?\s*;", body
+        r"(?<![\w.])([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*(?:\[\s*(\d+)\s*\])?\s*;",
+        body,
     ):
         type_name, array = decl.group(1), decl.group(3)
         count = int(array) if array else 1
@@ -140,8 +151,14 @@ def cbuffer_size(body: str, struct_sizes: dict[str, int]) -> tuple[int, list[str
                 offset = align(offset)
             base = size
         offset += base * count
-    # The block itself is a multiple of 16 bytes.
-    return align(offset) if offset else 0, unknown
+    # Deliberately NOT rounded up to 16 here.
+    #
+    # A cbuffer's placement rounds its size up to a 16-byte boundary, but that
+    # padding is not data the shader reads. The budget this is compared against is
+    # a root parameter's DWORD count, and what has to fit is the data: a 20-byte
+    # ArenaTable at b0 fits a 20-byte b0 exactly, and rounding it to 32 here would
+    # report every arena block as 12 bytes over a budget it exactly meets.
+    return ((offset + 3) // 4 * 4) if offset else 0, unknown
 
 
 def collect_struct_sizes() -> dict[str, int]:
@@ -153,7 +170,9 @@ def collect_struct_sizes() -> dict[str, int]:
             name, body = m.group(1), m.group(2)
             offset = 0
             ok = True
-            for decl in re.finditer(r"([A-Za-z_][\w]*)\s+([A-Za-z_]\w*)\s*;", body):
+            for decl in re.finditer(
+                r"(?<![\w.])([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*;", body
+            ):
                 type_name = decl.group(1)
                 if type_name in sizes:
                     offset += sizes[type_name]
@@ -191,7 +210,6 @@ def main() -> int:
         return 1
 
     problems: list[str] = []
-    arena_registers: dict[int, list[str]] = {}
     shaders = sorted(p for p in SHADER_DIR.rglob("*.hlsl"))
     total_blocks = 0
 
@@ -236,9 +254,7 @@ def main() -> int:
                     f"only {budgets[reg]} bytes; the surplus is silently truncated"
                 )
 
-        # The arena table is only meaningful if it is the whole block: a shader
-        # that packs anything beside it would have the renderer's five uints land
-        # at the wrong offsets.
+        # The arena block holds nothing but the table.
         arena = re.search(
             r"cbuffer\s+ArenaConstants\s*:\s*register\(\s*b(\d+)\s*\)\s*\{(.*?)\}\s*;",
             text,
@@ -246,43 +262,25 @@ def main() -> int:
         )
         if arena:
             body_fields = re.findall(
-                r"([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*;", strip_comments(arena.group(2))
+                r"(?<![\w.])([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*;",
+                strip_comments(arena.group(2)),
             )
-            names = [f[1] for f in body_fields]
-            if names != ["g_arena"] or body_fields[0][0] != "ArenaTable":
+            if body_fields != [("ArenaTable", "g_arena")]:
                 problems.append(
                     f"{rel}: ArenaConstants must hold nothing but 'ArenaTable g_arena' "
-                    f"(the renderer sets five uints); it holds {body_fields}"
+                    f"(SetArenaTable sets exactly five DWORDs); it holds {body_fields}"
                 )
 
-        # The arena table has to be at ONE register across every shader.
-        #
-        # This is the check that matters and the one that was missing. pipeline.h
-        # documents b0 as the arena table and b1 as the draw constants, and
-        # command.cpp always writes the arena table to parameter 0 -- but 24 of
-        # these shaders declare ArenaConstants at b1 and their per-draw block at
-        # b0, while world.vert/lambert.vert/lambert.frag declare it at b0. Both
-        # groups cannot be right: a shader that reads the arena from a register the
-        # renderer never writes gets whatever else is there.
-        #
-        # Which register is correct is a renderer-level decision (moving it means
-        # changing pipeline.h, command.cpp and one group or the other), so this
-        # reports the disagreement instead of picking a side. The sizes above are
-        # enforced either way, because those are unambiguous.
-        if arena:
-            arena_registers.setdefault(int(arena.group(1)), []).append(rel)
-
-    if len(arena_registers) > 1:
-        detail = "; ".join(
-            f"b{reg} in {len(files)} ({', '.join(sorted(files)[:3])}...)"
-            for reg, files in sorted(arena_registers.items())
-        )
-        problems.append(
-            f"the arena table is bound at different registers across shaders: "
-            f"{detail}. Only one register is written by the renderer "
-            f"(command.cpp set_arena_table writes parameter 0, b{ARENA_REGISTER}), "
-            f"so the other group reads a block that holds something else."
-        )
+        # Every block is at the register its contents belong at.
+        for reg, name in seen.items():
+            want = expected_register(name)
+            if want is not None and reg != want:
+                problems.append(
+                    f"{rel}: {name} is at b{reg}, but a block of that kind belongs at "
+                    f"b{want} (b0 arena table, b1 per-draw constants, b2 texture "
+                    f"handles). D3D12 matches a cbuffer to a root parameter by "
+                    f"register, and only one register of each kind is written."
+                )
 
     if problems:
         for problem in problems:

@@ -22,13 +22,13 @@
 
 #include "common/scene.hlsli"
 
-cbuffer ShadowConstants : register(b0) {
+cbuffer ShadowConstants : register(b1) {
     ArenaRef g_casters;
     Shadows g_shadows;
     uint g_cascade;
 };
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 

@@ -12,7 +12,7 @@
 
 #include "common/texel.hlsli"
 
-cbuffer PresentConstants : register(b0) {
+cbuffer PresentConstants : register(b2) {
     uint g_picture;
 };
 

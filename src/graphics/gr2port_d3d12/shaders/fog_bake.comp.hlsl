@@ -13,7 +13,7 @@
 #include "common/fog.hlsli"
 #include "common/texel.hlsli"
 
-cbuffer FogBakeConstants : register(b0) {
+cbuffer FogBakeConstants : register(b1) {
     ArenaRef g_fog;
     FogGrid g_grid;
     // 0 for the stratus map, 1 for the region map.
@@ -21,7 +21,7 @@ cbuffer FogBakeConstants : register(b0) {
     uint3 g_pad;
 };
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 

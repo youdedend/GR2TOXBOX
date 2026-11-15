@@ -12,7 +12,7 @@
 
 #include "common/arena.hlsli"
 
-cbuffer ImGuiConstants : register(b0) {
+cbuffer ImGuiConstants : register(b1) {
     ArenaRef g_vertices;
     float2 g_scale;
     float2 g_translate;
@@ -20,7 +20,7 @@ cbuffer ImGuiConstants : register(b0) {
     uint2 g_pad;
 };
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 

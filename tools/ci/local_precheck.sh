@@ -111,22 +111,174 @@ else
     echo "  ok   src/core/uwp_memory.cpp (GR2_XBOX_UWP)"
 fi
 
-# The HLSL cbuffer bindings against the root signature's constant budgets.
-#
-# Report-only for now, and deliberately not a FAIL: the check found a real
-# disagreement it cannot settle by itself. 24 shaders declare the arena table at
-# b1 with per-draw constants at b0, three declare it at b0, and pipeline.h
-# documents b0 as the arena table while command.cpp writes parameter 0. One of
-# the two groups reads a register nothing writes. Choosing which means changing
-# pipeline.h, command.cpp and one group of shaders together, which is a renderer
-# decision rather than a precheck's; the sizes are enforced here in the meantime
-# because those are unambiguous.
+# The UWP import checker itself. There is no dumpbin here and no UWP binary to
+# run it on, so what is checked is the checker: a fixture that must pass and one
+# that must fail, because a checker that matches no import format reports every
+# binary clean. That exact bug shipped in the first draft of this file -- the
+# pattern required the three-column form and dumpbin /imports prints two.
 if command -v python3 >/dev/null 2>&1; then
-    if python3 tools/shaders/check_cbuffer_registers.py >"$OUT/err" 2>&1; then
-        echo "  ok   HLSL cbuffer registers"
+    imports_tmp=$(mktemp -d)
+    cat >"$imports_tmp/clean.txt" <<'IMPORTS_CLEAN'
+      api-ms-win-core-synch-l1-2-0.dll
+                      2C  InitializeCriticalSectionEx
+      D3D12Core.dll
+                      1A  D3D12CreateDevice
+IMPORTS_CLEAN
+    cat >"$imports_tmp/leaky.txt" <<'IMPORTS_LEAKY'
+      KERNEL32.dll
+                      15  TlsAlloc
+                      9F  GetModuleHandleW
+                      8B  LCMapStringW
+      USER32.dll
+                      72  MessageBoxW
+IMPORTS_LEAKY
+    imports_ok=1
+    if ! python3 tools/ci/check_uwp_imports.py --exe t.exe --imports-file "$imports_tmp/clean.txt" >/dev/null 2>&1; then
+        echo "  FAIL UWP import check: a clean fixture was rejected"
+        imports_ok=0
+    fi
+    if python3 tools/ci/check_uwp_imports.py --exe t.exe --imports-file "$imports_tmp/leaky.txt" >/dev/null 2>&1; then
+        echo "  FAIL UWP import check: a leaking fixture was accepted"
+        imports_ok=0
+    fi
+    rm -rf "$imports_tmp"
+    if [ "$imports_ok" -eq 1 ]; then
+        echo "  ok   UWP import check (clean fixture passes, leaking fixture fails)"
     else
-        echo "  WARN HLSL cbuffer registers (see below; not a failure yet)"
-        sed 's/^/    /' "$OUT/err" | head -6
+        failures=$((failures + 1))
+    fi
+fi
+
+# The WinRT include checker, plus its own fixture test.
+#
+# This exists because of a Windows failure the host precheck could not see: a 4K
+# change used winrt::Windows::ApplicationModel::Core::CoreApplication while only
+# winrt/Windows.UI.Core.h was included, and ::ABI::Windows::UI::Core with no ABI
+# header at all. C++/WinRT does not exist on Linux, so the precheck compiles these
+# files with the macro undefined, exercises the desktop half, and skips the console
+# half entirely -- the build went green here and failed on the runner.
+#
+# The mapping is mechanical (namespace -> projection header), so it can be checked
+# without a compiler. The fixtures are checked too: a scan that sees no WinRT
+# types at all also reports every file clean, which is the failure mode worth
+# guarding.
+if command -v python3 >/dev/null 2>&1; then
+    winrt_ok=1
+    if ! python3 tools/ci/check_winrt_includes.py >"$OUT/err" 2>&1; then
+        echo "  FAIL WinRT includes"
+        sed 's/^/    /' "$OUT/err" | head -20
+        winrt_ok=0
+    fi
+
+    # Fixture: a UWP file that uses WinRT and includes the right headers must be
+    # accepted; the same file with the header removed must be rejected.
+    winrt_fixtures=$(mktemp -d)
+    cat >"$winrt_fixtures/good.cpp" <<'WINRT_GOOD'
+#if defined(GR2_XBOX_UWP)
+#include <winrt/Windows.ApplicationModel.Core.h>
+#include <windows.ui.core.h>
+void f() {
+    const auto view = winrt::Windows::ApplicationModel::Core::CoreApplication::MainView();
+    auto* w = static_cast<::ABI::Windows::UI::Core::ICoreWindow*>(nullptr);
+    (void)view; (void)w;
+}
+#endif
+WINRT_GOOD
+    # The bad fixture drops only the ApplicationModel.Core include.
+    grep -v 'Windows.ApplicationModel.Core.h' "$winrt_fixtures/good.cpp" >"$winrt_fixtures/bad.cpp"
+    if ! python3 tools/ci/check_winrt_includes.py --file "$winrt_fixtures/good.cpp" >/dev/null 2>&1; then
+        echo "  FAIL WinRT includes: a correct fixture was rejected"
+        winrt_ok=0
+    fi
+    if python3 tools/ci/check_winrt_includes.py --file "$winrt_fixtures/bad.cpp" >/dev/null 2>&1; then
+        echo "  FAIL WinRT includes: a missing include was accepted"
+        winrt_ok=0
+    fi
+    rm -rf "$winrt_fixtures"
+
+    if [ "$winrt_ok" -eq 1 ]; then
+        echo "  ok   WinRT includes (namespaces resolved, fixtures both ways)"
+    else
+        failures=$((failures + 1))
+    fi
+fi
+
+# Namespace qualification.
+#
+# Same blind spot as the WinRT check above: `CreateSwapchain` is in Gr2Port::D3D12
+# and used bare `Display::Mode`, but Display is declared in Gr2Port::Uwp::Display.
+# Unqualified lookup searches D3D12, then Gr2Port, then global -- never a sibling
+# namespace -- so it did not resolve, and only the UWP build ever compiled that
+# line. The fixture test pins the behaviour: the correct form must pass and the
+# sibling-qualified form must fail.
+if command -v python3 >/dev/null 2>&1; then
+    ns_ok=1
+    if ! python3 tools/ci/check_namespace_qualification.py >"$OUT/err" 2>&1; then
+        echo "  FAIL namespace qualification"
+        sed 's/^/    /' "$OUT/err" | head -20
+        ns_ok=0
+    fi
+
+    ns_tmp=$(mktemp -d)
+    mkdir -p "$ns_tmp/a"
+    # The use has to be a `::`-qualified one: the check is about the first
+    # qualifier of an expression, and `Thing{}` is a constructor call that starts
+    # no namespace lookup at all.
+    cat >"$ns_tmp/a/decl.h" <<'NS_DECL'
+namespace Outer::Sibling {
+struct Thing {
+    static constexpr int kValue = 7;
+};
+}
+namespace Outer::Other {
+inline int Use();
+}
+NS_DECL
+    cat >"$ns_tmp/good.cpp" <<'NS_GOOD'
+#include "decl.h"
+namespace Outer::Other {
+int Use() { return Sibling::Thing::kValue; }
+}
+NS_GOOD
+    # The broken form: `Thing` is reachable as Sibling::Thing, not bare.
+    cat >"$ns_tmp/bad.cpp" <<'NS_BAD'
+#include "decl.h"
+namespace Outer::Other {
+int Use() { return Thing::kValue; }
+}
+NS_BAD
+    if ! python3 tools/ci/check_namespace_qualification.py --file "$ns_tmp/good.cpp" >/dev/null 2>&1; then
+        echo "  FAIL namespace qualification: a qualified fixture was rejected"
+        ns_ok=0
+    fi
+    if python3 tools/ci/check_namespace_qualification.py --file "$ns_tmp/bad.cpp" >/dev/null 2>&1; then
+        echo "  FAIL namespace qualification: a sibling-scope reference was accepted"
+        ns_ok=0
+    fi
+    rm -rf "$ns_tmp"
+
+    if [ "$ns_ok" -eq 1 ]; then
+        echo "  ok   namespace qualification (sibling scopes, fixtures both ways)"
+    else
+        failures=$((failures + 1))
+    fi
+fi
+
+# The HLSL cbuffer bindings against the root signature.
+#
+# Now a hard failure, not a warning. The register layout is uniform and enforced:
+# b0 is the arena table (20 bytes, matching ArenaSet::RootArenaTable exactly), b1
+# is the per-draw block, b2 is the texture-handle block. A shader that puts any of
+# them elsewhere reads a root parameter the renderer never writes, and D3D12
+# reports nothing when it does.
+if command -v python3 >/dev/null 2>&1; then
+    if ! python3 tools/shaders/check_cbuffer_registers.py >"$OUT/err" 2>&1; then
+        echo "  FAIL HLSL cbuffer registers"
+        sed 's/^/    /' "$OUT/err" | head -20
+        annotate_log "src/graphics/gr2port_d3d12/shaders" "$OUT/err"
+        failures=$((failures + 1))
+    else
+        echo "  ok   HLSL cbuffer registers"
     fi
 fi
 

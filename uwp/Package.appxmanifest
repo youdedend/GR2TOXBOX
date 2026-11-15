@@ -54,6 +54,30 @@
   </Properties>
 
   <Dependencies>
+    <!--
+      The CRT question, in one place.
+
+      GR2port.exe links the static CRT (/MT, set in CMakeLists.txt under
+      GR2_XBOX_UWP), so the package carries its own runtime and needs no framework
+      package. Nothing else goes here.
+
+      If the build ever switches back to the dynamic CRT (/MD), two things have to
+      change together:
+
+        1. add the dependency below, and
+        2. let scripts/ci/package_msix.ps1 find and bundle
+           Microsoft.VCLibs.x64.14.00.appx beside the .msix; it already does, and
+           reads this manifest to decide whether to.
+
+      Without both, the package installs, shows its icon, and dies at launch with
+      0xc0000135. tools/ci/check_uwp_manifest.py fails if the manifest and
+      CMakeLists.txt disagree, so that cannot happen quietly.
+
+      <PackageDependency
+        Name="Microsoft.VCLibs.140.00"
+        MinVersion="14.0.30704.0"
+        Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" />
+    -->
     <TargetDeviceFamily
       Name="Windows.Universal"
       MinVersion="10.0.19041.0"

@@ -58,13 +58,13 @@ WorldDecal LoadWorldDecalAt(ArenaRef ref, ArenaTable table) {
     return decal;
 }
 
-cbuffer DecalConstants : register(b0) {
+cbuffer DecalConstants : register(b1) {
     ArenaRef g_decals;
     ArenaRef g_light;
     uint2 g_pad;
 };
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 

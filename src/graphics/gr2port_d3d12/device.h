@@ -28,8 +28,8 @@ struct SDL_Window;
 ///
 /// Targets:
 ///   * Desktop Win64  — `CreateSwapChainForHwnd`, any FL 12_1+ adapter.
-///   * Xbox Series X|S — `CreateSwapChainForCoreWindow`, FL 12_1, SM 6.6,
-///     a 1,200 MiB heap budget from `Core::Xbox`.
+///   * Xbox Series X|S — `CreateSwapChainForCoreWindow`, FL 12_1, SM 6.4 (the
+///     console driver's ceiling), a 1,200 MiB heap budget from `Core::Xbox`.
 namespace Gr2Port::D3D12 {
 
 using Microsoft::WRL::ComPtr;
@@ -49,23 +49,20 @@ struct Caps {
     /// Raytracing tier 1.1, used only for optional debug visualisation; the
     /// renderer runs without it.
     bool raytracing = false;
-    /// The device accepts Shader Model 6.6 DXIL.
+    /// Resource binding tier 3.
     ///
-    /// False on Xbox in UWP: `SraKmd_arden` stops at 6.4. Every stage this
-    /// backend ships is compiled for `*_6_4` for that reason, so a false value
-    /// here is no longer a reason to refuse to start.
-    bool shader_model_6_6 = true;
-    /// SM 6.6 `ResourceDescriptorHeap[]` direct indexing.
+    /// This is the only bindless-related capability the renderer depends on, and
+    /// it is what makes a descriptor table large enough to address every
+    /// descriptor the arena hands out. Xbox in UWP has it.
     ///
-    /// False on Xbox in UWP even at binding tier 3, because the *shader model*
-    /// ceiling is what gates it, not the tier. The shaders reach the same
-    /// descriptor heap through a descriptor table in root parameter space
-    /// instead; see `pipeline.cpp`'s root signature and `common/texel.hlsli`.
-    bool bindless = false;
-    /// Resource binding tier 3, which the table path needs for a table large
-    /// enough to address every descriptor the arena hands out. Xbox in UWP has
-    /// it; the tier and the shader model are independent, which is the whole
-    /// reason `bindless` above is not simply this.
+    /// There is deliberately no `shader_model_6_6` or `bindless` flag here any
+    /// more. Every stage is compiled for `*_6_4`, so "the device would accept
+    /// 6.6 DXIL" describes a property nothing uses, and a `bindless` flag named
+    /// after SM 6.6's `ResourceDescriptorHeap[]` described a path this renderer
+    /// does not take: shaders reach the heap through descriptor tables in
+    /// `space100..space111` (see `descriptors.h` and `common/descriptors.hlsli`).
+    /// Keeping both flags meant every reader had to know which of the two was the
+    /// real gate -- and the startup check got it wrong once already.
     bool binding_tier3 = false;
     /// Native 16-bit shader operations. Absent on Xbox in UWP. Reported only,
     /// because the half-precision path is written to fall back.

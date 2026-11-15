@@ -233,7 +233,7 @@ def check(path, problems):
         tool = m.group(1)
         if tool not in {
             "makepri.exe", "makeappx.exe", "signtool.exe", "makecert.exe",
-            "certutil.exe", "mt.exe", "c1010.exe",
+            "certutil.exe", "mt.exe", "c1010.exe", "dumpbin.exe",
         }:
             problems.append(f"{path}: Find-SdkTool \"{tool}\" is not a tool this expects")
 

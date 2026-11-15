@@ -23,11 +23,11 @@
 #include "common/arena.hlsli"
 #include "common/vertex.hlsli"
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 
-cbuffer ContourRoot : register(b0) {
+cbuffer ContourRoot : register(b1) {
     // The contour table (scene.glsl's Contours) is an arena ref, and this draw's
     // index in it is what gl_DrawID used to be.
     ArenaRef g_contours;

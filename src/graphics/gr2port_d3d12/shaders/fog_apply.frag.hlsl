@@ -18,12 +18,12 @@
 // cbuffers share one global namespace in HLSL, so two blocks cannot both declare
 // a member called g_pad -- dxc reports the second as a redefinition with a
 // different type. Each block's padding is named after the block.
-cbuffer FogApplyConstants : register(b0) {
+cbuffer FogApplyConstants : register(b1) {
     ArenaRef g_fog;
     float3 g_fog_pad;
 };
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 

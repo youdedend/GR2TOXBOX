@@ -79,6 +79,23 @@ void CommandList::SetPipeline(const Pipeline& pipeline) const {
     }
 }
 
+// SetArenaTable hands D3D12 `table.srv_index` together with a DWORD count of
+// RootConstants::ArenaBytes / 4. `table` is a local, so the count IS the number of
+// DWORDs D3D12 will read starting at srv_index. If ArenaBytes grows past
+// sizeof(RootArenaTable) that read runs off the end of the stack object and feeds
+// whatever follows it into the root signature -- no warning, no error, and the
+// arenas resolve to garbage on every draw.
+//
+// This assert is the guard. It was written after raising ArenaBytes to 128 to fit
+// ShadowConstants, which made every call a 108-byte overread.
+static_assert(sizeof(ArenaSet::RootArenaTable) == RootConstants::ArenaBytes,
+              "SetArenaTable passes RootArenaTable::srv_index with a count of "
+              "ArenaBytes / 4 -- the two must be the same size or the read runs "
+              "past the end of the stack object");
+static_assert(sizeof(ArenaSet::RootArenaTable) ==
+                  sizeof(u32) * static_cast<u32>(ArenaKind::Count),
+              "the arena table is one u32 per arena, matching the shaders' ArenaTable");
+
 void CommandList::SetArenaTable(const ArenaSet& arenas, const BindlessHeap& descriptors) const {
     if (!list) {
         return;
@@ -87,8 +104,11 @@ void CommandList::SetArenaTable(const ArenaSet& arenas, const BindlessHeap& desc
     // The arena table is the SRV index of each arena, packed as five uints at b0
     // (ArenaSet::BuildRootTable). Its layout is the shaders' ArenaTable struct.
     const ArenaSet::RootArenaTable table = arenas.BuildRootTable();
-    list->SetGraphicsRoot32BitConstants(0, RootConstants::ArenaBytes / 4, table.srv_index, 0);
-    list->SetComputeRoot32BitConstants(0, RootConstants::ArenaBytes / 4, table.srv_index, 0);
+    // sizeof, not RootConstants::ArenaBytes: the two are asserted equal above, but
+    // the array being passed is what decides what is legal to read.
+    constexpr u32 dwords = sizeof(table.srv_index) / sizeof(table.srv_index[0]);
+    list->SetGraphicsRoot32BitConstants(0, dwords, table.srv_index, 0);
+    list->SetComputeRoot32BitConstants(0, dwords, table.srv_index, 0);
 }
 
 void CommandList::SetDescriptorTables(const BindlessHeap& descriptors) const {
@@ -115,6 +135,12 @@ void CommandList::SetDrawConstants(const void* data, u32 bytes) const {
     if (!list || !data) {
         return;
     }
+    // The count is the DWORDs D3D12 will read from `data`. It is bounded by BOTH
+    // the caller's buffer and the root parameter, and the caller's buffer is the
+    // smaller of the two only because of the min() below -- if DrawBytes ever
+    // exceeds it and bytes is passed as the parameter size rather than the real
+    // one, this reads past the end of the caller's object exactly the way
+    // SetArenaTable did. Both callers are expected to pass sizeof(their struct).
     const u32 count = bytes / 4 < RootConstants::DrawBytes / 4 ? bytes / 4
                                                                : RootConstants::DrawBytes / 4;
     list->SetGraphicsRoot32BitConstants(1, count, data, 0);
@@ -125,6 +151,9 @@ void CommandList::SetPassConstants(const void* data, u32 bytes) const {
     if (!list || !data) {
         return;
     }
+    // Same bound as SetDrawConstants: `bytes` is the caller's buffer size, and a
+    // caller that passes the root parameter's size instead overreads its own
+    // object. Pass sizeof(struct), never RootConstants::*Bytes.
     const u32 count = bytes / 4 < RootConstants::PassBytes / 4 ? bytes / 4
                                                                : RootConstants::PassBytes / 4;
     list->SetGraphicsRoot32BitConstants(2, count, data, 0);

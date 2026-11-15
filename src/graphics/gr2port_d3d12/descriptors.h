@@ -13,17 +13,23 @@ namespace Gr2Port::D3D12 {
 
 /// A descriptor slot in the global bindless tables.
 ///
-/// The backend never binds descriptor tables per draw. Instead every resource
-/// gets a slot once, at creation, and the shaders index the heaps directly:
+/// The backend never binds descriptors per draw. Every resource gets a slot once,
+/// at creation, and a draw carries the slot index as a 32-bit constant:
 ///
-///   Texture2D t = ResourceDescriptorHeap[srv];
-///   SamplerState s = SamplerDescriptorHeap[smp];
+///   srv/smp are u32 indices the backend writes into the draw's constants, and the
+///   shader reads the resource through the descriptor table for that kind:
 ///
-/// `srv`/`smp` are 32-bit values the backend writes into the draw's constants.
+///   Texture2D t = g_tex2d_f4[NonUniformResourceIndex(srv)];
+///   SamplerState s = g_sampler[NonUniformResourceIndex(smp)];
+///
 /// This is the D3D12 equivalent of upstream's Vulkan
 /// `descriptorBindingPartiallyBound` + `runtimeDescriptorArray` combination, and
 /// it is what makes a 1,000-draw frame cheap: there is no per-draw descriptor
 /// copy and no root signature churn.
+///
+/// (Shader Model 6.6 would let a shader write `ResourceDescriptorHeap[srv]` and
+/// skip the table array entirely. The console's driver stops at 6.4, so that is
+/// not available, and every shader uses the table form instead.)
 ///
 /// Slots are allocated in blocks from a free list, so a texture that comes and
 /// goes (a streaming mip, a movie frame) does not fragment the heap.

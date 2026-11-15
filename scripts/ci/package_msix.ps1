@@ -135,6 +135,77 @@ foreach ($extra in @("shaders", "userdata")) {
 Copy-Item "docs/QUICKSTART-XBOX.txt" (Join-Path $OutDir "QUICKSTART-XBOX.txt") -ErrorAction SilentlyContinue
 
 # ---------------------------------------------------------------------------
+# 2b. The AppContainer import audit
+# ---------------------------------------------------------------------------
+# A packaged app may only call the onecore surface. The linker does not enforce
+# that, and with the static CRT (/MT) there is a specific way to get it wrong: the
+# desktop static CRT archives (libvcruntime/libucrt) pull in kernel32 direct
+# imports -- TlsAlloc, GetModuleHandleW, InitializeCriticalSectionAndSpinCount,
+# LCMapStringW -- where the store variants go through the API set. The package
+# still packs and installs; the title then dies on the console at start-up with
+# nothing but an exception code.
+#
+# So ask dumpbin and check. This runs before makepri and makeappx: a binary that
+# cannot start is worth failing on now, not after signing.
+$dumpbin = Find-SdkTool "dumpbin.exe"
+$exePath = Join-Path $StageDir $ExeName
+$importsLog = Join-Path $StageDir "imports.txt"
+& $dumpbin /nologo /imports $exePath | Out-File -FilePath $importsLog -Encoding utf8
+python tools/ci/check_uwp_imports.py --exe $ExeName --imports-file $importsLog
+if ($LASTEXITCODE -ne 0) {
+    throw ("$ExeName imports APIs a packaged app may not call. The static CRT is " +
+           "the usual cause on a /MT build: see tools/ci/check_uwp_imports.py.")
+}
+Remove-Item -Force $importsLog
+
+# ---------------------------------------------------------------------------
+# 2c. The CRT dependency, if the build links the dynamic CRT
+# ---------------------------------------------------------------------------
+# With the static CRT (/MT) the executable carries its own runtime and the package
+# needs nothing else. With the dynamic CRT (/MD) it needs the Microsoft Visual C++
+# Runtime framework appx, and both halves have to be present or the title installs
+# and dies at launch with 0xc0000135:
+#
+#   * <PackageDependency Name="Microsoft.VCLibs.140.00"> in the manifest, so the
+#     console knows the dependency before it starts the app;
+#   * Microsoft.VCLibs.x64.14.00.appx beside the .msix in the bundle, because Xbox
+#     Device Portal uploads a package and its dependencies in the same dialog --
+#     one install, dependencies first, no separate trip to a Store.
+#
+# Whether it is needed is read from the manifest rather than assumed: the manifest
+# is the thing that has to declare it, and makeappx validates that declaration
+# against the package.
+$manifestPath = Join-Path $StageDir "AppxManifest.xml"
+$needsVclibs = (Get-Content $manifestPath -Raw) -match 'Microsoft\.VCLibs'
+if ($needsVclibs) {
+    # The ExtensionSDK layout, newest installed version first. The appx is an x64
+    # framework package; the x86 and ARM ones are not usable here.
+    $sdkRoots = @(
+        "${env:ProgramFiles(x86)}\Microsoft SDKs\Windows Kits\10\ExtensionSDKs",
+        "$env:ProgramFiles\Microsoft SDKs\Windows Kits\10\ExtensionSDKs"
+    )
+    $vclibsAppx = $null
+    foreach ($root in $sdkRoots) {
+        if (-not (Test-Path $root)) { continue }
+        $vclibsAppx = Get-ChildItem -Path $root -Recurse -Filter "Microsoft.VCLibs.x64.14.00.appx" `
+            -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1
+        if ($vclibsAppx) { break }
+    }
+    if (-not $vclibsAppx) {
+        throw ("The manifest declares a Microsoft.VCLibs dependency but no " +
+               "Microsoft.VCLibs.x64.14.00.appx was found under the ExtensionSDKs " +
+               "directory. Either install the 'Microsoft Visual C++ Runtime' " +
+               "extension SDK, or switch the UWP build back to the static CRT " +
+               "(CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded).")
+    }
+    Write-Host "Bundling CRT dependency: $($vclibsAppx.FullName)"
+    Copy-Item $vclibsAppx.FullName (Join-Path $OutDir "Microsoft.VCLibs.x64.14.00.appx")
+} else {
+    Write-Host "No Microsoft.VCLibs dependency: the executable links the static CRT."
+}
+
+# ---------------------------------------------------------------------------
 # 3. Resource index (makepri)
 # ---------------------------------------------------------------------------
 $makepri = Find-SdkTool "makepri.exe"

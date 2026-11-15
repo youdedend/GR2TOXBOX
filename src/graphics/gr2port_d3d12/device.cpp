@@ -60,7 +60,7 @@ void ResolveCaps(IDXGIAdapter4* adapter, ID3D12Device8* device, bool tearing, Ca
     // (SM 6.2) and Int64ShaderOps / Int16ShaderOps, but it does NOT report a
     // shader model version -- there is no ShaderModel member and no
     // "what model does this device support" query, because a D3D12 device supports
-    // every SM the runtime can compile. SM 6.6 is therefore a property of the
+    // every SM the runtime can compile. The ceiling is therefore a property of the
     // build (dxc's -T gives the ceiling the driver accepts) rather than of the
     // device, and what has to be checked at runtime is the features the shaders
     // depend on. This build targets *_6_4, the Xbox in UWP ceiling.
@@ -68,7 +68,7 @@ void ResolveCaps(IDXGIAdapter4* adapter, ID3D12Device8* device, bool tearing, Ca
     //
     // Native 16-bit shader operations are a separate, genuinely optional feature.
     // They are absent on Xbox in UWP, and the shaders' half-precision path is
-    // written to cope. Reading them as the answer to "is SM 6.6 available?"
+    // written to cope. Reading them as the answer to "is the shader model usable?"
     // conflated two things: a device without 16-bit ops was reported as unable to
     // run 6.6 shaders at all, and the check further down then refused to start.
     D3D12_FEATURE_DATA_D3D12_OPTIONS4 options4{};
@@ -77,19 +77,9 @@ void ResolveCaps(IDXGIAdapter4* adapter, ID3D12Device8* device, bool tearing, Ca
                                               sizeof(options4))) &&
         options4.Native16BitShaderOpsSupported != FALSE;
 
-    // Shader Model 6.6 needs no query of its own: it is a property of what the
-    // build targeted. Xbox in UWP stops at 6.4 (`SraKmd_arden`), which is what
-    // every stage here is compiled for anyway.
-#if defined(GR2_XBOX_UWP)
-    caps.shader_model_6_6 = false;
-#else
-    caps.shader_model_6_6 = true;
-#endif
-
-    // Bindless: the renderer indexes ResourceDescriptorHeap[] directly, which
-    // D3D12 exposes for SM 6.6 resources on 12_1 hardware. There is no separate
-    // feature bit; the capability is the shader model plus a resource binding
-    // tier of 3.
+    // Resource binding tier 3. This is the one capability the descriptor-table
+    // path actually needs: the tables span the whole heap, and only tier 3 lets a
+    // single table address every descriptor the arena hands out.
     D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
     bool tier3 = false;
     if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options,
@@ -97,7 +87,6 @@ void ResolveCaps(IDXGIAdapter4* adapter, ID3D12Device8* device, bool tearing, Ca
         tier3 = options.ResourceBindingTier == D3D12_RESOURCE_BINDING_TIER_3;
     }
     caps.binding_tier3 = tier3;
-    caps.bindless = tier3 && caps.shader_model_6_6;
 
     // Raytracing is optional (debug visualisation only). XBOX_SERIES_X_DEVICE
     // reports tier 1.1, Series S does too, but the renderer never requires it.
@@ -325,21 +314,22 @@ bool CreateDevice(const DeviceDesc& desc, Device& out) {
         out.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
 
     LOG_INFO(Graphics,
-             "D3D12 device: '{}', FL {:#x}, VRAM {} MiB, bindless {}, tearing {}, "
+             "D3D12 device: '{}', FL {:#x}, VRAM {} MiB, binding tier 3 {}, tearing {}, "
              "CoreWindow present {}",
              Trimmed(out.caps.description), static_cast<u32>(out.caps.feature_level),
-             out.caps.dedicated_vram / 1_MB, out.caps.bindless, out.caps.tearing,
+             out.caps.dedicated_vram / 1_MB, out.caps.binding_tier3, out.caps.tearing,
              out.core_window);
 
-    // Not a start condition any more. Every stage is compiled for *_6_4, which is
-    // both what Xbox in UWP accepts and a subset of what a 6.6-capable desktop
-    // driver takes. Whether the *bindless* path is usable is a separate question,
-    // answered by caps.bindless: the root signature and the shader header follow
-    // it, and the table path is the one that works on the console.
-    if (!out.caps.bindless) {
-        LOG_INFO(Graphics,
-                 "D3D12: ResourceDescriptorHeap[] unavailable (needs binding tier 3 and "
-                 "SM 6.6); descriptors are reached through a table instead");
+    // Every stage is compiled for *_6_4 and reaches the heap through descriptor
+    // tables, so there is nothing to branch on and nothing to refuse to start
+    // over. Below tier 3 the tables are smaller than the heap and a descriptor
+    // index can fall outside the range the table covers -- which shows up as a
+    // draw that samples whatever descriptor happens to be at that index rather
+    // than as an error, so it is worth saying out loud in the log.
+    if (!out.caps.binding_tier3) {
+        LOG_WARNING(Graphics,
+                    "D3D12: resource binding tier is below 3; a descriptor index past "
+                    "the table's range will read an unrelated descriptor");
     }
 
     const u64 budget = Core::Xbox::EffectiveD3d12HeapBudget();
@@ -349,17 +339,29 @@ bool CreateDevice(const DeviceDesc& desc, Device& out) {
 
 bool CreateSwapchain(Device& device, const DeviceDesc& desc) {
 #if defined(GR2_XBOX_UWP)
+    // Uwp::Display, fully qualified. Display lives in Gr2Port::Uwp::Display and
+    // this function is in Gr2Port::D3D12; unqualified lookup searches D3D12 and
+    // then Gr2Port, never a sibling namespace, so bare `Display::Mode` does not
+    // resolve. Qualifying it here is not cosmetic -- the unqualified form is the
+    // "undeclared identifier 'Display'" the Windows build reported.
+    //
+    // Both are declared at function scope, not inside the sizing block, because
+    // the composition-transform block further down uses `plan` and is its own #if.
+    Uwp::Display::Mode mode;
+    Uwp::Display::Plan plan;
+
     // On the console the backbuffer size is not the caller's choice: the panel, the
     // composition scale and the 4K cap all decide it, and a 4K request that the
     // panel cannot show has to be reduced rather than presented and scaled down.
-    // Display::MakePlan owns that arithmetic (and is tested on the host); this only
-    // hands it the numbers.
-    const auto mode_query = Uwp::QueryDisplayMode();
-    Display::Mode mode;
-    mode.width = mode_query.width;
-    mode.height = mode_query.height;
-    mode.composition_scale = mode_query.composition_scale;
-    const Display::Plan plan = Display::MakePlan(mode, desc.width, desc.height);
+    // Uwp::Display::MakePlan owns that arithmetic (and is tested on the host); this
+    // only hands it the numbers.
+    {
+        const auto mode_query = Uwp::QueryDisplayMode();
+        mode.width = mode_query.width;
+        mode.height = mode_query.height;
+        mode.composition_scale = mode_query.composition_scale;
+        plan = Uwp::Display::MakePlan(mode, desc.width, desc.height);
+    }
     const u32 width = std::max<u32>(plan.width, 64);
     const u32 height = std::max<u32>(plan.height, 64);
     LOG_INFO(Graphics, "D3D12: presenting {}x{} (display {}x{}, scale {:.2f})",

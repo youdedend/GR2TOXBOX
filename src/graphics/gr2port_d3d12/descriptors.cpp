@@ -35,7 +35,7 @@ bool BindlessHeap::Create(Device& device) {
     D3D12_DESCRIPTOR_HEAP_DESC srv_desc{};
     srv_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     srv_desc.NumDescriptors = SrvCapacity;
-    // Shader-visible: ResourceDescriptorHeap[] in SM 6.6 indexes this heap.
+    // Shader-visible: the descriptor tables in space100..space111 index this heap.
     srv_desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     srv_desc.NodeMask = 0;
     HRESULT hr = device_->CreateDescriptorHeap(&srv_desc, IID_PPV_ARGS(&srv_heap_));

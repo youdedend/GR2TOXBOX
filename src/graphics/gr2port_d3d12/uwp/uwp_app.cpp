@@ -21,10 +21,22 @@
 #if defined(GR2_XBOX_UWP)
 // The HDMI query. WinRT only exists on the console build; the desktop build
 // compiles this file too and must not see these headers.
+//
+// Windows.ApplicationModel.Core is the header that declares CoreApplication --
+// including only Windows.UI.Core left `winrt::Windows::ApplicationModel::Core`
+// an unknown namespace, which is a UWP-only error: the desktop build never
+// compiles this block, so nothing on the host noticed.
+#include <winrt/Windows.ApplicationModel.Core.h>
+#include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Graphics.Display.h>
 #include <winrt/Windows.Graphics.Display.Core.h>
 #include <winrt/Windows.UI.Core.h>
 #include <winrt/base.h>
+
+// The ABI (non-C++/WinRT) view of ICoreWindow, which is what the swapchain call
+// in device.cpp takes and what g_core_window actually holds. Without this,
+// ::ABI::Windows::UI::Core does not exist.
+#include <windows.ui.core.h>
 
 #include <cmath>
 #endif

@@ -12,7 +12,7 @@
 #include "common/grade.hlsli"
 #include "common/texel.hlsli"
 
-cbuffer BloomExtractConstants : register(b0) {
+cbuffer BloomExtractConstants : register(b1) {
     // Read-only per-frame grading data, an arena ref rather than a cbuffer so
     // the std430 layout is preserved exactly (common/grade.hlsli).
     ArenaRef g_grade;
@@ -31,7 +31,7 @@ cbuffer BloomExtractTextures : register(b2) {
 // The arena table: the buffer-table index of each arena, the value the arena
 // accessors below pass to DescriptorRaw(). Declared by every stage that reads
 // the arena, because a cbuffer must be visible where it is used.
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 

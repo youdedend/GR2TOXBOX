@@ -83,14 +83,14 @@ Sky LoadSky(ArenaRef ref, ArenaTable table) {
     return sky;
 }
 
-cbuffer SkyConstants : register(b0) {
+cbuffer SkyConstants : register(b1) {
     ArenaRef g_sky;
     uint g_pad0;
     uint g_pad1;
     uint g_pad2;
 };
 
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 

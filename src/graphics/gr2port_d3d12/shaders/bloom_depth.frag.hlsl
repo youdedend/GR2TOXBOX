@@ -18,7 +18,7 @@
 
 #include "common/texel.hlsli"
 
-cbuffer BloomDepthTextures : register(b0) {
+cbuffer BloomDepthTextures : register(b2) {
     uint g_scene_depth;
 };
 

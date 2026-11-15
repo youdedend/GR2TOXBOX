@@ -16,7 +16,7 @@
 #include "common/arena.hlsli"
 #include "common/texel.hlsli"
 
-cbuffer ImGuiConstants : register(b0) {
+cbuffer ImGuiConstants : register(b1) {
     ArenaRef g_vertices;
     float2 g_scale;
     float2 g_translate;
@@ -27,7 +27,7 @@ cbuffer ImGuiConstants : register(b0) {
 // The arena table: the SRV index of each arena, the value the arena accessors
 // going to DescriptorRaw() with. Declared by every stage that reads the
 // arena, because a cbuffer has to be visible where it is used.
-cbuffer ArenaConstants : register(b1) {
+cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 
