@@ -190,7 +190,28 @@ struct D3D12_GRAPHICS_PIPELINE_STATE_DESC {
     UINT NodeMask;
     D3D12_CACHED_PIPELINE_STATE CachedPSO;
     D3D12_PIPELINE_STATE_FLAGS Flags;
-    UINT PatchControlPoints;
+};
+// D3D12_GRAPHICS_PIPELINE_STATE_DESC deliberately has no PatchControlPoints: the
+// patch size lives in the pipeline state *stream*
+// (D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PATCH_CONTROL_POINTS). An earlier version
+// of this stub declared it here, which let pipeline.cpp compile against a member
+// the real SDK does not have and cost a Windows run to find.
+struct D3D12_PIPELINE_STATE_STREAM_DESC {
+    SIZE_T SizeInBytes;
+    void* pPipelineStateSubobjectStream;
+};
+enum D3D12_PIPELINE_STATE_SUBOBJECT_TYPE {
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE,
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS,
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS,
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS,
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS,
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS,
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY,
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PATCH_CONTROL_POINTS,
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS,
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT,
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MAX_VALID,
 };
 struct D3D12_COMPUTE_PIPELINE_STATE_DESC {
     void* pRootSignature;
@@ -243,10 +264,14 @@ struct ID3D12GraphicsCommandList7 : ID3D12GraphicsCommandList {
 };
 struct ID3D12PipelinePipelineUnused;
 struct ID3D12PipelineState : ID3D12Pageable {};
+// Serialize only. A library is loaded by passing its blob to
+// ID3D12Device::CreatePipelineLibrary; there is no Deserialize on this interface.
+// The stub used to declare one, and pipeline.cpp called it -- a mistake no
+// amount of care in the backend would have caught against a stub that invented
+// the method.
 struct ID3D12PipelineLibrary : ID3D12DeviceChild {
     virtual SIZE_T GetSerializedSize() = 0;
     virtual HRESULT Serialize(void*, SIZE_T) = 0;
-    virtual HRESULT Deserialize(const void*, SIZE_T) = 0;
 };
 struct ID3D12Fence : ID3D12Pageable {
     virtual unsigned long long GetCompletedValue() = 0;

@@ -324,9 +324,18 @@ bool CreateGraphicsPipeline(ID3D12Device8* device, const RootSignature& root,
     state.DSVFormat = desc.depth_format;
     state.SampleDesc.Count = desc.sample_count;
     state.SampleDesc.Quality = 0;
-    // The tessellator's patch size lives in the PSO in D3D12, where Vulkan takes
-    // it as dynamic state.
-    state.PatchControlPoints = desc.hs.empty() ? 0 : desc.patch_control_points;
+    // Patch control points are deliberately not set: D3D12_GRAPHICS_PIPELINE_STATE_DESC
+    // has no such member. It exists only in the pipeline state *stream*
+    // (D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PATCH_CONTROL_POINTS), which is the
+    // description a tessellating pipeline needs. The tessellation stages are not
+    // ported yet, so nothing asks for it; when leaf.tesc/leaf.tese are, the
+    // stream description is what will build them, not this struct.
+    if (!desc.hs.empty() && desc.patch_control_points != 0) {
+        LOG_WARNING(Graphics,
+                    "D3D12 pipeline: a hull shader was given but the pipeline-state "
+                    "description cannot carry its {} control points; building it as "
+                    "non-tessellated", desc.patch_control_points);
+    }
 
     const HRESULT hr = device->CreateGraphicsPipelineState(
         &state, IID_PPV_ARGS(out.state.GetAddressOf()));
@@ -510,7 +519,16 @@ bool PipelineCache::LoadLibrary(const wchar_t* path) {
     if (bytes.empty()) {
         return false;
     }
-    const HRESULT hr = library_->Deserialize(bytes.data(), bytes.size());
+    // A pipeline library is loaded by handing its blob back to the device.
+    // ID3D12PipelineLibrary has Serialize but no Deserialize: the interface was
+    // designed so that deserialisation happens where the library is created.
+    ComPtr<ID3D12PipelineLibrary> loaded;
+    const HRESULT hr = device_->device->CreatePipelineLibrary(
+        bytes.data(), bytes.size(), IID_PPV_ARGS(loaded.GetAddressOf()));
+    if (SUCCEEDED(hr)) {
+        std::lock_guard lock{mutex_};
+        library_ = std::move(loaded);
+    }
     if (FAILED(hr)) {
         // A library written by a different driver or a different shader set is
         // not an error: it simply does not apply, and the states are rebuilt.
