@@ -143,6 +143,14 @@ needs the ~5 GB Game-mode pool: in Xbox Device Portal open the app's settings an
 change App type from 'App' to 'Game', then relaunch.
 ```
 
+**The package is self-contained.** `GR2port.exe` links the static CRT (`/MT`), so
+the `.msix` has no dependency on the Microsoft Visual C++ Runtime framework
+package. There is no `Microsoft.VCLibs` to install first and no ordering to get
+wrong: sideloading is one package, in one step. If a future change switches to the
+dynamic CRT, the manifest has to grow a matching `<PackageDependency>` at the same
+time or the title installs, shows its icon, and dies at launch with
+`0xc0000135`. `tools/ci/check_uwp_manifest.py` fails if the two ever disagree.
+
 ## 7. Preparing your game dump
 
 **You must supply your own legally dumped copy of Gravity Rush 2 (PS4), version

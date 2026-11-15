@@ -153,6 +153,34 @@ def main():
         if name in caps:
             problems.append(f"capability '{name}' is present: {why}")
 
+    # --- framework dependencies vs. the CRT --------------------------------
+    # The package must agree with how the executable linked the CRT. With the
+    # static CRT there must be no VCLibs dependency (and declaring one anyway makes
+    # the console require a framework package for nothing); with the dynamic CRT
+    # there must be one, or the title installs and dies at launch with 0xc0000135.
+    # CMakeLists.txt selects the static CRT for GR2_XBOX_UWP, so the expected state
+    # here is "no framework PackageDependency".
+    cmake = ""
+    cmakelists = "CMakeLists.txt"
+    if os.path.exists(cmakelists):
+        cmake = open(cmakelists, encoding="utf-8").read()
+    static_crt = re.search(
+        r'set\(CMAKE_MSVC_RUNTIME_LIBRARY\s+"MultiThreaded', cmake
+    ) is not None
+    vclibs = re.search(r'<PackageDependency\s+Name="Microsoft\.VCLibs', raw)
+    if static_crt and vclibs:
+        problems.append(
+            "the build links the static CRT but the manifest declares a "
+            "Microsoft.VCLibs PackageDependency; one of the two is stale"
+        )
+    if not static_crt and not vclibs:
+        problems.append(
+            "the build does not set CMAKE_MSVC_RUNTIME_LIBRARY (so the dynamic CRT, "
+            "which is the default) but the manifest declares no Microsoft.VCLibs "
+            "PackageDependency -- the package would install and then fail at launch "
+            "with 0xc0000135"
+        )
+
     # --- identity and version -----------------------------------------------
     identity = re.search(r"<Identity\b[^>]*>", raw, re.S)
     if not identity:

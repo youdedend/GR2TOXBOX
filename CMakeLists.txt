@@ -100,6 +100,30 @@ if (GR2_XBOX_UWP)
     add_compile_definitions(GR2_XBOX_UWP=1 WINAPI_FAMILY=WINAPI_FAMILY_APP
                             MINIMP3_NO_STDIO=1)
 
+    # Link the static CRT.
+    #
+    # With the dynamic CRT (the default) the package depends on the Microsoft
+    # Visual C++ Runtime framework package, which has to be declared as a
+    # <PackageDependency> on Microsoft.VCLibs.x64.14.00 AND installed on the
+    # console before the title will start. The framework appx can be redistributed,
+    # but sideloading then becomes two installs in the right order with a failure
+    # mode that reads as a broken build: the package installs, the icon appears, and
+    # launching it dies before main() with 0xc0000135 (DLL not found).
+    #
+    # /MT removes the dependency outright. The cost is a larger executable and no
+    # shared patching of the CRT, neither of which matters for a single
+    # self-contained title -- and self-contained is exactly what a sideloaded
+    # package should be.
+    #
+    # Set as a normal variable before add_subdirectory(externals): the policy has
+    # to be NEW for CMAKE_MSVC_RUNTIME_LIBRARY to mean anything, and it must be in
+    # scope for every target under it, not just gr2port.
+    if (POLICY CMP0091)
+        cmake_policy(SET CMP0091 NEW)
+    endif()
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    message(STATUS "GR2toXBOX: static CRT (/MT) -- the package has no VCLibs dependency")
+
     # The SDL3 shim. SDL 3 removed WinRT/UWP support during development and its
     # own header carries an #error saying so, while this project's entire
     # frontend is SDL. src/uwp/sdl3_shim/ replaces two things: the platform

@@ -169,6 +169,7 @@ jobs:
   # Job 1: Desktop Win64 Direct3D 12
   # ---------------------------------------------------------------------------
   windows-d3d12:
+    timeout-minutes: 35
     runs-on: windows-2022
     needs: get-info
     steps:
@@ -299,7 +300,7 @@ jobs:
   # UWP-only errors surface, and gating it behind the 25-minute desktop build meant
   # waiting half an hour for an answer that was available immediately.
   xbox-uwp-msix:
-    timeout-minutes: 120
+    timeout-minutes: 35
     runs-on: windows-2022
     needs: get-info
     if: ${{ !inputs.skip_uwp }}

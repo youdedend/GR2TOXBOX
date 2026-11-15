@@ -39,7 +39,9 @@ if ($env:GR2_CERT_PFX_BASE64 -and $env:GR2_CERT_PASSWORD) {
     Write-Host "Using the certificate from repository secrets."
     [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:GR2_CERT_PFX_BASE64))
     $secure = ConvertTo-SecureString -String $env:GR2_CERT_PASSWORD -AsPlainText -Force
-    $cert = Get-PfxCertificate -FilePath $pfxPath
+    # X509Certificate2 with the password. The Get-PfxCertificate call that used to
+    # sit here was both dead (overwritten on the next line) and a hang: a protected
+    # .pfx makes it prompt on stdin, which nothing answers in CI.
     $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
         $pfxPath, $secure)
     $cerBytes = $cert.Export(
@@ -70,7 +72,10 @@ if ($env:GR2_CERT_PFX_BASE64 -and $env:GR2_CERT_PASSWORD) {
     "GR2_PFX_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 }
 
-$thumbprint = (Get-PfxCertificate -FilePath $cerPath).Thumbprint
+$cerCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+    (Resolve-Path $cerPath).Path)
+$thumbprint = $cerCert.Thumbprint
+$cerCert.Dispose()
 Write-Host "Certificate thumbprint: $thumbprint"
 "GR2_CERT_THUMBPRINT=$thumbprint" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 "GR2_CERT_SUBJECT=$Subject" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8

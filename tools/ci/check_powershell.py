@@ -181,6 +181,23 @@ def check(path, problems):
                 f"Resolve it once before the Push-Location and use that."
             )
 
+    # Get-PfxCertificate on a password-protected .pfx blocks on stdin.
+    #
+    # It has no -Password parameter, so on a protected file it prints
+    # "Enter password for the private-key file:" and waits for input that a headless
+    # CI step never provides. The step then hangs with no output until the job
+    # timeout -- 80 minutes, once. X509Certificate2 takes the password as an
+    # argument and never prompts; there is no reason to use the other one here.
+    # Comments are stripped first so an explanatory comment is not a violation.
+    code = strip_for_balance(src)
+    for m in re.finditer(r"Get-PfxCertificate", code):
+        line = code[: m.start()].count("\n") + 1
+        problems.append(
+            f"{path}:{line}: Get-PfxCertificate can block forever on a "
+            f"password-protected .pfx (no -Password parameter, prompts on stdin). "
+            f"Use [X509Certificate2]::new($path, $password) instead."
+        )
+
     # makepri /dq takes one default qualifier *set*: tokens of the form
     # <dimension>-<value> joined by underscores. A bare language tag, or a
     # comma-separated list, is rejected at runtime -- and the rejection arrives as

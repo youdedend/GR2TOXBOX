@@ -250,7 +250,18 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # The signer's thumbprint is what has to match the certificate the bundle ships.
-$expectedThumb = (Get-PfxCertificate -FilePath $pfx).Thumbprint
+#
+# Load the .pfx through X509Certificate2 with the password, NEVER through
+# Get-PfxCertificate. A .pfx with a password is a *protected* format, and
+# Get-PfxCertificate has no -Password parameter: on a protected file it prompts on
+# stdin ("Enter password for the private-key file:") and waits. In a headless CI
+# step nothing ever types, so the step sits there until the job times out -- no
+# output, no error, nothing in the log. That is what hung this job for 80 minutes.
+# X509Certificate2 takes the password as an argument and never prompts.
+$pfxCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+    (Resolve-Path $pfx).Path, $password, 'EphemeralKeySet')
+$expectedThumb = $pfxCert.Thumbprint
+$pfxCert.Dispose()
 $packageCert = Get-AuthenticodeSignature -FilePath $msixPath
 if ($packageCert.Status -eq 'NotSigned' -or -not $packageCert.SignerCertificate) {
     throw "The package is not signed. signtool reported: $verifyOutput"
@@ -273,7 +284,13 @@ if ($packageCert.SignerCertificate.Thumbprint -ne $expectedThumb) {
 # is not the signer's certificate the package will refuse to install with
 # 0x800B0109 and look like a corrupt download.
 $cerPath = Join-Path $SigningDir "GR2port-XboxDevMode.cer"
-$shipped = (Get-PfxCertificate -FilePath $cerPath).Thumbprint
+# Same reasoning: X509Certificate2, not Get-PfxCertificate. A .cer holds no private
+# key so it is not password-protected in practice, but the rule is the rule -- and
+# the one place it is violated is the one place that hangs.
+$cerCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+    (Resolve-Path $cerPath).Path)
+$shipped = $cerCert.Thumbprint
+$cerCert.Dispose()
 if ($shipped -ne $expectedThumb) {
     throw "The .cer in the bundle ($shipped) is not the signing certificate ($expectedThumb)."
 }
