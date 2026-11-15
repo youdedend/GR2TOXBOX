@@ -45,6 +45,14 @@ NOT_A_VARIABLE = re.compile(
 )
 
 
+# The qualifier dimensions makepri recognises in a /dq token.
+QUALIFIER_DIMENSIONS = {
+    "lang", "scale", "contrast", "homeRegion", "targetSize", "layoutDirection",
+    "theme", "alternateForm", "dxFeatureLevel", "configuration", "deviceFamily",
+    "custom",
+}
+
+
 def strip_for_balance(src):
     """Remove comments and string literals so brace counting means something."""
     out = []
@@ -172,6 +180,36 @@ def check(path, problems):
                 f"did Push-Location ${var} -- the relative path resolves twice. "
                 f"Resolve it once before the Push-Location and use that."
             )
+
+    # makepri /dq takes one default qualifier *set*: tokens of the form
+    # <dimension>-<value> joined by underscores. A bare language tag, or a
+    # comma-separated list, is rejected at runtime -- and the rejection arrives as
+    # "makepri createconfig failed (1)" on a 24-minute run.
+    for m in re.finditer(r"createconfig[^\n]*/dq\s+(\S+)", src):
+        value = m.group(1)
+        if value.startswith('"$') or value.startswith("$"):
+            continue  # built at runtime; checked below by shape where possible
+        if "," in value:
+            problems.append(
+                f"{path}: makepri /dq {value!r} is comma-separated; qualifiers within "
+                f"one set are joined by underscores"
+            )
+        for token in value.split("_"):
+            dimension = token.split("-", 1)[0] if "-" in token else ""
+            if dimension.lower() not in QUALIFIER_DIMENSIONS:
+                problems.append(
+                    f"{path}: makepri /dq token {token!r} does not start with a known "
+                    f"qualifier dimension ({', '.join(sorted(QUALIFIER_DIMENSIONS))}); "
+                    f"a language qualifier is 'lang-en-US', not 'en-US'"
+                )
+
+    # A qualifier string assembled from a list of languages is the same mistake in
+    # its dynamic form: lang- takes one value.
+    for m in re.finditer(r"\$\w*[Qq]ualifiers?\s*=\s*\([^)]*-join\s+','", src):
+        problems.append(
+            f"{path}: a makepri qualifier set is being built by joining with ','; "
+            f"there is one default language and it is spelled lang-<tag>"
+        )
 
     # Find-SdkTool must name tools that exist in the SDK
     for m in re.finditer(r'Find-SdkTool\s+"([^"]+)"', src):

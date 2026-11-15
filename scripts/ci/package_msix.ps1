@@ -26,6 +26,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+
 function Find-SdkTool([string]$name) {
     $cmd = Get-Command $name -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
@@ -146,23 +147,38 @@ $makepri = Find-SdkTool "makepri.exe"
 $StageFull = (Resolve-Path $StageDir).Path
 Push-Location $StageFull
 try {
-    # The qualifier set has to cover every language the manifest declares.
-    # <Resource Language> in Package.appxmanifest lists en-us, ja-jp and ko-kr, and a
-    # package whose PRI was built for en-US alone is rejected with a manifest/ PRI
-    # mismatch -- which reads as a packaging error rather than a one-word omission.
-    # Read the list from the manifest so the two cannot drift.
+    # /dq is a single *default* qualifier set, not a list of languages.
+    #
+    # Two things make this easy to get wrong, and both were wrong here first:
+    #
+    #   * a qualifier is a token of the form <dimension>-<value>, so the language
+    #     qualifier is 'lang-en-US', not 'en-US'. A bare language tag is not a
+    #     qualifier token and makepri createconfig rejects it outright.
+    #   * within one set, qualifiers are separated by underscores
+    #     (lang-en-US_scale-100), and separators are for *different* dimensions.
+    #     There is exactly one default language, so a comma-separated list of
+    #     languages is never valid here.
+    #
+    # The manifest is what tells 'makepri new' the full set of languages the
+    # package supports; /dq only says which one is the default. So the primary
+    # language from the manifest is the right input, and the rest of the list does
+    # not belong on this command line.
     $manifestXml = [xml](Get-Content (Join-Path $StageFull "AppxManifest.xml") -Raw)
     $languages = @($manifestXml.Package.Resources.Resource |
         ForEach-Object { $_.Language } | Where-Object { $_ })
     if ($languages.Count -eq 0) { $languages = @("en-US") }
-    # makepri wants a comma-separated qualifier list, in BCP-47 casing.
-    $defaultQualifiers = ($languages | ForEach-Object {
-        $parts = $_ -split '-'
-        if ($parts.Count -eq 2) { "$($parts[0])-$($parts[1].ToUpper())" } else { $_ }
-    }) -join ','
-    Write-Host "Resource qualifiers: $defaultQualifiers"
-    & $makepri createconfig /cf priconfig.xml /dq $defaultQualifiers /o | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "makepri createconfig failed ($LASTEXITCODE)" }
+    $primary = $languages[0]
+    $parts = $primary -split '-'
+    if ($parts.Count -eq 2) { $primary = "$($parts[0])-$($parts[1].ToUpper())" }
+    $defaultQualifiers = "lang-$primary"
+    Write-Host "Default qualifier set: $defaultQualifiers (manifest languages: $($languages -join ', '))"
+    # Not piped to Out-Null: when makepri refuses a qualifier it says so, and that
+    # sentence is the whole diagnosis. Discarding it left "makepri createconfig
+    # failed (1)" and no reason.
+    & $makepri createconfig /cf priconfig.xml /dq $defaultQualifiers /o
+    if ($LASTEXITCODE -ne 0) {
+        throw "makepri createconfig failed ($LASTEXITCODE) for qualifiers '$defaultQualifiers'"
+    }
     & $makepri new /pr . /cf priconfig.xml /of resources.pri /in AppxManifest.xml /o
     if ($LASTEXITCODE -ne 0) { throw "makepri new failed ($LASTEXITCODE)" }
     Remove-Item -Force priconfig.xml
