@@ -111,6 +111,30 @@ else
     echo "  ok   src/core/uwp_memory.cpp (GR2_XBOX_UWP)"
 fi
 
+# The SDL3 shim, against SDL's own headers.
+#
+# This is the check that makes the shim trustworthy: the real SDL headers are on
+# the include path and the shim's replacement SDL_platform_defines.h wins for the
+# one header it replaces, so every definition in the shim is compiled against
+# SDL's own declaration of it. A wrong return type or a swapped parameter order
+# fails here in a second rather than on a Windows runner.
+#
+# The stub <windows.h> supplies the Win32 names the console branches use, and
+# -include it is what makes them visible before the shim's own includes.
+for file in src/uwp/sdl3_shim/*.cpp; do
+    [ -f "$file" ] || continue
+    if ! "$CXX" "${CXXFLAGS[@]}" -Iexternals/sdl3/include -Isrc/uwp/sdl3_shim \
+            -Itools/ci/stubs -include tools/ci/stubs/windows.h \
+            -fsyntax-only "$file" 2>"$OUT/err"; then
+        echo "  FAIL $file (SDL shim)"
+        sed 's/^/    /' "$OUT/err" | head -20
+        annotate_log "$file" "$OUT/err"
+        failures=$((failures + 1))
+    else
+        echo "  ok   $file (SDL shim)"
+    fi
+done
+
 # The Direct3D 12 backend, against the header stub. There is no Windows SDK here,
 # so this is the only way to type-check a backend file before a Windows runner
 # does it. Errors from the vendored D3D12MA header are filtered: the stub does

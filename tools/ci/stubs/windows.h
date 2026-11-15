@@ -103,11 +103,44 @@ typedef struct _LARGE_INTEGER {
     };
 } LARGE_INTEGER;
 
-typedef struct _MEMORYSTATUSEX MEMORYSTATUSEX;
+typedef struct _MEMORYSTATUSEX {
+    DWORD dwLength;
+    DWORD dwMemoryLoad;
+    unsigned long long ullTotalPhys;
+    unsigned long long ullAvailPhys;
+    unsigned long long ullTotalPageFile;
+    unsigned long long ullAvailPageFile;
+    unsigned long long ullTotalVirtual;
+    unsigned long long ullAvailVirtual;
+    unsigned long long ullAvailExtendedVirtual;
+} MEMORYSTATUSEX;
+
 typedef struct _FILETIME {
     DWORD dwLowDateTime;
     DWORD dwHighDateTime;
 } FILETIME;
+
+// --- psapi.h's surface, which uwp_memory.cpp uses -------------------------
+// Declared here rather than in psapi.h so there is one spelling of each name;
+// <psapi.h> in this tree includes this header and adds only what is genuinely
+// psapi's.
+typedef struct _PROCESS_MEMORY_COUNTERS {
+    DWORD cb;
+    DWORD PageFaultCount;
+    unsigned long long PeakWorkingSetSize;
+    unsigned long long WorkingSetSize;
+    unsigned long long QuotaPeakPagedPoolUsage;
+    unsigned long long QuotaPagedPoolUsage;
+    unsigned long long QuotaPeakNonPagedPoolUsage;
+    unsigned long long QuotaNonPagedPoolUsage;
+    unsigned long long PagefileUsage;
+    unsigned long long PeakPagefileUsage;
+} PROCESS_MEMORY_COUNTERS;
+
+typedef struct _PROCESS_MEMORY_COUNTERS_EX {
+    PROCESS_MEMORY_COUNTERS counters;
+    unsigned long long PrivateUsage;
+} PROCESS_MEMORY_COUNTERS_EX;
 
 // --- Functions the console code calls -------------------------------------
 // Declared, never defined: this header exists so the host compiler can parse the
@@ -127,6 +160,8 @@ HMODULE GetModuleHandleW(LPCWSTR name);
 DWORD GetModuleFileNameW(HMODULE module, LPWSTR filename, DWORD size);
 void OutputDebugStringW(LPCWSTR message);
 void OutputDebugStringA(LPCSTR message);
+BOOL GetProcessMemoryInfo(HANDLE process, PROCESS_MEMORY_COUNTERS* counters, DWORD size);
+BOOL GlobalMemoryStatusEx(MEMORYSTATUSEX* status);
 
 #ifdef __cplusplus
 }
