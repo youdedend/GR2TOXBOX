@@ -1260,7 +1260,7 @@ if (GR2_XBOX_UWP)
         src/uwp/sdl3_shim/sdl_audio_uwp.cpp
         src/uwp/sdl3_shim/sdl_input.cpp
         src/uwp/sdl3_shim/sdl_iostream.cpp
-        src/uwp/sdl3_shim/sdl_internal.h
+        src/uwp/sdl3_shim/gr2_sdl_internal.h
         src/uwp/sdl3_shim/pad_state.h
         src/uwp/sdl3_shim/audio_output.h
         src/uwp/sdl3_shim/chords_glue.h

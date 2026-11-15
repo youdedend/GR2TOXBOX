@@ -12,6 +12,12 @@
 /// one SDL module. It is not part of SDL and no emulator file includes it, which is
 /// what keeps the shim's internals from leaking into the include path the rest of
 /// the project sees.
+///
+/// The name is gr2_sdl_internal.h rather than sdl_internal.h on purpose. This
+/// header sits on the include path ahead of SDL's own tree, and Windows file names
+/// are case-insensitive, so an sdl_internal.h here would be picked up in place of
+/// SDL's own src/SDL_internal.h -- which is exactly what happened once, and broke
+/// every SDL source file in the UWP build with "expected identifier or '('".
 extern "C" {
 
 /// Runs every registered SDL_AddEventWatch filter against an event.

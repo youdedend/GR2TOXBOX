@@ -104,7 +104,25 @@ if (NOT TARGET SDL3::SDL3)
     set(SDL_TEST_LIBRARY OFF)
     set(SDL_PIPEWIRE OFF)
     set(SDL_AVX512F OFF)
-    add_subdirectory(sdl3)
+    if (GR2_XBOX_UWP)
+        # The Xbox package does not use SDL's library at all: src/uwp/sdl3_shim/
+        # provides every SDL call the emulator makes, over CoreWindow,
+        # Windows.Gaming.Input and XAudio2. SDL3 is still needed here because its
+        # *real headers* are what the shim compiles against -- that is what stops a
+        # signature from drifting -- but building its sources would be wasted work
+        # that cannot succeed: SDL 3 dropped UWP support and its own internal
+        # sources call APIs the onecore surface does not have.
+        #
+        # So the target exists, carries the headers, and has no sources. The link
+        # line still names SDL3::SDL3 because gr2port links it unconditionally on
+        # every platform; an interface library keeps that uniform.
+        add_library(SDL3-shim-headers INTERFACE)
+        target_include_directories(SDL3-shim-headers SYSTEM INTERFACE
+            "${CMAKE_CURRENT_SOURCE_DIR}/sdl3/include")
+        add_library(SDL3::SDL3 ALIAS SDL3-shim-headers)
+    else()
+        add_subdirectory(sdl3)
+    endif()
 endif()
 
 # vulkan-headers

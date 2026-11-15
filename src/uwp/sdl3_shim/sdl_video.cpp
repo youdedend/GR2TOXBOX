@@ -23,7 +23,7 @@
 
 #include <windows.h>
 
-#include "uwp/sdl3_shim/sdl_internal.h"
+#include "uwp/sdl3_shim/gr2_sdl_internal.h"
 
 #include <algorithm>
 #include <map>
