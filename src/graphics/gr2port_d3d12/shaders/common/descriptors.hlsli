@@ -39,6 +39,7 @@
 #define SPACE_TEX3D_F4 101
 #define SPACE_CUBE_F4 102
 #define SPACE_TEX2D_F1 103
+#define SPACE_TEX2DARR_F1 111
 #define SPACE_RW_TEX3D_F4 104
 #define SPACE_RW_TEX3D_F2 105
 #define SPACE_RW_TEX3D_F1 106
@@ -61,6 +62,11 @@ Texture2D<float4> g_tex2d[GR2_TABLE_SRVS] : register(t0, space100);
 Texture3D<float4> g_volume[GR2_TABLE_SRVS] : register(t0, space101);
 TextureCube<float4> g_cube[GR2_TABLE_SRVS] : register(t0, space102);
 Texture2D<float> g_tex2d_f[GR2_TABLE_SRVS] : register(t0, space103);
+// The cascaded shadow maps are a 2D array, not a 2D texture -- a distinct view
+// dimension, so a distinct table. Kept apart from g_tex2d_f because a descriptor
+// declared as the wrong dimension is not reinterpreted: the sampler reads it as
+// the declared type and returns the wrong pixels (dxc caught exactly this).
+Texture2DArray<float> g_tex2darr_f[GR2_TABLE_SRVS] : register(t0, space111);
 
 RWTexture3D<float4> g_rw3d_f4[GR2_TABLE_SRVS] : register(u0, space104);
 RWTexture3D<float2> g_rw3d_f2[GR2_TABLE_SRVS] : register(u0, space105);
@@ -90,6 +96,10 @@ TextureCube<float4> DescriptorCube(uint h) {
 
 Texture2D<float> DescriptorDepth(uint h) {
     return g_tex2d_f[NonUniformResourceIndex(h)];
+}
+
+Texture2DArray<float> DescriptorDepthArray(uint h) {
+    return g_tex2darr_f[NonUniformResourceIndex(h)];
 }
 
 RWTexture3D<float4> DescriptorRwVolumeF4(uint h) {

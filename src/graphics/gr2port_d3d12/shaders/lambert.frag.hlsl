@@ -83,8 +83,7 @@ struct PsInput {
 // to scratch memory and the comparison sampler reads a register it cannot index.
 // Two explicit blocks cost nothing and cannot be miscompiled.
 float KeyShadow(PsInput input) {
-    Texture2DArray<float> cascades =
-        DescriptorDepth(g_shadow_map);
+    Texture2DArray<float> cascades = DescriptorDepthArray(g_shadow_map);
     SamplerComparisonState sampler = DescriptorComparisonSampler(SMP_COMPARISON);
 
     const float3 first = input.shadow_clip0.xyz / input.shadow_clip0.w;

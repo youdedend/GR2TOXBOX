@@ -46,7 +46,7 @@ is untouched: the game's own code runs.
    ├──────────────────────────────────────────────┤
    │ Direct3D 12 backend (new)                     │
    │   device / allocator / descriptors / arena    │
-   │   HLSL SM 6.6 shaders                         │
+   │   HLSL SM 6.4 shaders, descriptor tables      │
    ├──────────────────────────────────────────────┤
    │ Xbox UWP shell (new)                          │
    │   IFrameworkView / CoreWindow / Gamepad       │
@@ -180,7 +180,7 @@ const uint64_t vertices = draws.draws[gl_BaseInstance].vertices;
 const vec3 p = LoadPosition(vertices, stride, offset);      // dereferences uint64
 ```
 
-HLSL has no equivalent: SM 6.6 DXIL has no generic pointer, and
+HLSL has no equivalent: DXIL has no generic pointer, and
 `GL_EXT_buffer_reference` has no D3D analogue.
 
 The arena turns a pointer into a pair:
@@ -193,11 +193,13 @@ Draw draw = LoadDraw(g_scene, g_scene.base_instance, g_arena);
 float3 p = LoadPosition(draw.vertices, draw.stride, draw.position, vertex_index, g_arena);
 ```
 
-and the accessor resolves it through the bindless heap:
+and the accessor resolves it through the bindless heap, which the shader reaches
+through a typed descriptor table -- see section 5a for why it is not
+`ResourceDescriptorHeap[]`:
 
 ```hlsl
 ByteAddressBuffer ArenaBuffer(ArenaRef ref, ArenaTable table) {
-    return ResourceDescriptorHeap[NonUniformResourceIndex(ArenaIndex(ref, table))];
+    return DescriptorRaw(ArenaIndex(ref, table));   // g_raw[NonUniformResourceIndex(h)]
 }
 uint4 ArenaLoad4(ArenaRef ref, ArenaTable table) {
     return ArenaBuffer(ref, table).Load4(ref.offset);
@@ -263,7 +265,7 @@ rate cap.
 ```
 src/graphics/gr2port_d3d12/shaders/*.hlsl
         │
-        ├─ dxc -T vs_6_6 -HV 2021 -O3 -WX -Qstrip_reflect
+        ├─ dxc -T vs_6_4 -HV 2021 -O3 -WX -Qstrip_reflect
         │
         ▼
    DXIL container (.dxil)
@@ -281,8 +283,8 @@ Properties:
 * **A shader warning fails the build** (`-WX`). A misspelt semantic or an
   implicit truncation that would silently corrupt a picture on a console is a
   CI failure instead.
-* **Stage inference is checked at configure time**: `.tesc` maps to `hs_6_6`,
-  `.tese` to `ds_6_6`, an unknown extension is a `FATAL_ERROR`, so no stage can
+* **Stage inference is checked at configure time**: `.tesc` maps to `hs_6_4`,
+  `.tese` to `ds_6_4`, an unknown extension is a `FATAL_ERROR`, so no stage can
   quietly be left out.
 * **Coverage is measured, not claimed**:
   `python3 tools/shaders/check_shader_coverage.py` compares the HLSL tree with
@@ -295,6 +297,66 @@ Shared headers replace upstream's shared GLSL:
 | `common/arena.hlsli` | `GL_EXT_buffer_reference`, the `Words`/`Rows` views, half/unorm unpacking |
 | `common/vertex.hlsli` | `vertex.glsl` — vertex pulling and skinning |
 | `common/scene.hlsli` | `scene.glsl` — Draw/Material/Decal packets, `gl_BaseInstance` |
+| `common/descriptors.hlsli` | the descriptor tables (see 5a) |
+| `common/texel.hlsli` | `surface.glsl` — texture sampling through the tables |
+
+### 5a. What the console's D3D12 driver actually allows
+
+These are not guesses and not documentation from Microsoft: they are the limits
+that `SraKmd_arden`, the driver a retail Xbox Series X|S runs in UWP Dev Mode,
+enforces -- established by another emulator that hit each of them on hardware
+(`Cosmo/KytyPS5`, GPL-2.0, branch `xbox-on-upstream-2026-11-14-11d834dd`, whose
+`docs/d3d12-backend.md`, `XBOX_CHANGES.md` and `src/uwp/src/app.cpp` are the
+references for everything in this section). Each one below is a failure that
+shows up on a console and nowhere else, which is why it is written down here
+rather than discovered again.
+
+**The device.** Feature level 11_0, Shader Model 6.4, resource binding tier 3,
+tiled resources tier 1, wave operations at 64 lanes, typed UAV loads. No native
+16-bit shader operations, no barycentrics, no mesh shaders. `D3D12CreateDevice`
+must be asked for 11_0 there -- a 12_1 request fails outright -- so the build
+requests 11_0 under `GR2_XBOX_UWP` and 12_1 elsewhere. Feature level and shader
+model are separate ceilings on this driver: an 11_0 device still takes 6.4 DXIL.
+
+**Shader Model 6.4 is the shader ceiling.** A 6.6 module does not load. That
+costs one thing this backend was built on -- `ResourceDescriptorHeap[]` direct
+heap indexing, which is a 6.6 feature -- so every stage now reaches the same heap
+through typed descriptor tables instead (`common/descriptors.hlsli`, one table
+per resource kind, all bound to the heap base, a handle still one `u32`).
+
+**`CreatePipelineLibrary` removes the device.** The call itself, not its
+arguments, so there is no HRESULT to check and no recovery. Both call sites are
+compiled out on this build. DXIL is still cached on disk -- that is the part that
+saves shader translation -- and PSOs are created per run.
+
+**Constant-alpha blend factors** (`D3D12_BLEND_BLEND_FACTOR` and
+`..._INV_BLEND_FACTOR` on alpha) fail PSO creation with `E_INVALIDARG`. This
+backend uses `ONE`/`ZERO`/`SRC_ALPHA`/`INV_SRC_ALPHA` only, so it is already
+clear of it; the guard is to keep it that way.
+
+**96-bit `RGB32` textures** cannot be created. Vertex input of those formats is
+fine. The backend does not create them.
+
+**32 KiB of `groupshared` per compute shader** is the ceiling; the fog volumes are
+well inside it, and a shader that exceeded it would fail PSO creation rather than
+run slowly.
+
+**A read-only depth view** is needed whenever one draw both depth-tests and
+samples depth. `D3D12_RESOURCE_STATE_DEPTH_READ` with
+`PIXEL_SHADER_RESOURCE` is what `command.cpp` transitions to.
+
+**`WaveActiveBallot` and helper lanes.** At 6.4 helper lanes are not in the
+ballot, so an empty ballot in a pixel shader must not be treated as "no lanes
+active, loop forever" -- the lane has to keep its own value. Nothing in this port
+uses a ballot yet; it applies to the compute ports still to come.
+
+**4K output.** On an Xbox the `CoreWindow` is 1920x1080 whatever the TV is, so a
+4K picture reaches the screen at 1080p and the console scales it back up. The
+swap chain is sized from `HdmiDisplayInformation.GetForCurrentView()`
+`.GetCurrentDisplayMode()` instead, with the panel's inverse scale transform, and
+clamped to 3840x2160. **Not yet implemented here** -- `src/uwp/` presents at the
+window size today, so a 4K title renders at 1080p. Kyty's `src/uwp/src/app.cpp`
+has the working pattern.
 
 ---
 

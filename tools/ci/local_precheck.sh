@@ -390,6 +390,25 @@ else
     echo "  ok   HLSL is SM 6.4 (no 6.6-only constructs)"
 fi
 
+# The descriptor tables agree between the shader header and the C++ list. These
+# are two hand-written spellings of the same fact -- a space number and an element
+# count -- and a table that disagrees is silent: the root signature binds one
+# range, the shader reads another, and the result is wrong pixels rather than an
+# error. dxc caught a related one (a Texture2DArray read through a Texture2D
+# table); this catches the arithmetic that dxc cannot see.
+if command -v python3 >/dev/null 2>&1; then
+    if ! python3 tools/shaders/check_descriptor_tables.py \
+            src/graphics/gr2port_d3d12/shaders/common/descriptors.hlsli \
+            src/graphics/gr2port_d3d12/descriptors.h >"$OUT/err" 2>&1; then
+        echo "  FAIL descriptor tables (shader header and C++ list disagree)"
+        sed 's/^/    /' "$OUT/err" | head -20
+        annotate_log "src/graphics/gr2port_d3d12/descriptors.h" "$OUT/err"
+        failures=$((failures + 1))
+    else
+        echo "  ok   descriptor tables (shader header matches the C++ list)"
+    fi
+fi
+
 # The ported HLSL, compiled. Microsoft ships a Linux x86_64 build of dxc as well as
 # the Windows one, and it compiles every stage in well under a second. The CI
 # source-guard job fetches it (see build-xbox-uwp.yml), so this step does real work

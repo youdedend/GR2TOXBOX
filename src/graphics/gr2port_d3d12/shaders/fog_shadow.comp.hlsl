@@ -70,8 +70,7 @@ void main(uint3 id : SV_DispatchThreadID) {
         SamplerComparisonState sampler = DescriptorComparisonSampler(SMP_COMPARISON);
         lit = map.SampleCmpLevelZero(sampler, coord.xy, coord.z);
     } else {
-        Texture2DArray<float> map =
-            DescriptorDepth(g_shadow_map);
+        Texture2DArray<float> map = DescriptorDepthArray(g_shadow_map);
         SamplerComparisonState sampler = DescriptorComparisonSampler(SMP_COMPARISON);
         lit = map.SampleCmpLevelZero(sampler, float3(coord.xy, float(cascade)), coord.z);
     }

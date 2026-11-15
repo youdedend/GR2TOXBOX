@@ -68,6 +68,7 @@ inline const Descriptor kTables[] = {
     {108, D3D12_DESCRIPTOR_RANGE_TYPE_UAV, kSrvCount},   // g_raw_rw
     {109, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, kSamplerCount},  // g_smp
     {110, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, kSamplerCount},  // g_smp_cmp
+    {111, D3D12_DESCRIPTOR_RANGE_TYPE_SRV, kSrvCount},   // g_tex2darr_f
 };
 
 inline constexpr u32 kCount = sizeof(kTables) / sizeof(kTables[0]);
