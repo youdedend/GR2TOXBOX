@@ -20,6 +20,11 @@
 #if defined(GR2_XBOX_UWP)
 
 #include <winrt/Windows.Foundation.h>
+// IVectorView's Size/GetAt/First are in the Collections header, not in
+// Windows.Foundation.h. Without it GetAt is a template whose return type has not
+// been deduced yet, which reads as "cannot be used before it is defined" and
+// says nothing about a missing include.
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Gaming.Input.h>
 #include <winrt/base.h>
 

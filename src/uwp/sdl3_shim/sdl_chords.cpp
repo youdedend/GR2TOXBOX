@@ -54,33 +54,37 @@ using Gr2Sdl::Pad::Button;
 // The chords' outputs as SDL reports them, in one table so the two halves of the
 // translation cannot drift apart. Upstream's own input_handler.h defines these
 // touchpad names; they are not SDL's.
-// The button field is typed SDL_GamepadButton, but the synthetic touchpad and
-// style names are not SDL enum values: input_handler.h defines them as
-// `SDL_GAMEPAD_BUTTON_COUNT + n` macros, so they are plain ints. Each entry casts
-// for that reason -- the enum is the narrower type, and the implicit conversion
-// from int is what MSVC rejects here.
+// The button field is an int, not SDL_GamepadButton.
+//
+// The synthetic touchpad and style names are not SDL enum values: input_handler.h
+// defines them as `SDL_GAMEPAD_BUTTON_COUNT + n` macros, and the style ones as
+// 0x08000001 and up, which is far past anything SDL's enum names. Casting them
+// into the enum is the obvious fix and it is wrong: clang rejects a constant cast
+// that lands outside the enumeration's range (-Wenum-constexpr-conversion), which
+// is how the first attempt at this failed. The values are ints by construction, so
+// the field keeps them as ints and PushButton takes them as ints.
 struct SyntheticButton {
     bool Uwp::Chords::ChordOutputs::*output;
-    SDL_GamepadButton button;
+    int button;
 };
 
 constexpr SyntheticButton kSyntheticButtons[] = {
     {&Uwp::Chords::ChordOutputs::touchpad_swipe_up,
-     static_cast<SDL_GamepadButton>(SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_UP)},
+     SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_UP},
     {&Uwp::Chords::ChordOutputs::touchpad_swipe_down,
-     static_cast<SDL_GamepadButton>(SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_DOWN)},
+     SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_DOWN},
     {&Uwp::Chords::ChordOutputs::touchpad_swipe_left,
-     static_cast<SDL_GamepadButton>(SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_LEFT)},
+     SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_LEFT},
     {&Uwp::Chords::ChordOutputs::touchpad_swipe_right,
-     static_cast<SDL_GamepadButton>(SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_RIGHT)},
+     SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_RIGHT},
     {&Uwp::Chords::ChordOutputs::touchpad_center,
-     static_cast<SDL_GamepadButton>(SDL_GAMEPAD_BUTTON_TOUCHPAD_CENTER)},
+     SDL_GAMEPAD_BUTTON_TOUCHPAD_CENTER},
     {&Uwp::Chords::ChordOutputs::normal_style,
-     static_cast<SDL_GamepadButton>(GR2_NORMAL_STYLE)},
+     GR2_NORMAL_STYLE},
     {&Uwp::Chords::ChordOutputs::lunar_style,
-     static_cast<SDL_GamepadButton>(GR2_LUNAR_STYLE)},
+     GR2_LUNAR_STYLE},
     {&Uwp::Chords::ChordOutputs::jupiter_style,
-     static_cast<SDL_GamepadButton>(GR2_JUPITER_STYLE)},
+     GR2_JUPITER_STYLE},
 };
 
 // The buttons a chord can borrow, and the swallow flag that says it did. Face
@@ -175,7 +179,7 @@ Uwp::Chords::PadState ToPadState(const Gr2Sdl::Pad::State& state) {
     return pad;
 }
 
-void PushButton(const SDL_GamepadButton button, const bool down) {
+void PushButton(const int button, const bool down) {
     SDL_Event event{};
     event.type = down ? SDL_EVENT_GAMEPAD_BUTTON_DOWN : SDL_EVENT_GAMEPAD_BUTTON_UP;
     event.gbutton.which = kPadId;

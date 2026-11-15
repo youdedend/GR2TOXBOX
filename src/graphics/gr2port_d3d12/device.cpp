@@ -66,7 +66,7 @@ void ResolveCaps(IDXGIAdapter4* adapter, ID3D12Device8* device, bool tearing, Ca
     // run 6.6 shaders at all, and the check further down then refused to start.
     D3D12_FEATURE_DATA_D3D12_OPTIONS4 options4{};
     caps.native_16bit_ops =
-        SUCCEEDED(device->CheckFeatureSupport(D3D_FEATURE_D3D12_OPTIONS4, &options4,
+        SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS4, &options4,
                                               sizeof(options4))) &&
         options4.Native16BitShaderOpsSupported != FALSE;
 
