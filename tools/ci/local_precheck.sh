@@ -181,6 +181,40 @@ else
     fi
 fi
 
+# The console build's in-memory MP3 path. music_player_service.cpp reads the file
+# with IOFile and hands the bytes to mp3dec_load_buf; the first version of that
+# called IOFile by the wrong name, used operator bool that it does not have, and
+# wrote an unscoped FileAccessMode -- three errors the Windows runner found and
+# this host did not. The snippet below is that code, compiled as itself.
+cat >"$OUT/mp3_load.cpp" <<'MP3_EOF'
+#include "common/io_file.h"
+#include <minimp3_ex.h>
+#include <vector>
+int main(int, char** argv) {
+    mp3dec_t dec;
+    mp3dec_init(&dec);
+    mp3dec_file_info_t file_info{};
+    int res = -1;
+    Common::FS::IOFile mp3{std::filesystem::path(argv[1]), Common::FS::FileAccessMode::Read};
+    if (mp3.IsOpen()) {
+        std::vector<u8> bytes(mp3.GetSize());
+        if (!bytes.empty() && mp3.Read(bytes) == bytes.size()) {
+            res = mp3dec_load_buf(&dec, bytes.data(), bytes.size(), &file_info, nullptr, nullptr);
+        }
+    }
+    return res;
+}
+MP3_EOF
+if ! "$CXX" "${CXXFLAGS[@]}" -Iexternals/minimp3 -DMINIMP3_NO_STDIO=1 \
+        -fsyntax-only "$OUT/mp3_load.cpp" 2>"$OUT/err"; then
+    echo "  FAIL music_player_service MP3 path (GR2_XBOX_UWP)"
+    sed 's/^/    /' "$OUT/err" | head -20
+    annotate_log "src/core/libraries/music/music_player_service.cpp" "$OUT/err"
+    failures=$((failures + 1))
+else
+    echo "  ok   music_player_service MP3 path (GR2_XBOX_UWP)"
+fi
+
 # libSceUsbd on the console. The desktop file it replaces is libusb end to end,
 # so this one stands in for the whole library and is the only definition of
 # these 65 symbols the UWP link has -- a typo in a signature or a missing

@@ -116,6 +116,14 @@ static bool IsDrawCall(AmdGpu::PM4ItOpcode opcode) {
 }
 
 inline std::optional<std::string> exec_cli(const char* cli) {
+#if defined(GR2_XBOX_UWP)
+    // A packaged app cannot launch a process at all, and popen is not in the
+    // onecore surface -- MSVC spells it _popen even on desktop. So the caller's
+    // "could not disassemble" path is the honest answer here: the helper reports
+    // that it ran nothing, which is exactly what happened.
+    (void)cli;
+    return {};
+#else
     std::array<char, 64> buffer{};
     std::string output;
     const auto f = popen(cli, "r");
@@ -128,6 +136,7 @@ inline std::optional<std::string> exec_cli(const char* cli) {
     }
     pclose(f);
     return output;
+#endif
 }
 
 template <typename T>

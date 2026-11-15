@@ -601,7 +601,8 @@ private:
                 // MINIMP3_NO_STDIO and reads the bytes itself. The in-memory decoder
                 // is the same one the file loader calls internally.
                 int res = -1;
-                if (IOFile mp3{host_path, FileAccessMode::Read}) {
+                Common::FS::IOFile mp3{host_path, Common::FS::FileAccessMode::Read};
+                if (mp3.IsOpen()) {
                     std::vector<u8> bytes(mp3.GetSize());
                     if (!bytes.empty() && mp3.Read(bytes) == bytes.size()) {
                         res = mp3dec_load_buf(&dec, bytes.data(), bytes.size(), &file_info,
