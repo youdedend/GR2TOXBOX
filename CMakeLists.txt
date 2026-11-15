@@ -1168,28 +1168,28 @@ set(EMULATOR src/GR2port.cpp
              src/sdl_window.cpp
 )
 
-# shadNet protobuf generation
-set(SHADNET_PROTO_OUT "${CMAKE_CURRENT_BINARY_DIR}/shadnet_proto_gen")
-file(MAKE_DIRECTORY "${SHADNET_PROTO_OUT}")
-add_custom_command(
-    OUTPUT
-        "${SHADNET_PROTO_OUT}/shadnet.pb.cc"
-        "${SHADNET_PROTO_OUT}/shadnet.pb.h"
-    COMMAND protobuf::protoc
-        "--proto_path=${CMAKE_CURRENT_SOURCE_DIR}/src/shadnet"
-        "--cpp_out=${SHADNET_PROTO_OUT}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/shadnet/shadnet.proto"
-    DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/shadnet/shadnet.proto"
-    COMMENT "Generating shadnet protobuf sources"
-    VERBATIM
-)
+# shadNet protobuf: the generated sources are checked in.
+#
+# They used to be generated here by proto::protoc, which made the UWP package
+# depend on a host tool the package cannot build: libprotoc spawns a child
+# process for compiler plugins, and a packaged app cannot create a process at
+# all. There is no way to run protoc inside a UWP build, by design.
+#
+# So src/shadnet/generated/shadnet.pb.{h,cc} are generated once and committed.
+# That is not free -- the .pb.h has a hard `#if PROTOBUF_VERSION != 7036000`
+# guard, so the files have to be regenerated whenever
+# externals/protobuf is updated, and the failure if they are not is an #error
+# rather than a subtle mismatch, which is the right trade. The command is in
+# tools/shadnet/regenerate.sh, and source-guard checks the pair is in sync with
+# the .proto via tools/shadnet/check_generated.sh.
+set(SHADNET_PROTO_OUT "${CMAKE_CURRENT_SOURCE_DIR}/src/shadnet/generated")
 
 set(SHADNET src/shadnet/client.cpp
             src/shadnet/client.h
             src/shadnet/server_probe.cpp
             src/shadnet/server_probe.h
-            "${SHADNET_PROTO_OUT}/shadnet.pb.cc"
+            src/shadnet/generated/shadnet.pb.cc
+            src/shadnet/generated/shadnet.pb.h
 )
 if (APPLE)
     list(APPEND EMULATOR src/sdl_window_apple.mm)

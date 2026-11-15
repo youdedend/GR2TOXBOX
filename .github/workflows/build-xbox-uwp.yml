@@ -89,6 +89,13 @@ jobs:
       # find here. Every rule in this script is a failure that cost a Windows run.
       - name: Check the ported HLSL for structural errors
         run: python3 tools/shaders/check_hlsl_structure.py
+      # The generated protobuf sources are checked in, because a UWP package
+      # cannot build protoc (libprotoc spawns a child process). That makes them
+      # something that can go stale, so the version guard is verified against the
+      # vendored runtime here instead of by a Windows runner that would fail with
+      # an #error inside generated code.
+      - name: Verify the checked-in protobuf sources match the vendored runtime
+        run: tools/shadnet/check_generated.sh
       - name: Compile and run the host-portable units
         run: tools/ci/local_precheck.sh
       # Annotations are capped and the annotations API truncates; the log file is
