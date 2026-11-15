@@ -121,6 +121,11 @@ if (GR2_XBOX_UWP)
     if (POLICY CMP0091)
         cmake_policy(SET CMP0091 NEW)
     endif()
+    # Ninja's MSVC platform defaults can retain desktop umbrella libraries even
+    # with CMAKE_SYSTEM_NAME=WindowsStore. Every UWP target gets only the public
+    # Store umbrella; do not let user32/oleaut32 win symbol resolution first.
+    set(CMAKE_C_STANDARD_LIBRARIES "WindowsApp.lib")
+    set(CMAKE_CXX_STANDARD_LIBRARIES "WindowsApp.lib")
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     message(STATUS "GR2toXBOX: static CRT (/MT) -- the package has no VCLibs dependency")
 
@@ -1445,7 +1450,10 @@ elseif (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
 endif()
 
 if (WIN32)
-    target_link_libraries(gr2port PRIVATE mincore wepoll)
+    target_link_libraries(gr2port PRIVATE wepoll)
+    if (NOT GR2_XBOX_UWP)
+        target_link_libraries(gr2port PRIVATE mincore)
+    endif()
 
     # wbemuuid is WMI's GUID library, and WMI is not in the onecore surface: the
     # UWP build has no WMI consumer left in it (the only one, the folder picker,

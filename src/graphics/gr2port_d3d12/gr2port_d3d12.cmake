@@ -70,13 +70,9 @@ endif()
 target_link_libraries(gr2port PRIVATE gr2_d3d12ma)
 
 # --- Windows / DXGI libraries ----------------------------------------------
-target_link_libraries(gr2port PRIVATE
-    d3d12
-    WindowsApp
-    dxgi
-    dxguid
-    d3dcompiler
-)
+if (NOT GR2_XBOX_UWP)
+    target_link_libraries(gr2port PRIVATE d3d12 dxgi dxguid d3dcompiler)
+endif()
 
 # The Xbox package links the onecore UWP surface (WindowsApp.lib), not the
 # desktop Win32 import libraries: CreateFile2FromApp, VirtualAllocFromApp and

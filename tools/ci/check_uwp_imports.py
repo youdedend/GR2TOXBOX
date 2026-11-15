@@ -175,7 +175,8 @@ def main() -> int:
         # imported at all.
         if dll in FORBIDDEN_DLLS:
             problems.append(
-                f"{Path(args.exe).name} imports {dll}: {FORBIDDEN_DLLS[dll]}"
+                f"{Path(args.exe).name} imports {dll}: {FORBIDDEN_DLLS[dll]}; "
+                f"symbols={', '.join(symbols)}"
             )
             continue
         # A symbol is only a problem when it is imported from the DESKTOP DLL.
