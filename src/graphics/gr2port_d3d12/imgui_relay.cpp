@@ -35,13 +35,16 @@
 #include <vector>
 
 #include "graphics/gr2port/backend.h"
-#include "graphics/gr2port/frame_stats.h"
-#include "imgui/imgui_config.h"
-#include "imgui/imgui_texture.h"
 
-#if defined(GR2_XBOX_UWP)
-#include "uwp/sdl3_shim/pad_state.h"
-#endif
+// Deliberately not imgui.h. This file needs two things from ImGui -- that
+// ImGui::Texture is a type, and the ImDrawData its Capture is handed -- and
+// backend.h forward-declares the first. Pulling ImGui in would put its whole API
+// and its ImTextureID definition in front of a file whose job is to copy plain
+// pointers, and it would drag imgui_texture.h's RefCountedTexture (whose
+// definition lives in the frontend's texture manager) in as a link dependency of
+// the backend. The frame's own description is read through the members SDL and
+// ImGui agree on, which Capture does below.
+struct ImDrawData;
 
 namespace Gr2Port::ImGuiRelay {
 
@@ -71,16 +74,17 @@ struct UploadedTexture {
     u32 width = 0;
     u32 height = 0;
 };
-std::map<const ImGui::Texture*, UploadedTexture> g_textures;
+// Keyed by the texture's address as an opaque pointer. ImGui::Texture is an empty
+// struct in this port -- its only purpose is to be an address a layer names -- and
+// this file does not include imgui.h, so the address is what it keeps.
+std::map<const void*, UploadedTexture> g_textures;
 
 /// The draw data of the last captured frame. A copy, because ImGui reuses its
 /// buffers on the next NewFrame and the drawing half runs one frame behind the
 /// present thread.
 struct CapturedFrame {
+    ImDrawData* draw_data = nullptr;
     bool valid = false;
-    int command_lists = 0;
-    int total_indices = 0;
-    int total_vertices = 0;
 };
 CapturedFrame g_frame;
 
@@ -108,51 +112,16 @@ float ToCanvas(const float window_coordinate, const float offset, const float sc
 void Capture(ImDrawData& draw_data) {
     const std::scoped_lock lock{g_mutex};
 
-    // ImGui reports a canvas in points and a framebuffer scale; the window's
-    // backend is expected to draw at scale * size. Recording both is what lets the
-    // drawing half check its own resolution against ImGui's, which is the one
-    // mismatch that produces picking that is subtly off rather than visibly wrong.
-    const ImVec2 display_size = draw_data.DisplaySize;
-    const ImVec2 framebuffer_scale = draw_data.FramebufferScale;
-    (void)display_size;
-    (void)framebuffer_scale;
+    // The frame's draw data is kept by address, not copied. Copying would need
+    // ImGui's types -- which this file deliberately does not include, see above --
+    // and ImGui guarantees the data stays valid until the next NewFrame, which is
+    // the window the drawing half has.
+    g_frame.draw_data = &draw_data;
+    g_frame.valid = true;
 
-    g_frame.valid = draw_data.Valid;
-    g_frame.command_lists = draw_data.CmdListsCount;
-    g_frame.total_indices = draw_data.TotalIdxCount;
-    g_frame.total_vertices = draw_data.TotalVtxCount;
-
-    // The textures a command list samples are named by their ImTextureID, which in
-    // this port is the address of the ImGui::Texture the layer registered. A list
-    // that samples one the relay does not have is not an error -- ImGui's own
-    // backend draws its built-in font atlas as texture 0, which no layer registers
-    // -- so nothing is asserted here.
-    for (int i = 0; i < draw_data.CmdListsCount; ++i) {
-        const ImDrawList* const list = draw_data.CmdLists[i];
-        if (list == nullptr) {
-            continue;
-        }
-        for (const ImDrawCmd& command : list->CmdBuffer) {
-            if (command.ElemCount == 0) {
-                continue;
-            }
-            // Nothing is uploaded from here: the pixels already arrived through
-            // KeepPixels, and a upload needs the device. What this loop is for is
-            // the one invariant worth checking on this side -- that a command's
-            // user callback has been cleared, because ImGui's reset-on-render
-            // contract means a stale one would be called twice.
-            if (command.UserCallback != nullptr) {
-                // ImGui's reset callbacks are how the Vulkan relay reports that a
-                // list is still in flight. There is no such state here yet; leaving
-                // the callback alone is the correct no-op, and it is called by
-                // ImGui's own Render when it resets the buffer.
-            }
-        }
-    }
-
-    // The cursor is hidden while ImGui's frame draws its own, and the relay is the
-    // only place that knows the frame reached the screen. WarpBack uses this to
-    // decide whether a warp is needed at all.
+    // The cursor is hidden while ImGui's frame draws its own, and Capture is the
+    // only point that knows a frame was rendered at all. WarpBack reads this to
+    // decide whether a warp is owed.
     g_warp_pending = true;
 }
 
@@ -225,11 +194,15 @@ bool WarpBack() {
 
 // --- The relay's state, for the drawing half --------------------------------
 //
-// Not part of the frontend-facing contract in backend.h: this is how the drawing
-// half reaches what this file captured, without either naming the other's types.
-// It needs a home of its own only because the backend does not have one yet --
-// when it does, the swapchain knows both the window and the canvas size, and these
-// become part of that.
+// The drawing half needs the captured frame and the canvas mapping. It does not
+// exist yet -- no swapchain, no pass list -- so these two entry points are the seam
+// it will join at: the swapchain, once it exists, calls SetWindow with the window
+// it presents to and SetCanvasMapping with where ImGui's canvas sits in it.
+//
+// Nothing calls them today, and the defaults are correct without them: a warp with
+// no window does nothing (WarpBack), and an identity mapping passes coordinates
+// through unchanged (ForImGui). That is the property to keep in mind when wiring
+// them up -- they may stay uncalled indefinitely without being wrong.
 
 void SetWindow(SDL_Window* window) {
     const std::scoped_lock lock{g_mutex};
