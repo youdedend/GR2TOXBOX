@@ -33,4 +33,29 @@ void Shutdown();
 /// recreated at the new size rather than presenting a stretched frame.
 void NotifyDisplayChanged();
 
+/// Asks the console what its HDMI output is currently doing, and returns the
+/// mode reduced to the numbers the swapchain needs.
+///
+/// On the console this reads HdmiDisplayInformation for the current view -- the
+/// API that reports the *panel's* resolution, which on an Xbox is usually 3840x2160
+/// even when the title presents 1920x1080 and lets the scaler do the rest. The
+/// composition scale comes from DisplayInformation, because a CoreWindow swapchain
+/// is composited at the window's logical size and has to be told to cancel that
+/// scaling.
+///
+/// Returns a zero-sized Mode on a build or a moment where neither API answers,
+/// which Display::MakePlan turns into a safe 1080p fallback.
+///
+/// Declared here rather than in a WinRT header so the D3D12 backend can call it
+/// without including C++/WinRT: device.cpp is compiled for the desktop build too.
+struct DisplayModeQuery {
+    unsigned int width = 0;
+    unsigned int height = 0;
+    float composition_scale = 1.0f;
+    /// True when HdmiDisplayInformation answered, false when only the
+    /// composition scale was available.
+    bool from_hdmi = false;
+};
+DisplayModeQuery QueryDisplayMode();
+
 } // namespace Gr2Port::Uwp

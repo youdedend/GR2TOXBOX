@@ -111,6 +111,22 @@ else
     echo "  ok   src/core/uwp_memory.cpp (GR2_XBOX_UWP)"
 fi
 
+# uwp_app.cpp is compiled into BOTH builds: it owns RunGame and Shutdown for the
+# console and the desktop. Its WinRT half therefore has to sit inside
+# GR2_XBOX_UWP guards, and a guard that covers the wrong part of the function --
+# which is exactly what shipped first here -- breaks the desktop build while the
+# console one stays green. Compiling it with no GR2_XBOX_UWP is the cheap way to
+# keep that honest.
+if ! "$CXX" "${CXXFLAGS[@]}" -DFMT_HEADER_ONLY \
+        -fsyntax-only src/graphics/gr2port_d3d12/uwp/uwp_app.cpp 2>"$OUT/err"; then
+    echo "  FAIL src/graphics/gr2port_d3d12/uwp/uwp_app.cpp (desktop)"
+    sed 's/^/    /' "$OUT/err" | head -30
+    annotate_log "src/graphics/gr2port_d3d12/uwp/uwp_app.cpp" "$OUT/err"
+    failures=$((failures + 1))
+else
+    echo "  ok   src/graphics/gr2port_d3d12/uwp/uwp_app.cpp (desktop guards)"
+fi
+
 # The AppContainer Win32 wrappers, which had never been host-checked -- and that is
 # why two of them shipped with the wrong number of arguments for the FromApp call
 # they forward to. VirtualAlloc2FromApp takes seven parameters and
@@ -572,7 +588,8 @@ fi
 if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
     echo "local_precheck: building and running the self-tests"
     for pair in "xbox_chords_test:chords:GR2_CHORDS_SELFTEST" \
-                "xbox_memory_budget_test:memory:GR2_XBOX_BUDGET_SELFTEST"; do
+                "xbox_memory_budget_test:memory:GR2_XBOX_BUDGET_SELFTEST" \
+                "display_mode_test:display:GR2_DISPLAY_SELFTEST"; do
         test=${pair%%:*}
         rest=${pair#*:}
         name=${rest%%:*}
@@ -580,6 +597,8 @@ if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
         case "$name" in
             chords) srcs=(src/tests/xbox_chords_test.cpp src/uwp/chords.cpp src/tests/selftest_log.cpp) ;;
             memory) srcs=(src/tests/xbox_memory_budget_test.cpp src/core/uwp_memory.cpp src/tests/selftest_log.cpp) ;;
+            # Header-only: the plan arithmetic has no .cpp to link against.
+            display) srcs=(src/tests/display_mode_test.cpp) ;;
         esac
         # fmt::vformat is a compiled symbol, so the test binaries link fmt itself.
         # spdlog links fmt as a dependency, but these tests use fmt directly.

@@ -36,6 +36,7 @@ target_sources(gr2port PRIVATE
     ${GR2_D3D12_DIR}/backend_surface.cpp
     ${GR2_D3D12_DIR}/backend_capture.cpp
     ${GR2_D3D12_DIR}/imgui_relay.cpp
+    ${GR2_D3D12_DIR}/uwp/display_mode.h
     ${GR2_D3D12_DIR}/uwp/uwp_app.cpp
     ${GR2_D3D12_DIR}/uwp/uwp_main.cpp
     ${GR2_D3D12_DIR}/uwp/uwp_main.h

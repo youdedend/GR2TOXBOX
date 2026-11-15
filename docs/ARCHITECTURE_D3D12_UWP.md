@@ -351,12 +351,32 @@ active, loop forever" -- the lane has to keep its own value. Nothing in this por
 uses a ballot yet; it applies to the compute ports still to come.
 
 **4K output.** On an Xbox the `CoreWindow` is 1920x1080 whatever the TV is, so a
-4K picture reaches the screen at 1080p and the console scales it back up. The
-swap chain is sized from `HdmiDisplayInformation.GetForCurrentView()`
-`.GetCurrentDisplayMode()` instead, with the panel's inverse scale transform, and
-clamped to 3840x2160. **Not yet implemented here** -- `src/uwp/` presents at the
-window size today, so a 4K title renders at 1080p. Kyty's `src/uwp/src/app.cpp`
-has the working pattern.
+swapchain sized from the window presents 1080p and the console scales it back up
+to the panel. Sizing from the window is therefore wrong on a 4K display, and the
+fix is two things at once:
+
+* ask `HdmiDisplayInformation::GetForCurrentView().GetCurrentDisplayMode()` for
+  the panel's resolution in raw pixels, which is the actual output mode rather
+  than the composition size;
+* carry the inverse of `DisplayInformation.ResolutionScale()` into
+  `IDXGISwapChain2::SetMatrixTransform`. A CoreWindow swapchain is composited at
+  the window's *logical* size, so a 3840x2160 backbuffer in a window the shell
+  reports at 2560x1440 DIPs would be scaled up 1.5x on the way to the panel --
+  the softness of 1440p having paid for 4K. The inverse matrix makes one
+  backbuffer pixel one panel pixel.
+
+The arithmetic lives in `uwp/display_mode.h` with no WinRT in it, so
+`src/tests/display_mode_test.cpp` exercises it on the build host: 64 checks
+covering native 4K, a 4K panel at 1.5x scale, 1440p and 1080p panels staying
+where they are, 8K clamping to 3840x2160, a 64:27 panel keeping its ratio when
+clamped (3840x1620, not 3840x2160), degenerate modes and a NaN or infinite
+composition scale. `uwp/uwp_app.cpp` supplies the numbers from WinRT and
+`device.cpp` applies the plan.
+
+The cap is 3840x2160 because that is what the memory planner in
+`core/uwp_memory.cpp` was verified against. Three colour and three depth buffers
+at 4K and 32 bits per pixel cost ~190 MiB, which is affordable inside the
+5,120 MiB Game-mode pool; an 8K request would not be.
 
 ---
 

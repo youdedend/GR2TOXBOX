@@ -12,6 +12,13 @@
 #include "graphics/gr2port_d3d12/device.h"
 
 #if defined(GR2_XBOX_UWP)
+// The 4K presentation arithmetic and the HDMI query. Both are console-only: the
+// desktop build sizes its swapchain from the window it was given.
+#include "graphics/gr2port_d3d12/uwp/display_mode.h"
+#include "graphics/gr2port_d3d12/uwp/uwp_main.h"
+#endif
+
+#if defined(GR2_XBOX_UWP)
 #include <windows.ui.core.h>
 #endif
 
@@ -341,8 +348,27 @@ bool CreateDevice(const DeviceDesc& desc, Device& out) {
 }
 
 bool CreateSwapchain(Device& device, const DeviceDesc& desc) {
+#if defined(GR2_XBOX_UWP)
+    // On the console the backbuffer size is not the caller's choice: the panel, the
+    // composition scale and the 4K cap all decide it, and a 4K request that the
+    // panel cannot show has to be reduced rather than presented and scaled down.
+    // Display::MakePlan owns that arithmetic (and is tested on the host); this only
+    // hands it the numbers.
+    const auto mode_query = Uwp::QueryDisplayMode();
+    Display::Mode mode;
+    mode.width = mode_query.width;
+    mode.height = mode_query.height;
+    mode.composition_scale = mode_query.composition_scale;
+    const Display::Plan plan = Display::MakePlan(mode, desc.width, desc.height);
+    const u32 width = std::max<u32>(plan.width, 64);
+    const u32 height = std::max<u32>(plan.height, 64);
+    LOG_INFO(Graphics, "D3D12: presenting {}x{} (display {}x{}, scale {:.2f})",
+             width, height, mode.width, mode.height,
+             static_cast<double>(mode.composition_scale));
+#else
     const u32 width = std::max<u32>(desc.width, 64);
     const u32 height = std::max<u32>(desc.height, 64);
+#endif
     device.swapchain_width = width;
     device.swapchain_height = height;
     device.hdr_enabled = desc.prefer_hdr;
@@ -412,6 +438,37 @@ bool CreateSwapchain(Device& device, const DeviceDesc& desc) {
         LOG_CRITICAL(Graphics, "D3D12: swapchain does not expose IDXGISwapChain4");
         return false;
     }
+
+#if defined(GR2_XBOX_UWP)
+    // Cancel the shell's composition scale.
+    //
+    // A CoreWindow swapchain is composited at the window's *logical* size, so a
+    // 3840x2160 backbuffer presented into a window the shell reports at 2560x1440
+    // DIPs would be scaled up by 1.5 on the way to the panel -- the same softness
+    // as rendering at 1440p, having paid for 4K. The inverse matrix makes one
+    // backbuffer pixel one panel pixel.
+    {
+        ComPtr<IDXGISwapChain2> swapchain2;
+        if (SUCCEEDED(device.swapchain.As(&swapchain2))) {
+            // DXGI_MATRIX_3X2_F, not a DirectXMath type: the API takes the struct
+            // directly and only the diagonal is ever non-zero.
+            const DXGI_MATRIX_3X2_F transform{plan.transform[0], plan.transform[1],
+                                              plan.transform[2], plan.transform[3]};
+            const HRESULT t_hr = swapchain2->SetMatrixTransform(transform);
+            if (FAILED(t_hr)) {
+                // Not fatal: without it the compositor applies its own scaling, so
+                // the frame is correct but softer than it should be.
+                LOG_WARNING(Graphics,
+                            "D3D12: SetMatrixTransform failed: {}; the compositor will scale",
+                            HresultToString(t_hr));
+            } else if (plan.transform[0] != 1.0f) {
+                LOG_INFO(Graphics,
+                         "D3D12: swapchain scale transform {:.3f} cancels the composition scale",
+                         static_cast<double>(plan.transform[0]));
+            }
+        }
+    }
+#endif
 
     // Opt into the format's colour space explicitly so an HDR display is driven
     // in PQ and an SDR one in sRGB, rather than relying on the default.
