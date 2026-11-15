@@ -111,6 +111,24 @@ else
     echo "  ok   src/core/uwp_memory.cpp (GR2_XBOX_UWP)"
 fi
 
+# libSceUsbd on the console. The desktop file it replaces is libusb end to end,
+# so this one stands in for the whole library and is the only definition of
+# these 65 symbols the UWP link has -- a typo in a signature or a missing
+# LIB_FUNCTION would otherwise only show up as an unresolved external on a
+# Windows runner, which is exactly the failure mode this section exists to
+# prevent. Compiled against the UWP build of usbd.h, so the declarations it is
+# checked against are the ones the console actually sees.
+if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/stubs -DGR2_XBOX_UWP=1 -DGR2_HOST_CHECK_WIN32=1 \
+        -DFMT_HEADER_ONLY \
+        -fsyntax-only src/core/libraries/usbd/usbd_uwp.cpp 2>"$OUT/err"; then
+    echo "  FAIL src/core/libraries/usbd/usbd_uwp.cpp (GR2_XBOX_UWP)"
+    sed 's/^/    /' "$OUT/err" | head -30
+    annotate_log "src/core/libraries/usbd/usbd_uwp.cpp" "$OUT/err"
+    failures=$((failures + 1))
+else
+    echo "  ok   src/core/libraries/usbd/usbd_uwp.cpp (GR2_XBOX_UWP)"
+fi
+
 # The SDL3 shim, against SDL's own headers.
 #
 # This is the check that makes the shim trustworthy: the real SDL headers are on
@@ -177,10 +195,9 @@ for entry in "${D3D12_UNITS[@]}"; do
     fi
 done
 
-# The ported HLSL, structurally. dxc only runs on Windows; this catches the
-# mistakes it reports that do not need a compiler, e.g. two cbuffers both
-# declaring g_pad, or a stage using ArenaRef without including the header that
-# declares it. Both of those cost a Windows run.
+# The ported HLSL, structurally. This catches the mistakes that do not need a
+# compiler, e.g. two cbuffers both declaring g_pad, or a stage using ArenaRef
+# without including the header that declares it. Both of those cost a Windows run.
 if command -v python3 >/dev/null 2>&1; then
     if ! python3 tools/shaders/check_hlsl_structure.py >"$OUT/err" 2>&1; then
         echo "  FAIL HLSL structure"
@@ -190,6 +207,59 @@ if command -v python3 >/dev/null 2>&1; then
     else
         echo "  ok   HLSL structure ($(ls src/graphics/gr2port_d3d12/shaders/*.hlsl | wc -l) stages)"
     fi
+fi
+
+# The ported HLSL, compiled. dxc is a Windows tool, but Microsoft ships a Linux
+# x86_64 build of it, and it compiles every stage in well under a second. Where it
+# is present -- DXC=$PWD/dxc, or dxc on PATH -- every stage in the manifest is
+# compiled for its real profile with warnings as errors, which is the only way a
+# shader error is ever found without a Windows runner.
+#
+# Where it is absent the check is skipped with a line saying so, rather than
+# silently passing: a shader that was never compiled must not look compiled. The
+# tarball is linux_dxc_<date>.x86_x64.tar.gz from the DirectXShaderCompiler
+# releases -- note x86_x64, which is not a typo in this comment and did cost one
+# download to discover.
+DXC_BIN="${DXC:-}"
+if [ -z "$DXC_BIN" ] && command -v dxc >/dev/null 2>&1; then
+    DXC_BIN=$(command -v dxc)
+fi
+if [ -n "$DXC_BIN" ] && [ -x "$DXC_BIN" ] && [ -f src/graphics/gr2port_d3d12/shaders_manifest.cmake ]; then
+    echo "local_precheck: compiling HLSL with $("$DXC_BIN" --version | head -1)"
+    hlsl_failed=0
+    # The manifest names each stage file and its profile variable; the pairing is
+    # the file's own stage suffix, which is what gr2port_add_hlsl_shader derives.
+    for stage_file in src/graphics/gr2port_d3d12/shaders/*.hlsl src/graphics/gr2port_d3d12/shaders/pfx/*.hlsl; do
+        [ -f "$stage_file" ] || continue
+        case "$stage_file" in
+            *.hlsli|*/common/*) continue ;;
+        esac
+        case "$stage_file" in
+            *.vert.hlsl) profile="vs_6_6" ;;
+            *.frag.hlsl) profile="ps_6_6" ;;
+            *.comp.hlsl) profile="cs_6_6" ;;
+            *.geom.hlsl) profile="gs_6_6" ;;
+            *.hull.hlsl|*.tesc.hlsl) profile="hs_6_6" ;;
+            *.dom.hlsl|*.tese.hlsl) profile="ds_6_6" ;;
+            *) continue ;;
+        esac
+        # -HV 2021 matches the runner's dxc invocation; -WX makes a warning an
+        # error, because a warning here is a line someone should look at.
+        if ! "$DXC_BIN" -T "$profile" -E main -HV 2021 -WX -I src/graphics/gr2port_d3d12/shaders \
+                -Fo /dev/null "$stage_file" >"$OUT/err" 2>&1; then
+            echo "  FAIL $stage_file ($profile)"
+            sed 's/^/    /' "$OUT/err" | head -20
+            annotate_log "$stage_file" "$OUT/err"
+            hlsl_failed=$((hlsl_failed + 1))
+        fi
+    done
+    if [ "$hlsl_failed" -eq 0 ]; then
+        echo "  ok   HLSL compile (all stages)"
+    else
+        failures=$((failures + hlsl_failed))
+    fi
+else
+    echo "  skip HLSL compile (no dxc; set DXC=/path/to/dxc to enable)"
 fi
 
 if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then

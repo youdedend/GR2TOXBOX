@@ -154,7 +154,15 @@ void IPC::InputLoop() {
             bool is_game_specific = next_u64() != 0;
             EmulatorSettings.SetVolumeSlider(value, is_game_specific);
             Libraries::AudioOut::AdjustVol();
-        } else if (cmd == "USB_LOAD_FIGURE") {
+        }
+#ifndef GR2_XBOX_UWP
+        // The figure-portal IPC commands drive the emulated USB backends, and the
+        // console build has no USB backends to drive (see usbd_uwp.cpp): the pads
+        // the console does have come from Windows.Gaming.Input, and the portals
+        // are a USB peripheral it cannot attach. Dropping the commands means the
+        // desktop UI's callbacks do nothing there rather than dereferencing a
+        // backend that was never created.
+        else if (cmd == "USB_LOAD_FIGURE") {
             const auto ref = Libraries::Usbd::usb_backend->GetImplRef();
             if (ref) {
                 std::string file_name = next_str();
@@ -191,7 +199,9 @@ void IPC::InputLoop() {
                 const u8 index = next_u64();
                 ref->CancelRemoveFigure(index);
             }
-        } else if (cmd == "RELOAD_INPUTS") {
+        }
+#endif
+        else if (cmd == "RELOAD_INPUTS") {
             std::string config = next_str();
             Input::ParseInputConfig(config);
         } else {

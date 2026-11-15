@@ -4,10 +4,20 @@
 #pragma once
 
 #include "common/types.h"
+
+// The USB backends are built on libusb, whose Windows port is WinUSB plus
+// SetupAPI/CfgMgr32. Neither is in the onecore surface an AppContainer links
+// against, and libusb has no UWP branch of its own, so on the console the whole
+// implementation is left out and usbd_uwp.cpp answers libSceUsbd instead: its
+// device list is empty, which is what a console with nothing in its USB ports
+// reports. Everything below still has to be declared, because libs.cpp registers
+// the library and the guest links against these symbols either way.
+#ifndef GR2_XBOX_UWP
 #include "emulated/dimensions.h"
 #include "emulated/infinity.h"
 #include "emulated/skylander.h"
 #include "usb_backend.h"
+#endif
 
 extern "C" {
 struct libusb_device;
@@ -25,7 +35,9 @@ class SymbolsResolver;
 
 namespace Libraries::Usbd {
 
+#ifndef GR2_XBOX_UWP
 extern std::shared_ptr<UsbBackend> usb_backend;
+#endif
 
 using SceUsbdDevice = libusb_device;
 using SceUsbdDeviceHandle = libusb_device_handle;
@@ -35,9 +47,11 @@ using SceUsbdTransfer = libusb_transfer;
 using SceUsbdControlSetup = libusb_control_setup;
 using SceUsbdTransferCallback = void PS4_SYSV_ABI (*)(SceUsbdTransfer* transfer);
 
+#ifndef GR2_XBOX_UWP
 using SkylandersPortalBackend = SkylanderBackend;
 using InfinityBaseBackend = InfinityBackend;
 using DimensionsToypadBackend = DimensionsBackend;
+#endif
 
 enum class SceUsbdSpeed : u32 {
     UNKNOWN = 0,

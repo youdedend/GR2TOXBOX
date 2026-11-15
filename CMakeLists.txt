@@ -341,6 +341,36 @@ if (ENABLE_SYSTEM_LIBRARIES)
     list(POP_BACK CMAKE_MODULE_PATH)
 endif()
 
+# Platform-wide Windows defines, before externals.
+#
+# These have to precede add_subdirectory(externals) or they only reach gr2port,
+# and a third-party target that reads them then builds for the wrong platform.
+# That is exactly what went wrong with miniupnpc: its minissdpc.c chooses
+# GetBestInterfaceEx over the desktop-only GetBestInterface when
+# _WIN32_WINNT >= VISTA, and has a UWP branch for in6addr_any -- all of it
+# unreachable if _WIN32_WINNT was never defined, so the UWP package compiled the
+# desktop path and failed on both.
+#
+# _WIN32_WINNT is also what stops windows.h from declaring types by the old name:
+# SOCKADDR_STORAGE_XP is what the SDK calls SOCKADDR_STORAGE at pre-Vista, and it
+# reaches ws2def.h through miniupnpc's includes rather than its own.
+if (WIN32)
+    if (MSVC)
+        # MSVC likes putting opinions on what people can use, disable:
+        add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE _SCL_SECURE_NO_WARNINGS)
+    endif()
+
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+
+    if (MSVC)
+        # Needed for conflicts with time.h of windows.h
+        add_compile_definitions(_TIMESPEC_DEFINED)
+    endif()
+
+    # Target Windows 10 RS5
+    add_compile_definitions(NTDDI_VERSION=0x0A000006 _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+endif()
+
 add_subdirectory(externals)
 include_directories(src)
 
@@ -694,18 +724,30 @@ set(RANDOM_LIB src/core/libraries/random/random.cpp
                src/core/libraries/random/random_error.h
 )
 
-set(USBD_LIB src/core/libraries/usbd/usbd.cpp
-             src/core/libraries/usbd/usbd.h
-             src/core/libraries/usbd/usb_backend.h
+set(USBD_LIB src/core/libraries/usbd/usbd.h
              src/core/libraries/usbd/usbstorage.cpp
              src/core/libraries/usbd/usbstorage.h
-             src/core/libraries/usbd/emulated/dimensions.cpp
-             src/core/libraries/usbd/emulated/dimensions.h
-             src/core/libraries/usbd/emulated/infinity.cpp
-             src/core/libraries/usbd/emulated/infinity.h
-             src/core/libraries/usbd/emulated/skylander.cpp
-             src/core/libraries/usbd/emulated/skylander.h
 )
+
+# libusb is WinUSB plus SetupAPI/CfgMgr32 on Windows, and has no UWP branch, so
+# the console build cannot compile the backends -- see usbd_uwp.cpp, which
+# answers libSceUsbd with an empty device list instead, the same thing a console
+# with nothing in its USB ports reports. usbstorage is unaffected: it reads
+# Mass Storage descriptors out of the guest's own structures and never touches a
+# host USB API, so it builds in both.
+if (GR2_XBOX_UWP)
+    list(APPEND USBD_LIB src/core/libraries/usbd/usbd_uwp.cpp)
+else()
+    list(APPEND USBD_LIB src/core/libraries/usbd/usbd.cpp
+                 src/core/libraries/usbd/usb_backend.h
+                 src/core/libraries/usbd/emulated/dimensions.cpp
+                 src/core/libraries/usbd/emulated/dimensions.h
+                 src/core/libraries/usbd/emulated/infinity.cpp
+                 src/core/libraries/usbd/emulated/infinity.h
+                 src/core/libraries/usbd/emulated/skylander.cpp
+                 src/core/libraries/usbd/emulated/skylander.h
+    )
+endif()
 
 set(MUSIC_LIB src/core/libraries/music/music_player_service.cpp
               src/core/libraries/music/music_player_service.h
@@ -1345,21 +1387,6 @@ endif()
 
 if (WIN32)
     target_link_libraries(gr2port PRIVATE mincore wepoll wbemuuid)
-
-    if (MSVC)
-        # MSVC likes putting opinions on what people can use, disable:
-        add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE _SCL_SECURE_NO_WARNINGS)
-    endif()
-
-    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
-
-    if (MSVC)
-        # Needed for conflicts with time.h of windows.h
-        add_compile_definitions(_TIMESPEC_DEFINED)
-    endif()
-
-    # Target Windows 10 RS5
-    add_compile_definitions(NTDDI_VERSION=0x0A000006 _WIN32_WINNT=0x0A00 WINVER=0x0A00)
 
     if (MSVC)
         target_link_libraries(gr2port PRIVATE clang_rt.builtins-x86_64.lib)

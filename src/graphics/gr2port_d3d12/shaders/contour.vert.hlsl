@@ -80,15 +80,17 @@ Contour LoadContour(ArenaRef base, ArenaTable table) {
     // and curve tuning, pixel_padding -- the geometry and fragment stages' fields,
     // not this one's.
     const uint2 vertices = ArenaLoad2(ArenaAdd(base, 240), table);
-    c.vertices = ArenaRef{vertices.x, vertices.y};
+    // ArenaMake, not ArenaRef{...}: HLSL 2021 rejects C++ brace-initialisation of a
+    // struct, and dxc says so at this line. The helper is the arena header's own.
+    c.vertices = ArenaMake(vertices.x, vertices.y);
     c.stride = ArenaLoad(ArenaAdd(base, 248), table);
     c.position = ArenaLoad(ArenaAdd(base, 252), table);
     c.normal = ArenaLoad(ArenaAdd(base, 256), table);
     c.bones = ArenaLoad(ArenaAdd(base, 260), table);
     const uint2 skin = ArenaLoad2(ArenaAdd(base, 264), table);
-    c.skin = ArenaRef{skin.x, skin.y};
+    c.skin = ArenaMake(skin.x, skin.y);
     const uint2 palette = ArenaLoad2(ArenaAdd(base, 272), table);
-    c.palette = ArenaRef{palette.x, palette.y};
+    c.palette = ArenaMake(palette.x, palette.y);
     return c;
 }
 

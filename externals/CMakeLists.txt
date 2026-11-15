@@ -261,7 +261,17 @@ if (NOT TARGET pugixml::pugixml)
 endif()
 
 # libusb
-if (NOT TARGET libusb::usb)
+#
+# The Windows port is WinUSB plus SetupAPI/CfgMgr32 -- device enumeration is
+# SetupDiGetClassDevs, descriptor reads go through CfgMgr32, and transfers open a
+# WinUSB handle. None of that is in the onecore surface an AppContainer links
+# against, and libusb has no UWP branch (nor a null backend wired up on Windows,
+# which is what it uses where there is no OS USB API at all). So the console build
+# does not build it: usbd_uwp.cpp answers libSceUsbd instead. The GIT_SUBMODULE
+# checkout still happens, it is just not compiled.
+if (GR2_XBOX_UWP)
+    message(STATUS "libusb: not built (WinUSB/SetupAPI are not in the UWP surface)")
+elseif (NOT TARGET libusb::usb)
     if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
         # YOU MUST USE NATIVE LIBUSB
         # using anything else will crash instantly, also freebsd will NOT like it
@@ -381,7 +391,21 @@ set(ALSOFT_INSTALL OFF CACHE BOOL "" FORCE)
 set(ALSOFT_CONFIG OFF CACHE BOOL "" FORCE)
 
 # Backends (platform-specific)
-if (WIN32)
+#
+# UWP is the case to get right rather than skip: OpenAL Soft is a real output
+# path the guest can select (openal_audio_out.cpp, and audio3d's positional
+# output), and its source already knows about UWP -- it sets ALSOFT_UWP itself
+# when CMAKE_SYSTEM_NAME is WindowsStore, and skips the avrt/DSound/WinMM backends
+# there because they are outside the onecore surface. What it cannot know is that
+# *this* build forced WASAPI on from outside, which is what the line below does on
+# every Windows target. So the override becomes desktop-only and UWP falls through
+# to OpenAL Soft's own choice.
+#
+# On UWP that leaves the null backend (ALSOFT_BACKEND_NULL, set below for every
+# platform), so a guest that selects OpenAL gets silence through a working mixer
+# instead of a failed device -- which is what its own fallback expects, and what
+# the SDL path through the shim's XAudio2 output does not have to share.
+if (WIN32 AND NOT GR2_XBOX_UWP)
     set(ALSOFT_BACKEND_WASAPI ON CACHE BOOL "" FORCE)
     set(ALSOFT_BACKEND_DSOUND OFF CACHE BOOL "" FORCE)
     set(ALSOFT_BACKEND_WINMM OFF CACHE BOOL "" FORCE)
