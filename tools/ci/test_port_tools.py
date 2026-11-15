@@ -20,6 +20,29 @@ def module(name, file):
 
 
 class PortTools(unittest.TestCase):
+    def test_uwp_automation_ordinals(self):
+        checker = module('uwp_imports', ROOT / 'tools/ci/check_uwp_imports.py')
+        self.assertEqual(checker.parse('    OLEAUT32.dll\n        Ordinal     6\n'),
+                         {'oleaut32.dll': ['Ordinal#6']})
+        with tempfile.TemporaryDirectory(prefix='gr2-import-') as tmp:
+            path = Path(tmp) / 'imports.txt'
+            fixtures = [
+                ('        Ordinal     6\n', 0),
+                ('        Ordinal 2\n        Ordinal 4\n        Ordinal 9\n', 0),
+                ('        6 SysFreeString\n        7 SysStringLen\n', 0),
+                ('        Ordinal 99999\n', 1),
+                ('        Ordinal 33\n', 1),  # RegisterActiveObject is desktop.
+                ('        21 RegisterActiveObject\n', 1),
+                ('', 1), ('        unparsed import data\n', 1),
+                ('        Ordinal 6\n        Ordinal 99999\n', 1),
+            ]
+            for body, expected in fixtures:
+                path.write_text('    oleaut32.dll\n' + body)
+                result = subprocess.run(['python3', str(ROOT / 'tools/ci/check_uwp_imports.py'),
+                                         '--exe', 'test.exe', '--imports-file', str(path)],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, expected, result.stdout)
+
     def test_uwp_dxgi_symbol_allowlist(self):
         with tempfile.TemporaryDirectory(prefix='gr2-import-') as tmp:
             path = Path(tmp) / 'imports.txt'

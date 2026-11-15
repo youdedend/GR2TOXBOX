@@ -509,6 +509,9 @@ jobs:
           $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip))
           try {
             $entries = $archive.Entries | ForEach-Object { $_.FullName }
+            foreach ($entry in $archive.Entries) {
+              Write-Host "::notice title=Actual Xbox archive entry::$($entry.FullName); bytes=$($entry.Length); compressed_bytes=$($entry.CompressedLength)"
+            }
           } finally {
             $archive.Dispose()
           }

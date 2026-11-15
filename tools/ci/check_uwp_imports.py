@@ -62,6 +62,59 @@ FORBIDDEN_DLLS = {
     "concrt140.dll": "the CRT must be inside the package or statically linked",
 }
 
+# Deliberately bounded to APP-partition BSTR/VARIANT/SAFEARRAY declarations in
+# Microsoft's SDK OleAuto.h (not registration, type libraries or dispatch APIs).
+# Header: microsoft/win32metadata generation/WinSDK/RecompiledIdlHeaders/um/OleAuto.h
+# Stable OLEAUT32 export ordinals: wine-mirror/wine dlls/oleaut32/oleaut32.spec.
+OLEAUT_APP_ORDINALS = {
+    2: "SysAllocString",
+    3: "SysReAllocString",
+    4: "SysAllocStringLen",
+    5: "SysReAllocStringLen",
+    6: "SysFreeString",
+    7: "SysStringLen",
+    8: "VariantInit",
+    9: "VariantClear",
+    10: "VariantCopy",
+    11: "VariantCopyInd",
+    12: "VariantChangeType",
+    15: "SafeArrayCreate",
+    16: "SafeArrayDestroy",
+    17: "SafeArrayGetDim",
+    18: "SafeArrayGetElemsize",
+    19: "SafeArrayGetUBound",
+    20: "SafeArrayGetLBound",
+    21: "SafeArrayLock",
+    22: "SafeArrayUnlock",
+    23: "SafeArrayAccessData",
+    24: "SafeArrayUnaccessData",
+    25: "SafeArrayGetElement",
+    26: "SafeArrayPutElement",
+    27: "SafeArrayCopy",
+    36: "SafeArrayAllocDescriptor",
+    37: "SafeArrayAllocData",
+    38: "SafeArrayDestroyDescriptor",
+    39: "SafeArrayDestroyData",
+    40: "SafeArrayRedim",
+    41: "SafeArrayAllocDescriptorEx",
+    42: "SafeArrayCreateEx",
+    43: "SafeArrayCreateVectorEx",
+    44: "SafeArraySetRecordInfo",
+    45: "SafeArrayGetRecordInfo",
+    57: "SafeArraySetIID",
+    67: "SafeArrayGetIID",
+    77: "SafeArrayGetVartype",
+    147: "VariantChangeTypeEx",
+    148: "SafeArrayPtrOfIndex",
+    149: "SysStringByteLen",
+    150: "SysAllocStringByteLen",
+    411: "SafeArrayCreateVector",
+    412: "SafeArrayCopyData",
+}
+OLEAUT_APP_IMPORTS = frozenset(OLEAUT_APP_ORDINALS.values()) | frozenset(
+    f"Ordinal#{ordinal}" for ordinal in OLEAUT_APP_ORDINALS
+)
+
 # Individual exports that are not in the onecore surface even though the DLL name
 # may be. These are what a desktop static CRT drags in.
 FORBIDDEN_SYMBOLS = {
@@ -106,6 +159,8 @@ ALLOWED_DLLS_HINT = {
 # requiring it matched nothing and made every binary look clean.
 IMPORT_LINE = re.compile(r"^\s+(?:[0-9A-Fa-f]{8,16}\s+)?([0-9A-Fa-f]+)\s+(\S+)\s*$")
 
+ORDINAL_LINE = re.compile(r"^\s+Ordinal\s+([0-9]+)\s*$")
+
 # Lines in a DLL section that are structure, not imports.
 STRUCTURE_LINE = re.compile(
     r"(Import Address Table|Import Name Table|time date stamp|Index of first "
@@ -141,6 +196,10 @@ def parse(text: str) -> dict[str, list[str]]:
         if current is None:
             continue
         if STRUCTURE_LINE.search(line):
+            continue
+        ordinal = ORDINAL_LINE.match(line)
+        if ordinal:
+            imports[current].append(f"Ordinal#{int(ordinal.group(1))}")
             continue
         m = IMPORT_LINE.match(line)
         if m:
@@ -178,6 +237,8 @@ def main() -> int:
         # github.com/MicrosoftDocs/sdk-api/blob/docs/sdk-api-src/content/dxgi1_3/nf-dxgi1_3-createdxgifactory2.md
         # Do not allow desktop DXGI/debug exports or an unparsed empty table.
         if dll == "dxgi.dll" and symbols and set(symbols) <= {"CreateDXGIFactory2"}:
+            continue
+        if dll == "oleaut32.dll" and symbols and set(symbols) <= OLEAUT_APP_IMPORTS:
             continue
         if dll in FORBIDDEN_DLLS:
             problems.append(
