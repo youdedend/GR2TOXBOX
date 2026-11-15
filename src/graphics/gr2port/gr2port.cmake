@@ -179,6 +179,23 @@ endif()
 # thousands of errors from a backend that can never run. The scene-capture files
 # above stay.
 # ---------------------------------------------------------------------------
+# presenter.cpp names no graphics API at all: it drives ImGui's frame at each
+# flip and owns the flip queue. It sat in the Vulkan-only list by grouping, and
+# the D3D12 desktop build then failed to link Presenter's constructor and Present
+# -- gnmdriver and videoout both reference them. It belongs with the shared
+# sources.
+#
+# imgui_relay.cpp stays below, for now: its capture half (Capture, KeepPixels,
+# Forget, ForImGui, WarpBack) names no API either, but separating it from the
+# Vulkan drawing half means reproducing ImGui's texture-backend contract exactly,
+# and a mistake there is a silent leak or a dangling texture rather than a build
+# error. That split is its own change with its own verification, not something to
+# fold into a dependency fix.
+target_sources(gr2port PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/presenter.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/presenter.h
+)
+
 if (GR2_RENDERER STREQUAL "VULKAN")
 target_sources(gr2port PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/device.cpp
@@ -190,8 +207,6 @@ target_sources(gr2port PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/memory.cpp
     ${CMAKE_CURRENT_LIST_DIR}/memory.h
     ${CMAKE_CURRENT_LIST_DIR}/pipeline.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/presenter.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/presenter.h
     ${CMAKE_CURRENT_LIST_DIR}/pipeline.h
     ${CMAKE_CURRENT_LIST_DIR}/renderer.cpp
     ${CMAKE_CURRENT_LIST_DIR}/renderer.h
