@@ -52,6 +52,13 @@ void SaveFile(const wchar_t* filePath, const void* data, size_t dataSize)
 
 void SetConsoleColor(CONSOLE_COLOR color)
 {
+#if defined(GR2_XBOX_UWP)
+    // An AppContainer has no console: GetStdHandle and SetConsoleTextAttribute are
+    // not in its surface, and there is nothing on the other end of them anyway --
+    // the package's output goes to the debugger. Colour is the only thing lost;
+    // the message itself still reaches PrintMessage.
+    (void)color;
+#else
     WORD attr = 0;
     switch(color)
     {
@@ -73,6 +80,7 @@ void SetConsoleColor(CONSOLE_COLOR color)
 
     HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
     SetConsoleTextAttribute(out, attr);
+#endif
 }
 
 void PrintMessage(CONSOLE_COLOR color, const char* msg)
@@ -115,7 +123,13 @@ void PrintMessageV(CONSOLE_COLOR color, const char* format, va_list argList)
 
 void PrintMessageV(CONSOLE_COLOR color, const wchar_t* format, va_list argList)
 {
-	size_t dstLen = (size_t)::_vcwprintf(format, argList);
+	// Upstream calls _vcwprintf here, which prints to the console *and* returns the
+	// length; the vswprintf_s below then prints the same text a second time. The
+	// counting-only twin is what was meant, and it is also the only one of the two
+	// that exists in the UWP CRT: an AppContainer has no console to write to, so
+	// _vcwprintf is not in its surface. Messages still reach the output through
+	// PrintMessage, which is the call that was supposed to print them.
+	size_t dstLen = (size_t)::_vscwprintf(format, argList);
 	if(dstLen)
 	{
 		bool useSmallBuf = dstLen < CONSOLE_SMALL_BUF_SIZE;

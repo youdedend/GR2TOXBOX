@@ -24,7 +24,13 @@
 #ifdef _WIN32
 #include <windows.h>
 // windows.h first
+#if !defined(GR2_XBOX_UWP)
+// The shell's folder API. Only the desktop branch of GetGlobalUserFolder reaches
+// it -- the UWP branch reads LOCALAPPDATA instead -- and shlobj.h is not part of
+// the onecore surface, so including it would be the first thing to fail on the
+// package.
 #include <shlobj.h>
+#endif
 #elif defined(__linux__)
 #include <unistd.h>
 #endif
@@ -133,7 +139,18 @@ fs::path GetExecutableDirectory() {
 }
 
 fs::path GetGlobalUserFolder() {
-#ifdef _WIN32
+#if defined(GR2_XBOX_UWP)
+    // SHGetFolderPathW is a desktop shell call, and CSIDL_APPDATA is not in the
+    // onecore surface. A Store app does not have a roaming AppData folder either:
+    // its writable data is the package's own local state, which is exactly what
+    // LOCALAPPDATA names inside an AppContainer. So the same variable that is the
+    // shell's answer on the desktop is the package's answer here, and reading it
+    // needs nothing WinRT brings in.
+    wchar_t appdata[MAX_PATH]{};
+    const DWORD length =
+        GetEnvironmentVariableW(L"LOCALAPPDATA", appdata, static_cast<DWORD>(std::size(appdata)));
+    return length != 0 ? fs::path{appdata} / GLOBAL_DIR : fs::path{};
+#elif defined(_WIN32)
     wchar_t appdata[MAX_PATH]{};
     SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appdata);
     return appdata[0] != L'\0' ? fs::path{appdata} / GLOBAL_DIR : fs::path{};

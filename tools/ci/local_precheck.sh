@@ -166,6 +166,7 @@ D3D12_UNITS=(
     "src/graphics/gr2port_d3d12/pipeline.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/command.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/backend_surface.cpp|"
+    "src/graphics/gr2port_d3d12/backend_capture.cpp|"
     "src/graphics/gr2port_d3d12/imgui_relay.cpp|"
 )
 for entry in "${D3D12_UNITS[@]}"; do
@@ -175,8 +176,13 @@ for entry in "${D3D12_UNITS[@]}"; do
     # The SDL headers are real here too: ImGui's relay and the backend surface take
     # SDL events and windows, and a stand-in for them would defeat the point.
     # shellcheck disable=SC2086
+    # Vulkan's headers are real here, and have to be: backend_capture.cpp defines
+    # the names the shared capture calls, so it includes the same headers those
+    # modules do (meshes.h -> device.h -> vulkan.hpp). Vulkan::Headers is linked on
+    # every build, D3D12 included, so this matches the real compile.
     if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/d3d12_stub -Iexternals/sdl3/include \
-            -Iexternals/imgui $extra -fsyntax-only "$file" 2>"$OUT/err"; then
+            -Iexternals/imgui -Iexternals/vulkan-headers/include $extra \
+            -fsyntax-only "$file" 2>"$OUT/err"; then
         # Only the diagnostics that are not inside the vendored header count.
         grep -E 'error' "$OUT/err" | grep -v 'd3d12ma/' >"$OUT/ours" || true
         if [ -s "$OUT/ours" ]; then
@@ -209,11 +215,12 @@ if command -v python3 >/dev/null 2>&1; then
     fi
 fi
 
-# The ported HLSL, compiled. dxc is a Windows tool, but Microsoft ships a Linux
-# x86_64 build of it, and it compiles every stage in well under a second. Where it
-# is present -- DXC=$PWD/dxc, or dxc on PATH -- every stage in the manifest is
-# compiled for its real profile with warnings as errors, which is the only way a
-# shader error is ever found without a Windows runner.
+# The ported HLSL, compiled. Microsoft ships a Linux x86_64 build of dxc as well as
+# the Windows one, and it compiles every stage in well under a second. The CI
+# source-guard job fetches it (see build-xbox-uwp.yml), so this step does real work
+# on every push. Where it is present -- DXC=$PWD/dxc, or dxc on PATH -- every stage
+# in the manifest is compiled for its real profile with warnings as errors, which
+# is the only way a shader error is ever found without a Windows runner.
 #
 # Where it is absent the check is skipped with a line saying so, rather than
 # silently passing: a shader that was never compiled must not look compiled. The

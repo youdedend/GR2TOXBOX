@@ -7,9 +7,25 @@ License:  MIT, Copyright (c) 2019-2025 Advanced Micro Devices, Inc.
 Vendored files (unmodified):
   include/D3D12MemAlloc.h   -> D3D12MemAlloc.h
   src/D3D12MemAlloc.cpp     -> D3D12MemAlloc.cpp
-  src/Common.cpp            -> Common.cpp
   src/Common.h              -> Common.h
   LICENSE.txt               -> LICENSE.txt
   NOTICES.txt               -> NOTICES.txt
+
+Vendored file with local changes:
+  src/Common.cpp            -> Common.cpp
+
+  Two changes, both inside `#if defined(GR2_XBOX_UWP)` except where noted, and
+  both in the console-debug printing that the allocator's own `UseDebug()`
+  enables. Nothing in the allocator's allocation behaviour is touched.
+
+  1. `PrintMessageV` called `::_vcwprintf` to measure the formatted length. That
+     function *prints* as well as returning the count, so upstream's
+     wide-character path printed every message twice -- and `_vcwprintf` is not
+     in the UWP CRT, because an AppContainer has no console. Replaced with
+     `_vscwprintf`, the counting-only twin, which is what the call was meant to
+     be. This is a genuine upstream bug fix and applies on every platform.
+  2. `SetConsoleColor` is compiled out on UWP: `GetStdHandle` and
+     `SetConsoleTextAttribute` are desktop-only, and a package's output goes to
+     the debugger rather than a console. The message itself still prints.
 
 Not vendored: samples, tests, docs, build scripts.

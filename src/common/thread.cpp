@@ -31,7 +31,12 @@
 #elif defined(_WIN32)
 #include <windows.h>
 // windows.h first
+#if !defined(GR2_XBOX_UWP)
+// Toolhelp32 is how the desktop build enumerates the process's threads for the
+// affinity walk. It is not in the onecore surface, and the UWP build takes the
+// early return instead, so the header has nothing left to declare there.
 #include <tlhelp32.h>
+#endif
 #include "common/string_util.h"
 #else
 #if defined(__Bitrig__) || defined(__DragonFly__) || defined(__FreeBSD__) || defined(__OpenBSD__)
@@ -712,6 +717,16 @@ unsigned ExcludeReservedCoresFromAllOtherThreads() {
                  reserved, host_cpus, narrowed, already_narrow);
     }
     return narrowed;
+#elif defined(GR2_XBOX_UWP)
+    // The whole of the desktop block below is Toolhelp32: CreateToolhelp32Snapshot,
+    // THREADENTRY32 and OpenThread, none of which an AppContainer can call -- a
+    // package may not enumerate the process's threads or open another one for
+    // affinity. That is not a loss here. The reserved cores on the console are the
+    // two the OS keeps for itself, and the scheduler never places a UWP app's
+    // threads on them, which is the outcome the walk exists to achieve; doing it by
+    // hand would be redundant even if it were permitted.
+    (void)host_cpus;
+    return 0;
 #elif defined(_WIN32)
     // Threads created after the snapshot are caught by the periodic walk.
     const DWORD self_pid = GetCurrentProcessId();

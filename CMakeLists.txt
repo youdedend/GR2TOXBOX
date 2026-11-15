@@ -341,19 +341,41 @@ if (ENABLE_SYSTEM_LIBRARIES)
     list(POP_BACK CMAKE_MODULE_PATH)
 endif()
 
-# Platform-wide Windows defines, before externals.
+# The Windows SDK version, before externals.
 #
-# These have to precede add_subdirectory(externals) or they only reach gr2port,
-# and a third-party target that reads them then builds for the wrong platform.
-# That is exactly what went wrong with miniupnpc: its minissdpc.c chooses
+# This one has to precede add_subdirectory(externals) or it only reaches gr2port,
+# and a third-party target that reads it then builds for the wrong platform. That
+# is exactly what went wrong with miniupnpc: its minissdpc.c chooses
 # GetBestInterfaceEx over the desktop-only GetBestInterface when
 # _WIN32_WINNT >= VISTA, and has a UWP branch for in6addr_any -- all of it
 # unreachable if _WIN32_WINNT was never defined, so the UWP package compiled the
-# desktop path and failed on both.
+# desktop path and failed on both. _WIN32_WINNT is also what stops windows.h
+# declaring types by their old names: SOCKADDR_STORAGE_XP is what the SDK calls
+# SOCKADDR_STORAGE at pre-Vista, and it reaches ws2def.h through miniupnpc's
+# includes rather than its own.
 #
-# _WIN32_WINNT is also what stops windows.h from declaring types by the old name:
-# SOCKADDR_STORAGE_XP is what the SDK calls SOCKADDR_STORAGE at pre-Vista, and it
-# reaches ws2def.h through miniupnpc's includes rather than its own.
+# This is the *only* define that belongs up here. The others below are not
+# platform selection -- they are conveniences for our own code -- and putting
+# WIN32_LEAN_AND_MEAN here in particular was a regression: it stops windows.h
+# including winsock.h, and libusb's io.c takes struct timeval, timerisset and
+# timeradd from exactly there. So the lean-mean and NOMINMAX block stays after
+# the externals, where it reaches our code and nothing else's.
+if (WIN32)
+    # Target Windows 10 RS5
+    add_compile_definitions(NTDDI_VERSION=0x0A000006 _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+endif()
+
+add_subdirectory(externals)
+include_directories(src)
+
+# The rest of the Windows conveniences, for our own code only.
+#
+# These deliberately come *after* the externals, which is where they were before
+# an earlier attempt moved the whole block up to fix miniupnpc. That move was
+# wrong in one direction: WIN32_LEAN_AND_MEAN maps to a windows.h that does not
+# include winsock.h, and libusb's io.c reads struct timeval and the timerisset /
+# timercmp macros from exactly there, so the whole desktop build stopped at
+# "incomplete type 'struct timeval'". Only the SDK version needed to travel up.
 if (WIN32)
     if (MSVC)
         # MSVC likes putting opinions on what people can use, disable:
@@ -366,13 +388,7 @@ if (WIN32)
         # Needed for conflicts with time.h of windows.h
         add_compile_definitions(_TIMESPEC_DEFINED)
     endif()
-
-    # Target Windows 10 RS5
-    add_compile_definitions(NTDDI_VERSION=0x0A000006 _WIN32_WINNT=0x0A00 WINVER=0x0A00)
 endif()
-
-add_subdirectory(externals)
-include_directories(src)
 
 set(AJM_LIB src/core/libraries/ajm/ajm.cpp
             src/core/libraries/ajm/ajm.h
@@ -1386,7 +1402,15 @@ elseif (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
 endif()
 
 if (WIN32)
-    target_link_libraries(gr2port PRIVATE mincore wepoll wbemuuid)
+    target_link_libraries(gr2port PRIVATE mincore wepoll)
+
+    # wbemuuid is WMI's GUID library, and WMI is not in the onecore surface: the
+    # UWP build has no WMI consumer left in it (the only one, the folder picker,
+    # is already guarded), so naming the library there would ask the Store
+    # package to link a desktop import library it cannot resolve.
+    if (NOT GR2_XBOX_UWP)
+        target_link_libraries(gr2port PRIVATE wbemuuid)
+    endif()
 
     if (MSVC)
         target_link_libraries(gr2port PRIVATE clang_rt.builtins-x86_64.lib)

@@ -158,6 +158,9 @@ BOOL QueryPerformanceFrequency(LARGE_INTEGER* frequency);
 HANDLE GetCurrentProcess(void);
 HMODULE GetModuleHandleW(LPCWSTR name);
 DWORD GetModuleFileNameW(HMODULE module, LPWSTR filename, DWORD size);
+// Read by the UWP branch of GetGlobalUserFolder, which takes the package's
+// local state from this rather than from the desktop shell's folder lookup.
+DWORD GetEnvironmentVariableW(LPCWSTR name, LPWSTR buffer, DWORD size);
 void OutputDebugStringW(LPCWSTR message);
 void OutputDebugStringA(LPCSTR message);
 BOOL GetProcessMemoryInfo(HANDLE process, PROCESS_MEMORY_COUNTERS* counters, DWORD size);

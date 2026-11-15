@@ -85,8 +85,48 @@ jobs:
         run: python3 tools/shaders/check_shader_coverage.py
       - name: Verify the D3D12 shader manifest covers every HLSL file
         run: python3 tools/shaders/generate_d3d12_manifest.py --check
-      # dxc is Windows-only, so the structural mistakes it reports are cheaper to
-      # find here. Every rule in this script is a failure that cost a Windows run.
+      # dxc is a Windows tool, but Microsoft publishes a Linux build of it, and
+      # this runner can reach GitHub Releases even though a sandbox generally
+      # cannot. Fetching it turns local_precheck.sh's HLSL step from "skipped" into
+      # a real compile of every stage, ninety seconds into the run instead of
+      # twenty-five minutes into a Windows one -- and it is the same dxc the
+      # Windows job uses, so a shader cannot pass here and fail there for a reason
+      # this check is meant to catch.
+      #
+      # The asset name carries a build date, so it is looked up from the release
+      # rather than hard-coded; a fixed name would 404 the first time Microsoft
+      # cuts a release. `|| true` because a shader compile is an addition to this
+      # job, not a prerequisite: if GitHub is having a bad day the structural check
+      # below still runs and the Windows jobs still compile the shaders for real.
+      - name: Fetch dxc for the HLSL compile
+        run: |
+          set -u
+          asset=$(curl -fsSL https://api.github.com/repos/microsoft/DirectXShaderCompiler/releases/latest \
+            | grep -o '"browser_download_url": *"[^"]*linux_dxc[^"]*\.x86_x64\.tar\.gz"' \
+            | head -1 | sed 's/.*"\(https[^"]*\)"/\1/')
+          if [ -z "${asset:-}" ]; then
+            echo "::warning title=dxc not fetched::no linux_dxc asset in the latest release; the HLSL compile step will skip"
+            exit 0
+          fi
+          echo "Fetching $asset"
+          if ! curl -fsSL "$asset" -o dxc.tar.gz; then
+            echo "::warning title=dxc not fetched::download failed; the HLSL compile step will skip"
+            exit 0
+          fi
+          tar -xzf dxc.tar.gz
+          # The tarball lays its binaries out one directory down.
+          found=$(find . -maxdepth 3 -type f -name dxc -perm -u+x | head -1)
+          if [ -z "$found" ]; then
+            echo "::warning title=dxc not fetched::no dxc binary in the archive; the HLSL compile step will skip"
+            exit 0
+          fi
+          chmod +x "$found"
+          # libdxcompiler.so sits beside the binary and is found through RPATH, but
+          # make it discoverable regardless.
+          echo "LD_LIBRARY_PATH=$(cd "$(dirname "$found")" && pwd):${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          echo "DXC=$(cd "$(dirname "$found")" && pwd)/dxc" >> "$GITHUB_ENV"
+          "$(cd "$(dirname "$found")" && pwd)/dxc" --version | head -1
+      # Every rule in this script is a failure that cost a Windows run.
       - name: Check the ported HLSL for structural errors
         run: python3 tools/shaders/check_hlsl_structure.py
       # The generated protobuf sources are checked in, because a UWP package

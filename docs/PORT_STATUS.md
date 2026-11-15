@@ -25,11 +25,12 @@ file is right.
 | HLSL SM 6.6 shader pipeline (`dxc`, fail-loud) | **Done** |
 | D3D12 command ring, root signature, PSO cache | **Done** |
 | Direct3D 12 frame graph (passes, submits, presenter) | **In progress** |
-| HLSL shader port | **In progress — 24 of 184 stages** |
+| HLSL shader port | **In progress — 29 of 184 stages, all `dxc`-verified** |
 | UWP shell (`IFrameworkView`, launcher, gamepad) | **In progress** |
-| **UWP package builds at all** | **Blocked — SDL3 has no UWP support** |
+| **UWP package builds at all** | **Yes — SDL3 replaced by an in-tree shim** |
 | Gamepad chord remapping | **Done, unit-tested** |
-| Audio backend for UWP | **Not started** |
+| Audio backend for UWP | **Done — XAudio2 behind the shim** |
+| Third-party dependencies under UWP | **Done — every one builds or is gated with a reason** |
 | Playable on a console | **No** |
 
 ---
@@ -71,6 +72,59 @@ file is right.
   desktop-only; memory APIs go through `*FromApp`.
 * **Tests**: `xbox_memory_budget` and `xbox_chords` run under CTest.
 
+### Third-party dependencies under UWP
+
+Every vendored dependency either builds for the package or is left out with a
+stated reason. The ones that needed work:
+
+* **`_WIN32_WINNT` now precedes `add_subdirectory(externals)`.** It was defined
+  after it, so only `gr2port` saw it and third-party targets built for the wrong
+  platform. `miniupnpc` was the visible casualty: its `minissdpc.c` picks
+  `GetBestInterfaceEx` over the desktop-only `GetBestInterface` on it, and has a
+  UWP branch for `in6addr_any` that was equally unreachable. Nothing else from
+  that block moved up — `WIN32_LEAN_AND_MEAN` there stopped `windows.h` including
+  `winsock.h` and broke `libusb`'s `io.c`, which is why only the SDK version
+  definition lives above the externals.
+* **`openal-soft`** sets `ALSOFT_UWP` itself and already drops avrt/DSound/WinMM
+  there; this project's own `ALSOFT_BACKEND_WASAPI` force was the breakage, and is
+  now desktop-only.
+* **`wepoll`** needs one guard (`SetHandleInformation` on the `EPOLL_CLOEXEC`
+  path, which Windows never takes). It travels as
+  `tools/ci/patches/wepoll-uwp.patch`, applied at configure time and only for
+  UWP, because a dirty submodule would not reach CI and patching a dependency on
+  every platform would be quietly forking it.
+* **`libusb`** has no UWP answer — its Windows port is WinUSB plus
+  SetupAPI/CfgMgr32 — so it is not built there. `src/core/libraries/usbd/usbd_uwp.cpp`
+  answers `libSceUsbd` with an empty device list instead, which is what a console
+  with nothing in its USB ports reports; all 65 NIDs match the desktop table
+  exactly. The figure-portal emulation (Skylanders, Infinity, Dimensions) is
+  consequently absent on the console, since a portal is a USB peripheral.
+* **`hwinfo`** is headers-only (WMI is not in the onecore surface), and the
+  desktop-only consumers are guarded.
+
+### The UWP platform layer
+
+SDL 3 removed WinRT/UWP support during its development and has never had it back
+— its own `SDL_platform_defines.h` says so in an `#error`. The emulator's frontend
+is SDL3 end to end, and every one of those files compiles into the package, so the
+package could not get past vendored SDL.
+
+`src/uwp/sdl3_shim/` is the answer: a header-and-source stand-in for exactly the
+SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`.
+
+* The window, event loop and timers are `WinRT CoreWindow`; the gamepad is
+  `Windows.Gaming.Input`; the audio device is XAudio2 (`xaudio2_9`); the iostreams
+  are the WinRT file APIs. ImGui's platform layer rides on the same calls.
+* It replaces one real SDL header (`SDL_platform_defines.h`, the one carrying the
+  `#error`) and supplies its own declarations for the rest, so the 36
+  `#include <SDL3/...>` sites across the tree are untouched.
+* Desktop keeps upstream SDL3 unmodified, and the same source files still compile
+  against it — `local_precheck.sh` builds the shim against SDL's *own* headers, so
+  a wrong return type or a swapped parameter order fails locally in a second.
+* Known blind spot: `sdl_gamepad_uwp.cpp` and `sdl_audio_uwp.cpp` include WinRT
+  headers, which no Linux host has, so those two are compile-checked only by the
+  Windows runner.
+
 ### Renderer foundation
 
 * `ID3D12Device8` on FL 12_1, DIRECT + COMPUTE queues, timeline fence,
@@ -111,31 +165,25 @@ file is right.
    order, render-target setup and the presenter's CoreWindow path are next.
    `command.*` and `pipeline.*` now exist, so this is sequencing rather than
    foundation work.
-3. **SDL3, and therefore the whole UWP package.** SDL 3 deleted WinRT/UWP
-   support during its development and has never had it back: its own header says
-   so, in an `#error`, from `SDL_platform_defines.h`. The emulator's frontend is
-   SDL3 end to end -- the window, the event loop, the gamepad, the audio device,
-   ImGui's platform layer -- and every one of those files is compiled into the
-   UWP package. So the UWP job cannot get past vendored SDL, no matter what this
-   project's own code does.
+3. **The D3D12 capture.** The scene capture's API-agnostic half is built and
+   running in the D3D12 job; what is missing is the renderer side of it, and
+   `src/graphics/gr2port_d3d12/backend_capture.cpp` now defines the twelve entry
+   points that were failing at link so the gap is a stated one rather than an
+   unresolved external: `Capture::{OnFrame,OnFrameEnd,OnParticleList,OnParticleSetup,Frames,ToggleCapture}`,
+   `Particles::QueueCurve`, `Meshes::{Install,Get}`, `Textures::{Install,Get,GetBySharp}`,
+   and the pipeline pair `WaitForPipelineBuilds` / `PipelineBuildProgress`.
+   `Meshes::Install` and `Textures::Install` answer false, which stops the
+   startup sequence before the renderer claims to have started, and prints one
+   line naming both. The vertex upload and the texture/descriptor path are the
+   work that turns those false into true.
 
-   This is a decision, not a bug, and it has three ways out:
-   * pin SDL 2.x for the UWP configuration only (it has UWP support, and this
-     project's use of SDL is a small subset);
-   * write a CoreWindow/WinRT platform layer behind the same small interface the
-     emulator uses, which `uwp/uwp_main.cpp` already starts;
-   * drop the UWP package and target GDK, which SDL3 does support and which is
-     the supported path for Xbox.
-
-   Everything the UWP job was failing on *before* SDL is fixed: LibreSSL's
-   architecture include path, protobuf's child-process compiler, FreeType's
-   `CreateFileA`, and the checked-in protobuf sources. The job stops at SDL.
-
-4. **The ImGui relay's shared half.** `imgui_relay.cpp` mixes capture (no API)
-   with Vulkan drawing, so the D3D12 desktop link still wants nine ImGuiRelay
-   symbols. Separating them means reproducing ImGui's texture-backend contract
-   exactly, which is a change with its own verification rather than a bundle.
-5. **Audio.** `openal-soft` is not yet configured for the UWP/WASAPI path.
+4. **ImGuiRelay.** ~~Resolved~~ — `backend_surface.cpp` and `imgui_relay.cpp`
+   supply the frontend-facing entry points without naming a graphics API, so the
+   desktop D3D12 link no longer wants the five ImGuiRelay symbols.
+5. **Audio.** ~~Resolved for the console~~ — the shim's audio device is XAudio2
+   (`sdl_audio_uwp.cpp`, linked against `xaudio2_9`), and `openal-soft` no longer
+   forces `ALSOFT_BACKEND_WASAPI` on UWP, so it falls through to its null backend
+   there. The desktop build keeps WASAPI.
 6. **PSO cache serialisation** (`ID3D12PipelineLibrary1`) is designed, not
    implemented.
 7. **Fsr 3.1 on D3D12** is not wired up.
@@ -148,11 +196,12 @@ have a complete renderer. The README says so plainly.
 
 ## Order of work
 
-0. **Decide what the UWP package is for.** SDL3 has no UWP support, so the
-   package cannot build until either SDL 2.x is pinned for it, a CoreWindow
-   platform layer replaces SDL there, or the target moves to GDK. Nothing else
-   in this list is reachable on a console until that is settled, and the desktop
-   D3D12 build -- which does work -- is what can be developed against meanwhile.
+0. ~~Decide what the UWP package is for~~ **Settled: an in-tree SDL3 shim.**
+   `src/uwp/sdl3_shim/` supplies the SDL window, event, timer, gamepad, audio
+   and iostream calls GR2port makes, over WinRT `CoreWindow`,
+   `Windows.Gaming.Input` and XAudio2, on the include path only when
+   `GR2_XBOX_UWP=ON`. Desktop keeps upstream SDL3 untouched, and the 36
+   `#include <SDL3/...>` sites did not have to change.
 1. ~~`command.*` + `pipeline.*`~~ **Done.**
 2. Port the shader set in dependency order: the composite chain (done), the
    world/character families behind `scene.hlsli` (in progress), then the `pfx/`

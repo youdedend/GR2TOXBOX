@@ -327,8 +327,18 @@ uintptr_t IOFile::GetFileMapping() {
     HANDLE mapping = nullptr;
 
     if (file_access_mode == FileAccessMode::ReadWrite) {
+#if defined(GR2_XBOX_UWP)
+        // CreateFileMapping2 is desktop-only: it was added alongside
+        // FILE_MAP_EXECUTE and the SEC_* attribute set, none of which an
+        // AppContainer gets. CreateFileMappingFromApp is its onecore counterpart and
+        // needs only what this call actually uses -- the handle, the protection and
+        // the size. SEC_COMMIT on a file that already has a size is a no-op, so the
+        // missing flag changes nothing here.
+        mapping = CreateFileMappingFromApp(hfile, NULL, PAGE_READWRITE, 0, NULL);
+#else
         mapping = CreateFileMapping2(hfile, NULL, FILE_MAP_WRITE, PAGE_READWRITE, SEC_COMMIT, 0,
                                      NULL, NULL, 0);
+#endif
     } else {
         mapping = hfile;
     }
@@ -419,9 +429,23 @@ bool IOFile::SetSize(u64 size) const {
 
 std::optional<FileInfo> GetFileInfo(const std::filesystem::path& path) {
 #ifdef _WIN32
+#if defined(GR2_XBOX_UWP)
+    // CreateFileW is desktop-only. CreateFile2 takes the same information packed
+    // into a CREATEFILE2_EXTENDED_PARAMETERS, and is what the onecore surface
+    // offers; FILE_FLAG_BACKUP_SEMANTICS has to be spelled there because a UWP app
+    // may open a directory's metadata only through it.
+    CREATEFILE2_EXTENDED_PARAMETERS extended{};
+    extended.dwSize = sizeof(extended);
+    extended.dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
+    extended.dwFileFlags = FILE_FLAG_BACKUP_SEMANTICS;
+    const HANDLE handle = CreateFile2(path.c_str(), 0,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                      OPEN_EXISTING, &extended);
+#else
     const HANDLE handle =
         CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                     nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+#endif
     if (handle == INVALID_HANDLE_VALUE) {
         return std::nullopt;
     }

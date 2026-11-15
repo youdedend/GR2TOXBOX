@@ -34,6 +34,7 @@ target_sources(gr2port PRIVATE
     # its own, or it compiles every module and then fails at link on exactly these
     # symbols. See graphics/gr2port/backend.h for the contract.
     ${GR2_D3D12_DIR}/backend_surface.cpp
+    ${GR2_D3D12_DIR}/backend_capture.cpp
     ${GR2_D3D12_DIR}/imgui_relay.cpp
     ${GR2_D3D12_DIR}/uwp/uwp_app.cpp
     ${GR2_D3D12_DIR}/uwp/uwp_main.cpp
