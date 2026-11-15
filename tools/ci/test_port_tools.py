@@ -20,6 +20,15 @@ def module(name, file):
 
 
 class PortTools(unittest.TestCase):
+    def test_dxc_scalar_splat_regression(self):
+        checker = module('hlsl_structure', ROOT / 'tools/shaders/check_hlsl_structure.py')
+        with tempfile.TemporaryDirectory(prefix='gr2-hlsl-') as tmp:
+            path = Path(tmp) / 'bad.frag.hlsl'
+            path.write_text('float4 main() : SV_Target { return float4(0.0); }')
+            self.assertTrue(any('scalar-splat' in p for p in checker.check_file(path)))
+            path.write_text('float4 main() : SV_Target { return float4(0.0, 0.0, 0.0, 0.0); }')
+            self.assertEqual(checker.check_file(path), [])
+
     def test_map_aslr_and_other_modules(self):
         script = module('symbolicate', ROOT / 'tools/symbolicate_crash.py')
         text = '''Preferred load address is 0000000140000000

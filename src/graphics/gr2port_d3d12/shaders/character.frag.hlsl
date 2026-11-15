@@ -72,7 +72,7 @@ float KeyShadow() {
     const float4 clip = mul(light.shadow_projection[cascade], float4(view_position, 1.0));
     const float3 coord = clip.xyz / clip.w;
     if (cascade == 2u) {
-        return CascadeTap(cascade, coord, float2(0.0));
+        return CascadeTap(cascade, coord, float2(0.0, 0.0));
     }
     float sum = 0.0;
     if (cascade == 0u) {
@@ -199,13 +199,13 @@ float4 main(StageIO input) : SV_Target0 {
     const float4 gradation = material.gradation_color;
     float3 albedo = lerp(color_map.rgb * material.color_scale.rgb, gradation.rgb,
                       gradation.a * (1.0 - vertex_color.z));
-    float4 decal = float4(1.0);
+    float4 decal = float4(1.0, 1.0, 1.0, 1.0);
     const uint decal_index = draw.decal;
     if (decal_index != 0u) {
         const uint handle = LoadBatchDecal(ArenaAdd(g_scene_decals, (decal_index - 1u) * 144u), g_arena).texture;
         decal = BatchTexture(handle, decal_texcoord, 0.0);
     }
-    albedo *= lerp(float3(1.0), lerp(decal.rgb, gradation.rgb, gradation.a), decal.a * mask);
+    albedo *= lerp(float3(1.0, 1.0, 1.0), lerp(decal.rgb, gradation.rgb, gradation.a), decal.a * mask);
 
     // In shadow, the shadow colour carries a share of the surface's colour.
     const float3 shadow_color = material.shadow_color.rgb;
@@ -262,7 +262,7 @@ float4 main(StageIO input) : SV_Target0 {
         1.0;
     result +=
         camera_facing * camera_share * material.camera_light_color.rgb * albedo;
-    result = max(result, float3(0.0));
+    result = max(result, float3(0.0, 0.0, 0.0));
 
     // The reflection map, on the model or on the screen.
     const float2 distortion = material.reflection_distortion * n.xy;
@@ -275,7 +275,7 @@ float4 main(StageIO input) : SV_Target0 {
     // A material without a reflection map holds a black constant texture.
     const uint reflection_map = material.reflection;
     const float3 reflection =
-        reflection_map != 0u ? Sample(reflection_map, reflection_uv).rgb : float3(0.0);
+        reflection_map != 0u ? Sample(reflection_map, reflection_uv).rgb : float3(0.0, 0.0, 0.0);
     const float reflection_share =
         light_scale * material.reflection_blend * mask * detail_mask;
     if (reflection_mode == 1) {

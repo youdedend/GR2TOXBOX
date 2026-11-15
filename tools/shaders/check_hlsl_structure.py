@@ -41,6 +41,11 @@ def check_file(path: pathlib.Path) -> list[str]:
     text = path.read_text()
     problems: list[str] = []
 
+    # Slang accepts GLSL scalar-splat constructors that DXC/HLSL2021 rejects.
+    # Catch the literal case locally; vectors must spell out their components.
+    if re.search(r"\b(?:float|uint|int)[234]\(\s*-?\d+(?:\.\d+)?[fu]?\s*\)", text):
+        problems.append("GLSL scalar-splat constructor: use explicit HLSL vector components")
+
     blocks = CBUFFER_RE.findall(text)
     registers: dict[str, str] = {}
     members: dict[str, str] = {}

@@ -40,7 +40,7 @@ static uint draw_index;
 
 float4 CubeMap(uint handle, float3 direction) {
     if (handle == 0u) {
-        return float4(0.0);
+        return float4(0.0, 0.0, 0.0, 0.0);
     }
     return BatchCube(handle, direction, 0.0);
 }
@@ -85,7 +85,7 @@ float4 main(StageIO input) : SV_Target0 {
     const float3 env = m.reflectance.rgb * (1.04 - 0.572 * rough - k) +
                      (0.022 * rough - 0.04 + k) * clamp(50.0 * m.reflectance.g, 0.0, 1.0);
     const float lod = clamp(6.0 + 1.15 * log2(max(rough, 1e-6)), 0.0, 6.5);
-    float3 radiance = float3(0.0);
+    float3 radiance = float3(0.0, 0.0, 0.0);
     if (light.radiance[0] != 0u) {
         radiance =
             BatchCube(light.radiance[0], reflect(ray, n), lod)
@@ -93,7 +93,7 @@ float4 main(StageIO input) : SV_Target0 {
     }
     const float3 fresnel =
         m.fresnel_floor + (1.0 - m.fresnel_floor) * pow(max(1.0 - n_dot_v, 0.0), 5.0);
-    const float3 share = m.fresnel_scale * max(fresnel - m.fresnel_bias, float3(0.0));
+    const float3 share = m.fresnel_scale * max(fresnel - m.fresnel_bias, float3(0.0, 0.0, 0.0));
     color = float4(inner + (radiance * env - inner) * share, 0.0);
     return color;
 }

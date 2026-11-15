@@ -53,7 +53,7 @@ float KeyShadow() {
 // Where a ray that refracts at the surface lands on the screen.
 float2 Refracted(float3 ray, float3 n, float ratio, float2 projection) {
     const float3 bent = refract(ray, n, ratio);
-    return float2(0.5) + float2(0.5, -0.5) * projection * bent.xy / -bent.z;
+    return float2(0.5, 0.5) + float2(0.5, -0.5) * projection * bent.xy / -bent.z;
 }
 
 // The game's G2_BG_Glass pixel program (0x1b8712c): the scene behind the pane, refracted through
@@ -92,7 +92,7 @@ float4 main(StageIO input) : SV_Target0 {
     }
 
     // In the light pass the target already holds the scene through the pane, so nothing is read.
-    float3 behind = float3(0.0);
+    float3 behind = float3(0.0, 0.0, 0.0);
     if (g_glass_output == RefractedOutput) {
         const float4 refraction = material.refraction;
         const float2 projection = material.projection;
@@ -129,7 +129,7 @@ float4 main(StageIO input) : SV_Target0 {
         1.04 * (min(exp2(-9.28 * n_dot_v), gloss * gloss) * gloss - 0.0275 * rough) + 0.0442;
     const float3 env = reflectance * (1.04 - 0.572 * rough - k) +
                      (0.022 * rough - 0.04 + k) * clamp(50.0 * reflectance.g, 0.0, 1.0);
-    float3 radiance = float3(0.0);
+    float3 radiance = float3(0.0, 0.0, 0.0);
     if (light.radiance[0] != 0u) {
         const float3x3 view_to_world = (float3x3)material.view_inverse;
         const float3 reflected =

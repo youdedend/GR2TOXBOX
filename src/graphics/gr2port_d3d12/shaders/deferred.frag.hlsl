@@ -49,7 +49,7 @@ float ShadowTap(uint cascade, float3 coord, float2 offset) {
 float KeyShadow(uint cascade, float3 position) {
     const float3 coord = ShadowCoord(cascade, position);
     if (cascade == 2u) {
-        return ShadowTap(cascade, coord, float2(0.0));
+        return ShadowTap(cascade, coord, float2(0.0, 0.0));
     }
     return 0.25 * (ShadowTap(cascade, coord, float2(1.3e-4, 3.64e-4)) +
                    ShadowTap(cascade, coord, float2(3.56e-4, 1.01e-4)) +
@@ -78,7 +78,7 @@ float Transmittance(float s) {
 
 float3 Irradiance(float3 direction) {
     if (light.irradiance[0] == 0u) {
-        return float3(0.0);
+        return float3(0.0, 0.0, 0.0);
     }
     const float3 first =
         BatchCube(light.irradiance[0], direction, 0.0).rgb;
@@ -92,7 +92,7 @@ float3 Irradiance(float3 direction) {
 
 float3 Radiance(float3 direction, float lod) {
     if (light.radiance[0] == 0u) {
-        return float3(0.0);
+        return float3(0.0, 0.0, 0.0);
     }
     const float3 first =
         BatchCube(light.radiance[0], direction, lod).rgb;
@@ -128,7 +128,7 @@ float3 Tone(float3 c) {
     const float3 t = c * light.toning;
     const float3 f = frac(t);
     const float3 f2 = f * f;
-    return lerp(t, t - f + f2 * f2, step(float3(1.0), t)) / light.toning;
+    return lerp(t, t - f + f2 * f2, step(float3(1.0, 1.0, 1.0), t)) / light.toning;
 }
 
 // The game's LightPass, IBL and Resolve programs in one pass.
@@ -256,7 +256,7 @@ float4 main(float4 position_in : SV_Position) : SV_Target0 {
                     translucency * behind * behind * diffuse);
         }
     }
-    lit = max(lit, float3(0.0)) + 6.0 * surface.a * albedo;
+    lit = max(lit, float3(0.0, 0.0, 0.0)) + 6.0 * surface.a * albedo;
 
     // Ambient light from the sky's cube maps.
     const float3 sky_normal = normalize(mul((float3x3)light.view_to_sky, normal));
@@ -282,7 +282,7 @@ float4 main(float4 position_in : SV_Position) : SV_Target0 {
     ambient *= light.ibl_intensity;
     const float strength = light.occluder_intensity * max(1.0 - dot(lit, LumaWeights), 0.0);
     ambient *= OccluderShade(position, strength);
-    float3 shaded = Tone(max(lit + ambient, float3(0.0)));
+    float3 shaded = Tone(max(lit + ambient, float3(0.0, 0.0, 0.0)));
     const float gradation_amount =
         clamp((distance_to_eye - light.gradation_start) * light.gradation_range, 0.0, 1.0);
     const float3 gradation = lerp(lerp(light.gradation_middle.rgb, light.gradation_low.rgb,

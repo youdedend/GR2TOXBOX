@@ -94,7 +94,7 @@ StageIO main(uint vertex_index : SV_VertexID, uint instance : SV_InstanceID) {
     const float4 transform = draw.texcoord_transform;
     output.texcoord = transform.xy + transform.zw * LoadTexcoord(vertices, stride, draw.texcoord, vertex_index, g_arena);
     const uint decal_index = draw.decal;
-    output.decal_texcoord = decal_index != 0u ? DecalTexcoord(unskinned, decal_index - 1u) : float2(0.0);
+    output.decal_texcoord = decal_index != 0u ? DecalTexcoord(unskinned, decal_index - 1u) : float2(0.0, 0.0);
     output.model_xy = unskinned.xy;
 
     const uint normal_element = draw.normal;
@@ -125,6 +125,6 @@ StageIO main(uint vertex_index : SV_VertexID, uint instance : SV_InstanceID) {
     }
     const uint color_element = draw.vertex_color;
     output.vertex_color = (color_element >> 8) != 0u ? LoadVertexColor(vertices, stride, color_element, vertex_index, g_arena)
-                                              : float4(1.0);
+                                              : float4(1.0, 1.0, 1.0, 1.0);
     return output;
 }
