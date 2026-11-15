@@ -1,7 +1,14 @@
 # SPDX-FileCopyrightText: Copyright 2026 GR2port
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-if (WIN32)
+# The launcher is a desktop shell: it draws with GDI+ (art.cpp) or Qt's widgets,
+# links comctl32 and shlwapi for its dialogs, and exists to pick a game and set up
+# a pad before the emulator starts. The packaged Xbox build has none of that --
+# a packaged app gets its content from the package, has no shell to open a dialog
+# in, and the console has no GDI+. Its entry point runs the game directly
+# (src/graphics/gr2port_d3d12/uwp/uwp_main.cpp), so the launcher is not built
+# there at all rather than made to compile without the libraries it is made of.
+if (WIN32 AND NOT GR2_XBOX_UWP)
     target_sources(gr2port PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/art.cpp
         ${CMAKE_CURRENT_LIST_DIR}/art.h

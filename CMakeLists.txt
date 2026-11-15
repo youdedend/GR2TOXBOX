@@ -1156,6 +1156,7 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/uwp_memory.cpp
          src/core/uwp_memory.h
          src/core/uwp_win_compat.h
+         src/uwp/uwp_shell_compat.h
          src/core/emulator_state.cpp
          src/core/emulator_state.h
          src/core/emulator_settings.cpp

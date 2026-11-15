@@ -44,6 +44,8 @@ typedef long LONG;
 typedef unsigned long long DWORD64;
 typedef unsigned int UINT;
 typedef int INT;
+typedef short SHORT;
+typedef void* HLOCAL;
 // The pointer-sized unsigned type the memory API is declared in terms of.
 typedef unsigned long long SIZE_T;
 typedef unsigned long long ULONG64;
@@ -168,6 +170,15 @@ void OutputDebugStringW(LPCWSTR message);
 void OutputDebugStringA(LPCSTR message);
 BOOL GetProcessMemoryInfo(HANDLE process, PROCESS_MEMORY_COUNTERS* counters, DWORD size);
 BOOL GlobalMemoryStatusEx(MEMORYSTATUSEX* status);
+
+// The local heap, which uwp_shell_compat.h's CommandLineToArgvW replacement uses.
+// Both are documented as UWP-capable, so unlike most of this file they are not
+// stand-ins for missing desktop calls but the real thing under another header.
+#ifndef LMEM_FIXED
+#define LMEM_FIXED 0x0000
+#endif
+HLOCAL LocalAlloc(UINT flags, SIZE_T bytes);
+HLOCAL LocalFree(HLOCAL block);
 
 // --- memoryapi.h's surface, as src/core/uwp_win_compat.h uses it ------------
 //

@@ -238,7 +238,7 @@ std::string NoGame(const std::filesystem::path& beside, const std::filesystem::p
 // Tells the player that no game is found. Where the launcher has the dialog for it, the player
 // can choose the folder that holds the game instead, and that folder is returned.
 std::optional<std::filesystem::path> AskFolder(const std::string& text) {
-#if defined(_WIN32) || defined(__linux__)
+#if (defined(_WIN32) && !defined(GR2_XBOX_UWP)) || defined(__linux__)
     LOG_ERROR(Loader, "GR2port: {}", text);
     return Launcher::AskGameFolder(text);
 #else

@@ -10,6 +10,11 @@
 #include <optional>
 #include <span>
 #include <vector>
+// Before CLI11: its Win32 argv helper calls CommandLineToArgvW, which the packaged
+// build has no shell32 to take it from. The header supplies it for that build only
+// (see src/uwp/uwp_shell_compat.h) and does nothing elsewhere.
+#include "uwp/uwp_shell_compat.h"
+
 #include <CLI/CLI.hpp>
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_messagebox.h>
@@ -32,7 +37,10 @@
 #include "core/user_settings.h"
 #include "graphics/gr2port/device_lost.h"
 
-#ifdef _WIN32
+// The launcher is a desktop shell only (see src/launcher/launcher.cmake); the
+// packaged Xbox build starts the game directly from uwp_main.cpp and has no
+// folder to pick.
+#if defined(_WIN32) && !defined(GR2_XBOX_UWP)
 #include <windows.h>
 #include "launcher/launcher.h"
 #elif defined(__APPLE__)
@@ -42,7 +50,7 @@
 #endif
 
 int main(int argc, char* argv[]) {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GR2_XBOX_UWP)
     Gr2Port::Launcher::AttachTerminal();
     SetConsoleOutputCP(CP_UTF8);
 #endif
@@ -200,7 +208,7 @@ int main(int argc, char* argv[]) {
     }
     PromptPacks::InstallBundled();
 
-#if defined(_WIN32) || defined(__linux__)
+#if (defined(_WIN32) && !defined(GR2_XBOX_UWP)) || defined(__linux__)
     if (!noLauncher && !IPC::Instance().IsEnabled() && !Gr2Port::Launcher::Run()) {
         return 0;
     }

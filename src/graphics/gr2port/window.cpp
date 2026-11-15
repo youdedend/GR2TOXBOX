@@ -37,7 +37,12 @@ void StoreSize(int width, int height) {
 // Whether the print screen key is down. Windows tells SDL of that key only when it is released,
 // so there the key's own state is read.
 bool PrintScreenHeld() {
-#ifdef _WIN32
+#if defined(GR2_XBOX_UWP)
+    // A packaged app cannot read global key state, so there is no print-screen key
+    // to poll. The console takes screenshots from a gamepad chord instead
+    // (src/uwp/chords.cpp), which comes through the input path and not this one.
+    return false;
+#elif defined(_WIN32)
     return (GetAsyncKeyState(VK_SNAPSHOT) & 0x8000) != 0;
 #else
     return SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_PRINTSCREEN];

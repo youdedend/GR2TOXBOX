@@ -181,6 +181,37 @@ else
     fi
 fi
 
+# src/uwp/uwp_shell_compat.h, in both configurations. It is the stand-in for two
+# desktop shell calls that the packaged build's object files reference but cannot
+# take from shell32/user32: CommandLineToArgvW (CLI11 calls it) and
+# GetAsyncKeyState (the screenshot path). Written blind to the Windows toolchain,
+# so this is the only check it gets before a runner compiles it -- and on desktop
+# it must be completely inert, which is the second half of the check.
+cat >"$OUT/shell_compat.cpp" <<'SHELL_EOF'
+#include "uwp/uwp_shell_compat.h"
+int main() {
+    return 0;
+}
+SHELL_EOF
+for sc_uwp in 1 0; do
+    sc_defs=""
+    sc_label="desktop (must be inert)"
+    if [ "$sc_uwp" = "1" ]; then
+        sc_defs="-DGR2_XBOX_UWP=1"
+        sc_label="GR2_XBOX_UWP"
+    fi
+    # shellcheck disable=SC2086
+    if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/stubs -D_WIN32=1 $sc_defs \
+            -fsyntax-only "$OUT/shell_compat.cpp" 2>"$OUT/err"; then
+        echo "  FAIL src/uwp/uwp_shell_compat.h ($sc_label)"
+        sed 's/^/    /' "$OUT/err" | head -20
+        annotate_log "src/uwp/uwp_shell_compat.h" "$OUT/err"
+        failures=$((failures + 1))
+    else
+        echo "  ok   src/uwp/uwp_shell_compat.h ($sc_label)"
+    fi
+done
+
 # The console build's in-memory MP3 path. music_player_service.cpp reads the file
 # with IOFile and hands the bytes to mp3dec_load_buf; the first version of that
 # called IOFile by the wrong name, used operator bool that it does not have, and

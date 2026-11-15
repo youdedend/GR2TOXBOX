@@ -117,7 +117,13 @@ struct GameViewSource : winrt::implements<GameViewSource,
 
 /// The application's entry point. On a UWP app the linker resolves /ENTRY to the
 /// app model's stub, which calls this.
-int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+// The parameter types are spelled out rather than HINSTANCE/PWSTR: neither is in
+// the onecore surface this build compiles against, and the app model never passes
+// anything the entry point reads. wWinMain's signature is what the linker looks
+// for, and these are the same four types it declares (a handle, a handle, a wide
+// string and an int).
+int __stdcall wWinMain(void* /*hInstance*/, void* /*hPrevInstance*/,
+                       wchar_t* /*commandLine*/, int /*showCommand*/) {
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     winrt::Windows::ApplicationModel::Core::CoreApplication::Run(GameViewSource{});
     return 0;
