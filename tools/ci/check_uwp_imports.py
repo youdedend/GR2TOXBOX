@@ -108,6 +108,11 @@ OLEAUT_APP_ORDINALS = {
     148: "SafeArrayPtrOfIndex",
     149: "SysStringByteLen",
     150: "SysAllocStringByteLen",
+    # C++/WinRT's error transport, also resolved by WindowsApp.lib. These are
+    # explicitly declared in microsoft/cppwinrt strings/base_extern.h for UWP;
+    # this is NOT permission for desktop COM registration/type-library APIs.
+    200: "GetErrorInfo",
+    201: "SetErrorInfo",
     411: "SafeArrayCreateVector",
     412: "SafeArrayCopyData",
 }

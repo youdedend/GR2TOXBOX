@@ -29,6 +29,7 @@ class PortTools(unittest.TestCase):
             fixtures = [
                 ('        Ordinal     6\n', 0),
                 ('        Ordinal 2\n        Ordinal 4\n        Ordinal 9\n', 0),
+                ('        Ordinal 200\n        Ordinal 201\n        Ordinal 6\n        Ordinal 7\n', 0),
                 ('        6 SysFreeString\n        7 SysStringLen\n', 0),
                 ('        Ordinal 99999\n', 1),
                 ('        Ordinal 33\n', 1),  # RegisterActiveObject is desktop.
