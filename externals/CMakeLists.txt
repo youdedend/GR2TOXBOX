@@ -322,6 +322,40 @@ if (APPLE OR ${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
 endif()
 
 #windows only
+#
+# wepoll's epoll_create1 calls SetHandleInformation for EPOLL_CLOEXEC, and that
+# function is not in the onecore surface a UWP app links against. The fix is two
+# lines in wepoll.c, but wepoll is a submodule pointing at upstream's dist branch,
+# so it cannot carry a local commit -- a dirty submodule does not travel with this
+# repo and the Actions runner checks out the pristine tree. The patch is therefore
+# applied here, at configure time, and only on UWP: the desktop build keeps
+# upstream's file byte for byte, which matters because wepoll is a dependency we
+# do not own and a fix that silently changed it everywhere would be a fork.
+#
+# It is idempotent -- the patch's own context fails once applied -- so a rebuild
+# or a second configure is harmless.
+if (GR2_XBOX_UWP AND WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ext-wepoll/wepoll.c")
+    execute_process(
+        COMMAND git apply --reverse --check
+                "${CMAKE_CURRENT_SOURCE_DIR}/../tools/ci/patches/wepoll-uwp.patch"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/ext-wepoll"
+        RESULT_VARIABLE wepoll_already_patched
+        OUTPUT_QUIET ERROR_QUIET)
+    if (NOT wepoll_already_patched EQUAL 0)
+        execute_process(
+            COMMAND git apply "${CMAKE_CURRENT_SOURCE_DIR}/../tools/ci/patches/wepoll-uwp.patch"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/ext-wepoll"
+            RESULT_VARIABLE wepoll_patch_result
+            OUTPUT_VARIABLE wepoll_patch_out
+            ERROR_VARIABLE wepoll_patch_err)
+        if (NOT wepoll_patch_result EQUAL 0)
+            message(FATAL_ERROR
+                "failed to apply wepoll's UWP patch:\n${wepoll_patch_err}")
+        endif()
+        message(STATUS "wepoll: applied the UWP SetHandleInformation patch")
+    endif()
+endif()
+
 if (WIN32)
 add_subdirectory(ext-wepoll)
 endif()

@@ -1,0 +1,31 @@
+diff --git a/wepoll.c b/wepoll.c
+index 9ccb3ea..05a650a 100644
+--- a/wepoll.c
++++ b/wepoll.c
+@@ -514,6 +514,8 @@ HANDLE epoll_create1(int flags) {
+ 		return INVALID_HANDLE_VALUE;
+ 	}
+ 
++#if !defined(WINAPI_FAMILY) || !defined(WINAPI_FAMILY_PARTITION) || \
++	WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+ 	if (flags & EPOLL_CLOEXEC) {
+ 		if (!SetHandleInformation((HANDLE)ephnd, HANDLE_FLAG_INHERIT, 0)) {
+ 			DWORD error = GetLastError();
+@@ -522,6 +524,17 @@ HANDLE epoll_create1(int flags) {
+ 			return INVALID_HANDLE_VALUE;
+ 		}
+ 	}
++#else
++	// A UWP app has no child processes, so there is nothing for a handle to be
++	// inherited by and SetHandleInformation is not in the onecore surface.
++	//
++	// EPOLL_CLOEXEC is therefore accepted and means nothing, which is the correct
++	// reading of it here rather than a compromise: the flag exists to stop a
++	// descriptor leaking into a process this app can never create. The caller
++	// (core/net/host_net.cpp) passes 0 on Windows anyway, so this path is reached
++	// only by a caller that asked for something that cannot happen.
++	(void)flags;
++#endif
+ 
+ 	return ephnd;
+ }
