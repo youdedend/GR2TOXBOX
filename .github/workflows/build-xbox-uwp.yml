@@ -299,6 +299,7 @@ jobs:
   # UWP-only errors surface, and gating it behind the 25-minute desktop build meant
   # waiting half an hour for an answer that was available immediately.
   xbox-uwp-msix:
+    timeout-minutes: 120
     runs-on: windows-2022
     needs: get-info
     if: ${{ !inputs.skip_uwp }}
@@ -402,6 +403,12 @@ jobs:
       # the check run itself and survives a log that cannot be downloaded.
       - name: Stage, pack and sign the MSIX
         shell: pwsh
+        # No timeout-minutes anywhere in this workflow means a hung step runs until
+        # GitHub's 6-hour default. This one hung for 87 minutes on a timestamp-server
+        # socket. Ten minutes is generous for makepri + makeappx + signtool on a
+        # 200 MiB staging directory, and short enough to fail while the run is still
+        # worth reading.
+        timeout-minutes: 10
         run: |
           # $ErrorActionPreference is left at Stop: the packaging script signals
           # failure with throw, and a terminating error is what try/catch catches.

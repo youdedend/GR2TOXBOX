@@ -207,13 +207,20 @@ if (-not (Test-Path $pfx)) { throw "Signing certificate not found at $pfx" }
 $password = $env:GR2_PFX_PASSWORD
 if (-not $password) { throw "GR2_PFX_PASSWORD is not set" }
 
-& $signtool sign /fd SHA256 /f $pfx /p $password `
-    /tr http://timestamp.digicert.com /td SHA256 $msixPath
-if ($LASTEXITCODE -ne 0) {
-    Write-Warning "Timestamped signing failed; retrying without a timestamp server."
-    & $signtool sign /fd SHA256 /f $pfx /p $password $msixPath
-    if ($LASTEXITCODE -ne 0) { throw "signtool sign failed ($LASTEXITCODE)" }
-}
+# Sign without a timestamp server.
+#
+# A timestamp is not needed here and costs the job. The timestamp only says "this
+# signature was made before the certificate expired", which matters for a
+# long-lived signature on something a stranger will verify years later. This
+# package is signed by a Dev Mode certificate that the user installs on their own
+# console moments before sideloading it, so the RFC 3161 round trip buys nothing.
+#
+# It does cost something: /tr has no timeout of its own, so if the timestamp
+# authority is unreachable from the runner signtool sits on the socket until the
+# job's timeout expires. That is exactly what happened -- the packaging step ran
+# for 87 minutes with no output before it was killed.
+& $signtool sign /fd SHA256 /f $pfx /p $password $msixPath
+if ($LASTEXITCODE -ne 0) { throw "signtool sign failed ($LASTEXITCODE)" }
 # How to verify a package signed by a self-signed Dev Mode certificate.
 #
 # `/pa /v` alone always fails here, and not because the signature is wrong: the
