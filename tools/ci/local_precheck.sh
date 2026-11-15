@@ -111,6 +111,42 @@ else
     echo "  ok   src/core/uwp_memory.cpp (GR2_XBOX_UWP)"
 fi
 
+# The AppContainer Win32 wrappers, which had never been host-checked -- and that is
+# why two of them shipped with the wrong number of arguments for the FromApp call
+# they forward to. VirtualAlloc2FromApp takes seven parameters and
+# MapViewOfFile3FromApp nine, the same lists as their desktop counterparts;
+# nothing here declared them, so a four-argument call compiled cleanly on this host
+# and failed only on the Windows runner. tools/ci/stubs/windows.h now declares the
+# memory API with its real arities, which turns this into a real check.
+#
+# Both configurations are compiled: the UWP branch is the one that broke, and the
+# desktop branch is what CI's desktop job exercises, so a mistake in either is
+# caught here.
+cat >"$OUT/win_compat.cpp" <<'COMPAT_EOF'
+#include "core/uwp_win_compat.h"
+int main() {
+    return 0;
+}
+COMPAT_EOF
+for compat_uwp in 1 0; do
+    compat_defs=""
+    compat_label="desktop"
+    if [ "$compat_uwp" = "1" ]; then
+        compat_defs="-DGR2_XBOX_UWP=1"
+        compat_label="GR2_XBOX_UWP"
+    fi
+    # shellcheck disable=SC2086
+    if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/stubs -D_WIN32=1 $compat_defs \
+            -fsyntax-only "$OUT/win_compat.cpp" 2>"$OUT/err"; then
+        echo "  FAIL src/core/uwp_win_compat.h ($compat_label)"
+        sed 's/^/    /' "$OUT/err" | head -20
+        annotate_log "src/core/uwp_win_compat.h" "$OUT/err"
+        failures=$((failures + 1))
+    else
+        echo "  ok   src/core/uwp_win_compat.h ($compat_label)"
+    fi
+done
+
 # libSceUsbd on the console. The desktop file it replaces is libusb end to end,
 # so this one stands in for the whole library and is the only definition of
 # these 65 symbols the UWP link has -- a typo in a signature or a missing
@@ -200,6 +236,55 @@ for entry in "${D3D12_UNITS[@]}"; do
         echo "  ok   $file"
     fi
 done
+
+# The D3D12 backend's definitions, by the names the linker will look for.
+#
+# -fsyntax-only above proves that backend_capture.cpp compiles; it says nothing
+# about whether each definition landed in the namespace its declaration lives in,
+# because a declaration is in scope either way. That is exactly how QueueCurve
+# shipped once as Gr2Port::QueueCurve when particles.h declares
+# Gr2Port::Particles::QueueCurve: the file compiled, the desktop link failed with
+# one undefined symbol, and a 25-minute run was spent learning it. Compiling the
+# object and reading its symbol table catches it in a second.
+D3D12_SYMBOLS=(
+    "Gr2Port::Capture::OnFrame(unsigned long, unsigned long)"
+    "Gr2Port::Capture::OnParticleSetup(unsigned long)"
+    "Gr2Port::Capture::OnParticleList(unsigned long)"
+    "Gr2Port::Capture::OnFrameEnd()"
+    "Gr2Port::Capture::Frames()"
+    "Gr2Port::Capture::ToggleCapture()"
+    "Gr2Port::Particles::QueueCurve(unsigned int, unsigned int, unsigned long, unsigned int)"
+    "Gr2Port::Meshes::Get(unsigned long)"
+    "Gr2Port::Meshes::Install(unsigned long, Xbyak::CodeGenerator&, unsigned long)"
+    "Gr2Port::Textures::Get(unsigned long)"
+    "Gr2Port::Textures::GetBySharp(unsigned int const*, bool&)"
+    "Gr2Port::Textures::Install(unsigned long, Xbyak::CodeGenerator&, unsigned long)"
+    "Gr2Port::WaitForPipelineBuilds()"
+    "Gr2Port::PipelineBuildProgress()"
+)
+if command -v nm >/dev/null 2>&1 &&
+        "$CXX" "${CXXFLAGS[@]}" -c -o "$OUT/backend_capture.o" \
+            -Itools/ci/d3d12_stub -Iexternals/sdl3/include -Iexternals/imgui \
+            -Iexternals/vulkan-headers/include \
+            src/graphics/gr2port_d3d12/backend_capture.cpp 2>"$OUT/err"; then
+    nm -C "$OUT/backend_capture.o" >"$OUT/syms"
+    missing_syms=0
+    for sym in "${D3D12_SYMBOLS[@]}"; do
+        if ! grep -qF " $sym" "$OUT/syms"; then
+            echo "  MISSING $sym"
+            missing_syms=$((missing_syms + 1))
+        fi
+    done
+    if [ "$missing_syms" -ne 0 ]; then
+        echo "  FAIL D3D12 backend symbols (${missing_syms} of ${#D3D12_SYMBOLS[@]} not defined)"
+        printf '%s\n' "the D3D12 backend does not define these at the linkage their declarations use:" \
+            "$(printf '  %s' "${D3D12_SYMBOLS[@]}")" >"$OUT/ours"
+        annotate_log "src/graphics/gr2port_d3d12/backend_capture.cpp" "$OUT/ours"
+        failures=$((failures + 1))
+    else
+        echo "  ok   D3D12 backend symbols (${#D3D12_SYMBOLS[@]} defined)"
+    fi
+fi
 
 # The ported HLSL, structurally. This catches the mistakes that do not need a
 # compiler, e.g. two cbuffers both declaring g_pad, or a stage using ArenaRef

@@ -44,6 +44,9 @@ typedef long LONG;
 typedef unsigned long long DWORD64;
 typedef unsigned int UINT;
 typedef int INT;
+// The pointer-sized unsigned type the memory API is declared in terms of.
+typedef unsigned long long SIZE_T;
+typedef unsigned long long ULONG64;
 typedef void* HANDLE;
 typedef void* HMODULE;
 typedef void* HWND;
@@ -165,6 +168,90 @@ void OutputDebugStringW(LPCWSTR message);
 void OutputDebugStringA(LPCSTR message);
 BOOL GetProcessMemoryInfo(HANDLE process, PROCESS_MEMORY_COUNTERS* counters, DWORD size);
 BOOL GlobalMemoryStatusEx(MEMORYSTATUSEX* status);
+
+// --- memoryapi.h's surface, as src/core/uwp_win_compat.h uses it ------------
+//
+// The arities here are the real ones, taken from Microsoft's documentation, and
+// that is the whole point: an earlier version of uwp_win_compat.h called
+// VirtualAlloc2FromApp with four arguments and MapViewOfFile3FromApp with seven,
+// when they take seven and nine. Both compiled on this host only because nothing
+// declared them here, so the call was never checked; the packaged build was the
+// first thing to reject it. Declaring them with their true signatures means the
+// host check catches the next such mistake in a second.
+
+#ifndef MEM_COMMIT
+#define MEM_COMMIT 0x00001000
+#define MEM_RESERVE 0x00002000
+#define MEM_RELEASE 0x00008000
+#define MEM_FREE 0x00010000
+#endif
+#ifndef PAGE_NOACCESS
+#define PAGE_NOACCESS 0x01
+#define PAGE_READONLY 0x02
+#define PAGE_READWRITE 0x04
+#define PAGE_WRITECOPY 0x08
+#define PAGE_EXECUTE 0x10
+#define PAGE_EXECUTE_READ 0x20
+#define PAGE_EXECUTE_READWRITE 0x40
+#define PAGE_EXECUTE_WRITECOPY 0x80
+#endif
+#ifndef MEM_EXTENDED_PARAMETER_TYPE
+// The field is only ever read by the real SDK; the wrapper passes the pointer
+// through, so an opaque struct of the right shape is enough here.
+typedef struct MEM_EXTENDED_PARAMETER {
+    DWORD64 Type;
+    union {
+        DWORD64 ULong64;
+        void* Pointer;
+        SIZE_T Size;
+        HANDLE Handle;
+        DWORD ULong;
+    };
+} MEM_EXTENDED_PARAMETER;
+#endif
+
+typedef struct SECURITY_ATTRIBUTES {
+    DWORD nLength;
+    void* lpSecurityDescriptor;
+    BOOL bInheritHandle;
+} SECURITY_ATTRIBUTES;
+
+typedef struct MEMORY_BASIC_INFORMATION {
+    void* BaseAddress;
+    void* AllocationBase;
+    DWORD AllocationProtect;
+    SIZE_T RegionSize;
+    DWORD State;
+    DWORD Protect;
+    DWORD Type;
+} MEMORY_BASIC_INFORMATION;
+typedef MEMORY_BASIC_INFORMATION* PMEMORY_BASIC_INFORMATION;
+
+void* VirtualAlloc2(HANDLE process, void* base, SIZE_T size, DWORD type, DWORD protect,
+                    MEM_EXTENDED_PARAMETER* extended, DWORD count);
+void* VirtualAlloc2FromApp(HANDLE process, void* base, SIZE_T size, DWORD type, DWORD protect,
+                           MEM_EXTENDED_PARAMETER* extended, DWORD count);
+void* MapViewOfFile3(HANDLE mapping, HANDLE process, void* base, unsigned long long offset,
+                     SIZE_T view_size, DWORD allocation_type, DWORD page_protection,
+                     MEM_EXTENDED_PARAMETER* extended, DWORD count);
+void* MapViewOfFile3FromApp(HANDLE mapping, HANDLE process, void* base, unsigned long long offset,
+                            SIZE_T view_size, DWORD allocation_type, DWORD page_protection,
+                            MEM_EXTENDED_PARAMETER* extended, DWORD count);
+BOOL VirtualProtect(void* address, SIZE_T size, DWORD new_protect, DWORD* old_protect);
+BOOL VirtualProtectFromApp(void* address, SIZE_T size, DWORD new_protect, DWORD* old_protect);
+BOOL VirtualFree(void* address, SIZE_T size, DWORD free_type);
+BOOL VirtualFreeFromApp(void* address, SIZE_T size, DWORD free_type);
+SIZE_T VirtualQuery(const void* address, MEMORY_BASIC_INFORMATION* info, SIZE_T length);
+SIZE_T VirtualQueryEx(HANDLE process, const void* address, MEMORY_BASIC_INFORMATION* info,
+                      SIZE_T length);
+void* CreateFileMappingFromApp(HANDLE file, SECURITY_ATTRIBUTES* attributes, DWORD protect,
+                               unsigned long long maximum_size, LPCWSTR name);
+void* CreateFileMapping2(HANDLE file, SECURITY_ATTRIBUTES* attributes, DWORD desired_access,
+                         DWORD page_protection, DWORD section_flags,
+                         unsigned long long maximum_size, LPCWSTR name,
+                         MEM_EXTENDED_PARAMETER* extended, DWORD count);
+BOOL VirtualFreeEx(HANDLE process, void* address, SIZE_T size, DWORD free_type);
+BOOL UnmapViewOfFile2(HANDLE process, void* base, DWORD unmap_flags);
 
 #ifdef __cplusplus
 }

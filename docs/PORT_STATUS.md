@@ -25,7 +25,7 @@ file is right.
 | HLSL SM 6.6 shader pipeline (`dxc`, fail-loud) | **Done** |
 | D3D12 command ring, root signature, PSO cache | **Done** |
 | Direct3D 12 frame graph (passes, submits, presenter) | **In progress** |
-| HLSL shader port | **In progress — 29 of 184 stages, all `dxc`-verified** |
+| HLSL shader port | **In progress — 31 of 184 stages; 29 `dxc`-verified, 2 newly written** |
 | UWP shell (`IFrameworkView`, launcher, gamepad) | **In progress** |
 | **UWP package builds at all** | **Yes — SDL3 replaced by an in-tree shim** |
 | Gamepad chord remapping | **Done, unit-tested** |

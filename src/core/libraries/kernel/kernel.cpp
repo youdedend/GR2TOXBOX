@@ -179,7 +179,17 @@ s32 PS4_SYSV_ABI sceKernelUuidCreate(OrbisKernelUuid* orbisUuid) {
     if (!orbisUuid) {
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
-#ifdef _WIN64
+#if defined(GR2_XBOX_UWP)
+    // UuidCreate is the RPC runtime's, and RPC is desktop-only -- which is also
+    // why RPC_S_OK is undeclared here. CoCreateGuid is COM's and is in the onecore
+    // surface; it makes a version-4 GUID from CoCreateGuid's own source, which is
+    // the same thing UuidCreate does without the RPC dependency. It returns an
+    // HRESULT, so the success test is S_OK rather than RPC_S_OK.
+    UUID uuid;
+    if (FAILED(CoCreateGuid(&uuid))) {
+        return ORBIS_KERNEL_ERROR_EFAULT;
+    }
+#elif defined(_WIN64)
     UUID uuid;
     if (UuidCreate(&uuid) != RPC_S_OK) {
         return ORBIS_KERNEL_ERROR_EFAULT;

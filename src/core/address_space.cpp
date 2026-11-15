@@ -371,8 +371,9 @@ struct AddressSpace::Impl {
                 continue;
             }
             MEMORY_BASIC_INFORMATION info{};
-            const bool ret = VirtualQueryEx(process, LPCVOID(addr), &info, sizeof(info));
-            ASSERT_MSG(ret, "VirtualQueryEx failed. {}", Common::GetLastErrorMsg());
+            const bool ret = WinCompat::VirtualQueryCompat(process, LPCVOID(addr), &info,
+                                                          sizeof(info)) != 0;
+            ASSERT_MSG(ret, "VirtualQuery failed. {}", Common::GetLastErrorMsg());
             if (info.Protect != region.prot) {
                 protections.push_back(info);
             }

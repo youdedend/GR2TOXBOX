@@ -318,6 +318,21 @@ s32 PS4_SYSV_ABI posix_clock_getres(u32 clock_id, OrbisKernelTimespec* res) {
     switch (clock_id) {
     case ORBIS_CLOCK_SECOND:
     case ORBIS_CLOCK_REALTIME_FAST: {
+#if defined(GR2_XBOX_UWP)
+        // GetSystemTimeAdjustment is desktop-only: it reports how far the NT timer
+        // tick is stretched to keep the system clock with the CMOS clock, which is
+        // a desktop scheduler concern and not in the onecore surface.
+        //
+        // The value it would report is not a secret, though. Windows' default clock
+        // interval is 15,625 units of 100 ns, i.e. 1562500 ns, and the desktop
+        // branch below multiplies the increment it reads back by 100 to get exactly
+        // that. Stating it here is the same answer without the measurement, which
+        // the package is not allowed to make. It is also the resolution the guest
+        // should see: anything finer would be a promise the timer cannot keep.
+        res->tv_sec = 0;
+        res->tv_nsec = 1562500;
+        return 0;
+#else
         DWORD timeAdjustment;
         DWORD timeIncrement;
         BOOL isTimeAdjustmentDisabled;
@@ -328,6 +343,7 @@ s32 PS4_SYSV_ABI posix_clock_getres(u32 clock_id, OrbisKernelTimespec* res) {
         res->tv_sec = 0;
         res->tv_nsec = timeIncrement * 100;
         return 0;
+#endif
     }
     case ORBIS_CLOCK_REALTIME:
     case ORBIS_CLOCK_REALTIME_PRECISE:
@@ -423,7 +439,15 @@ s32 PS4_SYSV_ABI posix_gettimeofday(OrbisKernelTimeval* tp, OrbisKernelTimezone*
     if (tz) {
         static int tzflag = 0;
         if (!tzflag) {
+#if defined(GR2_XBOX_UWP)
+            // _tzset is desktop CRT. The package does not need it: a console has no
+            // user-chosen time zone to read, its clock is UTC, and the market's
+            // offset arrives with the system time rather than with a TZ variable.
+            // So there is nothing to initialise.
+            (void)0;
+#else
             _tzset();
+#endif
             tzflag++;
         }
         time_t t = 0;

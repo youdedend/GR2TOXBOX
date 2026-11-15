@@ -21,9 +21,10 @@
 ///
 /// Rather than sprinkle `#ifdef GR2_XBOX_UWP` through the address-space code,
 /// this header exposes one set of names that resolve to the right call for the
-/// build. The signatures are narrowed where the `FromApp` variant cannot express
-/// something (notably `CreateFileMapping2`'s placeholder/parameter list), and a
-/// comment records what is lost.
+/// build. Only `CreateFileMapping2Compat` narrows its caller's signature, because
+/// `CreateFileMappingFromApp` genuinely cannot express `CreateFileMapping2`'s
+/// section flags; every other wrapper keeps the desktop parameter list, and says
+/// so where it does.
 ///
 /// The desktop build gets thin inlines that forward to the desktop APIs, so the
 /// address-space code compiles unchanged on both and the desktop CI job
@@ -39,17 +40,27 @@ namespace Core::WinCompat {
 
 /// Reserves and/or commits pages at a requested address.
 ///
-/// The `FromApp` variant takes no extended parameters. That is fine for this
-/// emulator: the address-space code never passes any, and the one feature it
-/// would want (large pages) is not available to an AppContainer anyway.
+/// The `FromApp` variants take the same parameter lists as their desktop
+/// counterparts -- they are the desktop signatures with `FromApp` appended, not
+/// narrowed forms of them. What differs is the access the container's token is
+/// granted, not the call's shape.
 inline void* VirtualAlloc2Compat(void* process, void* base, SIZE_T size, ULONG type,
                                  ULONG protect, void* extended_parameters,
                                  ULONG parameter_count) {
 #if defined(GR2_XBOX_UWP)
-    (void)process; // A UWP process can only allocate in itself.
-    (void)extended_parameters;
-    (void)parameter_count;
-    return VirtualAlloc2FromApp(base, size, type, protect);
+    // The AppContainer variant takes the same seven parameters as VirtualAlloc2,
+    // including the process handle and the extended-parameter list -- it is the
+    // desktop signature with FromApp on the end, not a narrowed one. An earlier
+    // version of this file assumed otherwise and passed four arguments, which is
+    // why the packaged build reported "no matching function for call to
+    // VirtualAlloc2FromApp".
+    //
+    // `process` is still ignored in effect: a UWP process may only name itself,
+    // so the caller's own handle is the only value that can succeed.
+    return VirtualAlloc2FromApp(static_cast<HANDLE>(process),
+                                base, size, type, protect,
+                                static_cast<MEM_EXTENDED_PARAMETER*>(extended_parameters),
+                                parameter_count);
 #else
     return VirtualAlloc2(process, base, size, type, protect,
                          static_cast<MEM_EXTENDED_PARAMETER*>(extended_parameters),
@@ -62,16 +73,17 @@ inline void* MapViewOfFile3Compat(HANDLE mapping, void* process, void* base, ULO
                                   SIZE_T view_size, ULONG allocation_type, ULONG page_protection,
                                   void* extended_parameters, ULONG parameter_count) {
 #if defined(GR2_XBOX_UWP)
-    (void)process;
-    (void)base;
-    (void)extended_parameters;
-    (void)parameter_count;
-    // MapViewOfFile3FromApp cannot place a view at a caller-chosen address, so
-    // the caller's `base` is a hint and the returned address is authoritative.
-    // AddressSpace::Impl treats the return value as the mapping's address, which
-    // is why its MapRegion() asserts against it rather than assuming success.
-    return MapViewOfFile3FromApp(mapping, process, base, offset, view_size, allocation_type,
-                                 page_protection);
+    // Nine parameters, the same nine as MapViewOfFile3: the extended-parameter
+    // list is part of the AppContainer variant's signature, and an earlier version
+    // of this file passed seven, which the packaged build rejected with "no
+    // matching function for call to MapViewOfFile3FromApp". `base` is honoured as
+    // the desktop call honours it -- a desired address, rounded down to 64k --
+    // rather than being ignored, so the caller's placement still works and the
+    // returned address remains authoritative either way.
+    return MapViewOfFile3FromApp(mapping, static_cast<HANDLE>(process), base, offset, view_size,
+                                 allocation_type, page_protection,
+                                 static_cast<MEM_EXTENDED_PARAMETER*>(extended_parameters),
+                                 parameter_count);
 #else
     return MapViewOfFile3(mapping, process, base, offset, view_size, allocation_type,
                           page_protection, static_cast<MEM_EXTENDED_PARAMETER*>(extended_parameters),
@@ -111,6 +123,25 @@ inline bool VirtualProtectCompat(void* address, SIZE_T size, ULONG new_protect,
 #else
     return VirtualProtect(address, size, new_protect, reinterpret_cast<DWORD*>(old_protect)) !=
            FALSE;
+#endif
+}
+
+/// Queries the pages of a range.
+///
+/// `VirtualQueryEx` is the desktop call and takes a process handle; an
+/// AppContainer may query only itself, and the onecore surface offers no Ex form.
+/// The emulator never queries another process -- the handle it passes is its own
+/// -- so `VirtualQuery` is the same answer with the handle dropped, and it also
+/// avoids the `LPCVOID` -> `LPVOID` mismatch that `VirtualQueryEx`'s prototype
+/// produces for a const-cast address.
+inline SIZE_T VirtualQueryCompat(void* process, const void* address,
+                                 MEMORY_BASIC_INFORMATION* info, SIZE_T length) {
+    (void)process; // Only ever this process; see above.
+#if defined(GR2_XBOX_UWP)
+    // The onecore surface's query takes no process handle and a writable address.
+    return VirtualQuery(const_cast<void*>(address), info, length);
+#else
+    return VirtualQueryEx(static_cast<HANDLE>(process), address, info, length);
 #endif
 }
 

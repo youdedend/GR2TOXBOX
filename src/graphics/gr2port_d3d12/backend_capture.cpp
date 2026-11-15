@@ -207,6 +207,8 @@ bool Install(VAddr module_base, Xbyak::CodeGenerator& c, size_t capacity) {
 // Particle curves
 // ---------------------------------------------------------------------------
 
+namespace Particles {
+
 void QueueCurve(u32 destination, u32 columns, VAddr texels, u32 pitch) {
     (void)destination;
     (void)columns;
@@ -222,5 +224,7 @@ void QueueCurve(u32 destination, u32 columns, VAddr texels, u32 pitch) {
         LOG_DEBUG(Graphics, "GR2port/D3D12: {} particle curves queued and dropped", seen);
     }
 }
+
+} // namespace Particles
 
 } // namespace Gr2Port
