@@ -15,6 +15,7 @@
 #include "graphics/gr2port_d3d12/descriptors.h"
 
 #include "common/logging/log.h"
+#include "uwp/blackbox_log.h"
 
 namespace Gr2Port::D3D12 {
 
@@ -382,6 +383,7 @@ bool CreateGraphicsPipeline(ID3D12Device8* device, const RootSignature& root,
     const HRESULT hr = device->CreateGraphicsPipelineState(
         &state, IID_PPV_ARGS(out.state.GetAddressOf()));
     if (FAILED(hr)) {
+        BlackboxRecordDeviceRemoved(device);
         LOG_CRITICAL(Graphics,
                      "D3D12 pipeline: CreateGraphicsPipelineState failed ({}): vs {} ps {} "
                      "targets {} depth {}",
@@ -397,6 +399,7 @@ bool CreateGraphicsPipeline(ID3D12Device8* device, const RootSignature& root,
     out.ds = desc.ds;
     out.cs = {};
     out.hash = PipelineCache::HashGraphics(desc);
+    Blackbox::PsoCreated(out.hash);
     return true;
 }
 
@@ -417,6 +420,7 @@ bool CreateComputePipeline(ID3D12Device8* device, const RootSignature& root,
     const HRESULT hr =
         device->CreateComputePipelineState(&state, IID_PPV_ARGS(out.state.GetAddressOf()));
     if (FAILED(hr)) {
+        BlackboxRecordDeviceRemoved(device);
         LOG_CRITICAL(Graphics, "D3D12 pipeline: CreateComputePipelineState failed: {}",
                      HresultToString(hr));
         return false;
@@ -428,6 +432,7 @@ bool CreateComputePipeline(ID3D12Device8* device, const RootSignature& root,
     out.ds = {};
     out.cs = cs;
     out.hash = PipelineCache::HashCompute(cs);
+    Blackbox::PsoCreated(out.hash);
     return true;
 }
 

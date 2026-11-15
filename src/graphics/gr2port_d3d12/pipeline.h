@@ -25,7 +25,7 @@ namespace Gr2Port::D3D12 {
 /// renderer:
 ///
 ///   b0  ArenaConstants   ArenaTable g_arena, 5 uints (20 bytes)
-///   b1  root constants   the per-draw block (32..128 bytes, see DrawBytes)
+///   b1  root constants   the per-draw block (up to 64 bytes, see DrawBytes)
 ///   b2  root constants   texture handles and the like (16 bytes)
 ///   12x descriptor tables, one per descriptor kind, each over the whole heap and
 ///       in its own register space
@@ -74,20 +74,9 @@ namespace RootConstants {
 /// b0: ArenaKind::Count uints, the same five the shaders' ArenaTable declares.
 inline constexpr u32 ArenaBytes = 20;
 
-/// b1: the largest per-draw block any shader declares here.
-///
-/// 128 bytes is ShadowConstants: an ArenaRef (8) + the inline `Shadows` struct
-/// (112: one float4x4 inverse view plus three float4x4 cascade matrices, plus a
-/// light direction and two light colours) + the cascade index, rounded to 16.
-///
-/// The tighter shape is to move `Shadows` into an ArenaRef of its own, which
-/// would bring this block down to about 32 bytes and match how every other pass
-/// reaches bulk data. It is NOT done yet, and deliberately: nothing writes b1 at
-/// all today -- SetDrawConstants has no caller -- so restructuring it would make
-/// `shadow.vert` read a root constant that no code ever sets, turning a
-/// size-overshoot into a garbage-render bug. The block has room; the caller comes
-/// first, and the restructuring is then a change with a test behind it.
-inline constexpr u32 DrawBytes = 128;
+/// b1: at most 16 DWORDs. Bulk matrices live in arenas, never inline.
+inline constexpr u32 DrawBytes = 64;
+static_assert(DrawBytes <= 16 * sizeof(u32));
 
 /// b2: texture and sampler handles for the passes that are not per-draw. The
 /// largest block is four handles, in TonemapTextures and FogApplyTextures.
@@ -98,7 +87,7 @@ inline constexpr u32 PassBytes = 16;
 // constant parameter contributes its size in DWORDs and each descriptor table
 // contributes one, so this is the whole budget:
 //
-//   5 (b0) + 8 (b1) + 4 (b2) + 12 (tables) = 29 of 64.
+//   5 (b0) + 16 (b1) + 4 (b2) + 12 (tables) = 37 of 64.
 //
 // Exceeding it fails root signature creation at device start with no useful
 // message, so it is checked here rather than discovered on a console.

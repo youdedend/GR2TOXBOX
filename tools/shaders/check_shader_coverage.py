@@ -79,6 +79,10 @@ def main() -> int:
         print(f"GCN host compute shaders: {len(host_shaders())} "
               f"({len(host_missing)} still to port)")
 
+    detile = HLSL_DIR / "detile.comp.hlsl"
+    print("GCN detile kernel: " + ("present (2D display/thin micro + P2/P8 macro; MSAA/thick/PRT rejected)"
+                                 if detile.exists() else "missing"))
+
     if args.missing:
         for name in missing:
             print(f"  missing: {expected_hlsl(name)}  (from {name})")

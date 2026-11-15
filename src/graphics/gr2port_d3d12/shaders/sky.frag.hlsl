@@ -76,19 +76,20 @@ Sky LoadSky(ArenaRef ref, ArenaTable table) {
     sky.cubes[1] = buffer.Load(ref.offset + SKY_CUBES + 4u);
     sky.cloud = buffer.Load(ref.offset + SKY_CLOUD);
     sky.cloud_fade = asfloat(buffer.Load2(ref.offset + SKY_CLOUD_FADE));
-    [unroll] for (uint i = 0u; i < 2u; ++i) {
-        sky.cloud_layers[i] = asfloat(buffer.Load4(ref.offset + SKY_CLOUD_LAYERS + i * 16u));
+    [unroll] for (uint second_index = 0u; second_index < 2u; ++second_index) {
+        sky.cloud_layers[second_index] = asfloat(buffer.Load4(ref.offset + SKY_CLOUD_LAYERS + second_index * 16u));
     }
     sky.cloud_color = asfloat(buffer.Load4(ref.offset + SKY_CLOUD_COLOR));
     return sky;
 }
 
 cbuffer SkyConstants : register(b1) {
-    ArenaRef g_sky;
+    uint2 g_sky_words;
     uint g_pad0;
     uint g_pad1;
     uint g_pad2;
 };
+#define g_sky ArenaMake(g_sky_words.x, g_sky_words.y)
 
 cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;

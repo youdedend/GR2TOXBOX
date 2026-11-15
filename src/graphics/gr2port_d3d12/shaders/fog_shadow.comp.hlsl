@@ -19,10 +19,12 @@
 #include "common/texel.hlsli"
 
 cbuffer FogShadowConstants : register(b1) {
-    ArenaRef g_fog;
-    ArenaRef g_light;
+    uint2 g_fog_words;
+    uint2 g_light_words;
     FogGrid g_grid;
 };
+#define g_fog ArenaMake(g_fog_words.x, g_fog_words.y)
+#define g_light ArenaMake(g_light_words.x, g_light_words.y)
 
 cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;

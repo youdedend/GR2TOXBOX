@@ -49,7 +49,13 @@
 #include "launcher/launcher.h"
 #endif
 
+#if defined(GR2_BLACKBOX)
+#include "uwp/blackbox_log.h"
+#endif
 int main(int argc, char* argv[]) {
+#if defined(GR2_BLACKBOX)
+    Gr2Port::Blackbox::Initialize();
+#endif
 #if defined(_WIN32) && !defined(GR2_XBOX_UWP)
     Gr2Port::Launcher::AttachTerminal();
     SetConsoleOutputCP(CP_UTF8);
@@ -252,6 +258,9 @@ int main(int argc, char* argv[]) {
     emulator->executableName = argv[0];
 #endif
     emulator->waitForDebuggerBeforeRun = waitForDebugger;
+#if defined(GR2_BLACKBOX)
+    Gr2Port::Blackbox::SetGameRoot(game->root.wstring().c_str());
+#endif
     emulator->Run(game->root, gameArgs, overrideRoot, mounts, env_vars, append_log);
 
     return 0;

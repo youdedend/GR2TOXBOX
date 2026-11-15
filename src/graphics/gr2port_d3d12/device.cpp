@@ -9,6 +9,7 @@
 
 #include "common/logging/log.h"
 #include "core/uwp_memory.h"
+#include "uwp/blackbox_log.h"
 #include "graphics/gr2port_d3d12/device.h"
 
 #if defined(GR2_XBOX_UWP)
@@ -50,9 +51,9 @@ void ResolveCaps(IDXGIAdapter4* adapter, ID3D12Device8* device, bool tearing, Ca
     }
 
     // The feature level is not queried back from the device. `Create` asks
-    // D3D12CreateDevice for 12_1 and refuses to continue if that fails, so 12_1 is
+    // D3D12CreateDevice for 12_0 and refuses to continue if that fails, so 12_0 is
     // the level the device is known to have: reporting it is fact, not a guess.
-    caps.feature_level = D3D_FEATURE_LEVEL_12_1;
+    caps.feature_level = D3D_FEATURE_LEVEL_12_0;
     caps.tearing = tearing;
     caps.device8 = true;
 
@@ -226,6 +227,7 @@ bool CreateDevice(const DeviceDesc& desc, Device& out) {
 #endif
     HRESULT hr = CreateDXGIFactory2(factory_flags, IID_PPV_ARGS(&out.factory));
     if (FAILED(hr)) {
+        if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(out.device.Get());
         LOG_CRITICAL(Graphics, "D3D12: CreateDXGIFactory2 failed: {}", HresultToString(hr));
         return false;
     }
@@ -239,32 +241,30 @@ bool CreateDevice(const DeviceDesc& desc, Device& out) {
     const bool tearing = EnableTearing(out.factory.Get(), desc.allow_tearing && !out.core_window);
 
     // --- Device ------------------------------------------------------------
-    // The feature level this build asks for. On Xbox in UWP it has to be 11_0:
-    // `SraKmd_arden` reports 11_0 and refuses a 12_1 device outright, so asking
-    // for 12_1 there is a device-creation failure, not a downgrade. Desktop
-    // keeps 12_1, which is what the D3D12 renderer is written against.
-    //
-    // Feature level and shader model are separate ceilings on this driver: an
-    // 11_0 device still accepts Shader Model 6.4 DXIL. Every stage is compiled
-    // for 6.4 for exactly that reason.
-#if defined(GR2_XBOX_UWP)
-    constexpr D3D_FEATURE_LEVEL kFeatureLevel = D3D_FEATURE_LEVEL_11_0;
-#else
-    constexpr D3D_FEATURE_LEVEL kFeatureLevel = D3D_FEATURE_LEVEL_12_1;
-#endif
+    // Feature level and shader model are independent contracts. Require FL12_0
+    // and compile the portable shader set for SM6.4 (never SM6.6 bindless).
+    constexpr D3D_FEATURE_LEVEL kFeatureLevel = D3D_FEATURE_LEVEL_12_0;
 
     hr = D3D12CreateDevice(out.adapter.Get(), kFeatureLevel, IID_PPV_ARGS(&out.device));
     if (FAILED(hr)) {
+        if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(out.device.Get());
         LOG_CRITICAL(Graphics, "D3D12: D3D12CreateDevice failed: {} (FL {:#x} is required)",
                      HresultToString(hr), static_cast<u32>(kFeatureLevel));
         return false;
     }
     // No GetFeatureLevel() round-trip: D3D12CreateDevice above already answered
-    // the question, because asking for 12_1 and succeeding *is* the guarantee
-    // that the device is at least 12_1. A second query would only re-derive what
+    // the question, because asking for 12_0 and succeeding *is* the guarantee
+    // that the device is at least 12_0. A second query would only re-derive what
     // the call just established.
 
     ResolveCaps(out.adapter.Get(), out.device.Get(), tearing, out.caps);
+    D3D12_FEATURE_DATA_SHADER_MODEL model{D3D_SHADER_MODEL_6_4};
+    const HRESULT sm_hr = out.device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &model, sizeof(model));
+    LOG_INFO(Graphics, "D3D12: adapter {}, VRAM {} bytes; SM6.4 support {}",
+             Trimmed(out.caps.description), out.caps.dedicated_vram,
+             SUCCEEDED(sm_hr) && model.HighestShaderModel >= D3D_SHADER_MODEL_6_4);
+    Blackbox::Write("", 0, true);
+    if (FAILED(sm_hr) || model.HighestShaderModel < D3D_SHADER_MODEL_6_4) return false;
 
     // --- Queues ------------------------------------------------------------
     D3D12_COMMAND_QUEUE_DESC queue_desc{};
@@ -273,6 +273,7 @@ bool CreateDevice(const DeviceDesc& desc, Device& out) {
     queue_desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
     hr = out.device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&out.graphics_queue));
     if (FAILED(hr)) {
+        if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(out.device.Get());
         LOG_CRITICAL(Graphics, "D3D12: CreateCommandQueue(DIRECT) failed: {}",
                      HresultToString(hr));
         return false;
@@ -282,6 +283,7 @@ bool CreateDevice(const DeviceDesc& desc, Device& out) {
     queue_desc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
     hr = out.device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&out.compute_queue));
     if (FAILED(hr)) {
+        if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(out.device.Get());
         // A compute queue is an optimisation (detiling and skinning overlap the
         // graphics queue); fall back to running those on the graphics queue.
         LOG_WARNING(Graphics, "D3D12: CreateCommandQueue(COMPUTE) failed: {}; "
@@ -293,6 +295,7 @@ bool CreateDevice(const DeviceDesc& desc, Device& out) {
     // --- Timeline fence ----------------------------------------------------
     hr = out.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&out.timeline_fence));
     if (FAILED(hr)) {
+        if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(out.device.Get());
         LOG_CRITICAL(Graphics, "D3D12: CreateFence failed: {}", HresultToString(hr));
         return false;
     }
@@ -412,6 +415,7 @@ bool CreateSwapchain(Device& device, const DeviceDesc& desc) {
         hr = device.factory->CreateSwapChainForCoreWindow(
             device.graphics_queue.Get(), core_window, &swap_desc, nullptr, &base);
         if (FAILED(hr)) {
+            if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(device.device.Get());
             LOG_CRITICAL(Graphics, "D3D12: CreateSwapChainForCoreWindow failed: {}",
                          HresultToString(hr));
             return false;
@@ -426,6 +430,7 @@ bool CreateSwapchain(Device& device, const DeviceDesc& desc) {
                                                     static_cast<HWND>(desc.hwnd), &swap_desc,
                                                     nullptr, nullptr, &base);
         if (FAILED(hr)) {
+            if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(device.device.Get());
             LOG_CRITICAL(Graphics, "D3D12: CreateSwapChainForHwnd failed: {}",
                          HresultToString(hr));
             return false;
@@ -437,6 +442,7 @@ bool CreateSwapchain(Device& device, const DeviceDesc& desc) {
 
     hr = base.As(&device.swapchain);
     if (FAILED(hr)) {
+        if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(device.device.Get());
         LOG_CRITICAL(Graphics, "D3D12: swapchain does not expose IDXGISwapChain4");
         return false;
     }
@@ -454,9 +460,22 @@ bool CreateSwapchain(Device& device, const DeviceDesc& desc) {
         if (SUCCEEDED(device.swapchain.As(&swapchain2))) {
             // DXGI_MATRIX_3X2_F, not a DirectXMath type: the API takes the struct
             // directly and only the diagonal is ever non-zero.
-            const DXGI_MATRIX_3X2_F transform{plan.transform[0], plan.transform[1],
-                                              plan.transform[2], plan.transform[3]};
-            const HRESULT t_hr = swapchain2->SetMatrixTransform(transform);
+            DXGI_MATRIX_3X2_F matrix{};
+            matrix._11 = plan.transform[0];
+            matrix._12 = plan.transform[1];
+            matrix._21 = plan.transform[2];
+            matrix._22 = plan.transform[3];
+            matrix._31 = 0.0f;
+            matrix._32 = 0.0f;
+            const HRESULT source_hr = swapchain2->SetSourceSize(width, height);
+            if (FAILED(source_hr)) {
+                LOG_WARNING(Graphics, "D3D12: SetSourceSize failed: {}", HresultToString(source_hr));
+            }
+            const HRESULT t_hr = swapchain2->SetMatrixTransform(&matrix);
+            LOG_INFO(Graphics, "CoreWindow scaler [{}, {}; {}, {}; {}, {}] source {}x{}",
+                     matrix._11, matrix._12, matrix._21, matrix._22, matrix._31, matrix._32,
+                     width, height);
+            Blackbox::Write("", 0, true);
             if (FAILED(t_hr)) {
                 // Not fatal: without it the compositor applies its own scaling, so
                 // the frame is correct but softer than it should be.
@@ -508,6 +527,7 @@ bool ResizeSwapchain(Device& device, u32 width, u32 height) {
     const HRESULT hr = device.swapchain->ResizeBuffers(device.buffer_count, width, height,
                                                        device.swapchain_format, flags);
     if (FAILED(hr)) {
+        if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(device.device.Get());
         LOG_CRITICAL(Graphics, "D3D12: ResizeBuffers({}x{}) failed: {}", width, height,
                      HresultToString(hr));
         return false;
@@ -528,6 +548,7 @@ bool Present(Device& device, bool vsync) {
         return true;
     }
     if (FAILED(hr)) {
+        if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(device.device.Get());
         LOG_CRITICAL(Graphics, "D3D12: Present failed: {}", HresultToString(hr));
         return false;
     }
@@ -548,7 +569,8 @@ void WaitForFence(Device& device, u64 value) {
 u64 SignalFence(Device& device) {
     const u64 value = ++device.timeline_value;
     if (device.graphics_queue && device.timeline_fence) {
-        device.graphics_queue->Signal(device.timeline_fence.Get(), value);
+        const HRESULT hr = device.graphics_queue->Signal(device.timeline_fence.Get(), value);
+        if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(device.device.Get());
     }
     return value;
 }

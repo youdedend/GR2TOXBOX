@@ -25,10 +25,11 @@ cbuffer ArenaConstants : register(b0) {
 };
 
 cbuffer ContourRoot : register(b1) {
-    ArenaRef g_contours;
+    uint2 g_contours_words;
     uint g_contour_index;
     uint3 g_contour_pad;
 };
+#define g_contours ArenaMake(g_contours_words.x, g_contours_words.y)
 
 // The table entry's size and the offsets of the fields this stage reads. The full
 // layout is written out in contour.vert.hlsl; these are the same numbers.

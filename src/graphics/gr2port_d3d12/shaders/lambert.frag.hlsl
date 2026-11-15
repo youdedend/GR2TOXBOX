@@ -45,8 +45,8 @@ cbuffer ArenaConstants : register(b0) {
 };
 
 cbuffer LambertSceneRoot : register(b1) {
-    ArenaRef g_scene_draws;
-    ArenaRef g_scene_characters;
+    uint2 g_scene_draws_words;
+    uint2 g_scene_characters_words;
     uint g_base_instance;
     // One pad word: the block is two ArenaRefs and this uint, which is exactly
     // RootConstants::DrawBytes (24 bytes, 6 words) in pipeline.h. The root
@@ -54,6 +54,8 @@ cbuffer LambertSceneRoot : register(b1) {
     // bind fewer than it declares and read whatever followed.
     uint g_pad;
 };
+#define g_scene_draws ArenaMake(g_scene_draws_words.x, g_scene_draws_words.y)
+#define g_scene_characters ArenaMake(g_scene_characters_words.x, g_scene_characters_words.y)
 
 cbuffer LambertTextures : register(b2) {
     // The two nearer cascades (Texture2DArray depth) and the last cascade

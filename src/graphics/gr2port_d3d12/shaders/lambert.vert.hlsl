@@ -60,8 +60,8 @@ cbuffer LambertSceneRoot : register(b1) {
     // The draw table, then the character table (scene.glsl's `Draws scene_draws;
     // Characters scene_characters;`), each an ArenaRef where the GLSL had a
     // buffer_reference. g_base_instance is gl_BaseInstance.
-    ArenaRef g_scene_draws;
-    ArenaRef g_scene_characters;
+    uint2 g_scene_draws_words;
+    uint2 g_scene_characters_words;
     uint g_base_instance;
     // One pad word: the block is two ArenaRefs and this uint, which is exactly
     // RootConstants::DrawBytes (24 bytes, 6 words) in pipeline.h. The root
@@ -69,6 +69,8 @@ cbuffer LambertSceneRoot : register(b1) {
     // bind fewer than it declares and read whatever followed.
     uint g_pad;
 };
+#define g_scene_draws ArenaMake(g_scene_draws_words.x, g_scene_draws_words.y)
+#define g_scene_characters ArenaMake(g_scene_characters_words.x, g_scene_characters_words.y)
 
 struct VsOutput {
     float4 position : SV_Position;

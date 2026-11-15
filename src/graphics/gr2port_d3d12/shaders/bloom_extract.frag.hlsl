@@ -15,13 +15,14 @@
 cbuffer BloomExtractConstants : register(b1) {
     // Read-only per-frame grading data, an arena ref rather than a cbuffer so
     // the std430 layout is preserved exactly (common/grade.hlsli).
-    ArenaRef g_grade;
+    uint2 g_grade_words;
     // One pixel of the scene in texture coordinates.
     float2 g_scene_pixel;
     // The grade block is 240 bytes and its offsets are fixed, so it cannot be a
     // cbuffer member next to loose uniforms; the arena keeps it byte-exact.
     uint2 g_pad;
 };
+#define g_grade ArenaMake(g_grade_words.x, g_grade_words.y)
 
 cbuffer BloomExtractTextures : register(b2) {
     uint g_scene;

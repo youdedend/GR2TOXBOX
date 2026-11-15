@@ -42,6 +42,8 @@
 
 #include "common/logging/log.h"
 #include "core/uwp_memory.h"
+#include "core/uwp_guest_arena.h"
+#include "uwp/blackbox_log.h"
 
 // The WindowsApp.lib entry point. A UWP app's /ENTRY is main() from the app
 // model's stub, and the stub calls the Application singleton's factory, so this
@@ -85,7 +87,7 @@ public:
         // RunGame blocks for the whole session: it drives the frame loop and
         // returns when the game exits or the window closes, at which point the
         // app model tears the view down through Uninitialize.
-        Gr2Port::Uwp::RunGame(&window_);
+        Gr2Port::Uwp::RunGame(winrt::get_abi(window_));
     }
 
     void Uninitialize() {
@@ -125,7 +127,12 @@ struct GameViewSource : winrt::implements<GameViewSource,
 // string and an int).
 int __stdcall wWinMain(void* /*hInstance*/, void* /*hPrevInstance*/,
                        wchar_t* /*commandLine*/, int /*showCommand*/) {
+    const bool reserved = Core::Xbox::ReserveEarlyGuestArena();
     winrt::init_apartment(winrt::apartment_type::single_threaded);
+    Gr2Port::Blackbox::Initialize();
+    Gr2Port::Blackbox::RecordGuestArena(reinterpret_cast<void*>(Core::Xbox::EarlyGuestBase),
+                                      Core::Xbox::EarlyGuestBytes, reserved);
+    if (!reserved) return 1;
     winrt::Windows::ApplicationModel::Core::CoreApplication::Run(GameViewSource{});
     return 0;
 }

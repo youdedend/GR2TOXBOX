@@ -30,10 +30,11 @@ cbuffer ArenaConstants : register(b0) {
 cbuffer ContourRoot : register(b1) {
     // The contour table (scene.glsl's Contours) is an arena ref, and this draw's
     // index in it is what gl_DrawID used to be.
-    ArenaRef g_contours;
+    uint2 g_contours_words;
     uint g_contour_index;
     uint3 g_contour_pad;
 };
+#define g_contours ArenaMake(g_contours_words.x, g_contours_words.y)
 
 // One Contour is 288 bytes, and the offsets below are the std430 layout computed
 // from scene.glsl's declaration order rather than counted by hand -- the first

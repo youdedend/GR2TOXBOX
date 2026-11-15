@@ -138,3 +138,20 @@ Sony, Japan Studio, or Microsoft.
 
 Source: https://github.com/youdedend/GR2TOXBOX  (GPL-2.0)
 Upstream: https://github.com/junminlee2004/GR2port  (GPL-2.0, shadPS4 lineage)
+
+USB BLACK-BOX REPORTS AND OFFLINE SYMBOLS
+---------------------------------------
+The D3D12 build writes gr2toxbox_boot.log and gr2toxbox_prev.log in LocalState.
+If AppContainer permissions allow access to a USB drive (D: through Z:) or the
+selected game folder, it mirrors these under GR2TOXBOX_logs. Early lines are
+replayed from a bounded 64 KiB ring when the drive becomes accessible. Keep the
+USB inserted while testing; write-through logs are flushed at milestones and
+warnings. Drive visibility alone does not grant UWP filesystem permission.
+First-chance CPU fault candidates go to gr2toxbox_crash.log; handled guest faults
+are not necessarily crashes. GPU removals are recorded in the boot log.
+
+Keep GR2port.pdb and GR2port.map from THIS zip with the report. Symbols are not
+inside the MSIX and need not be copied to the console. On a PC with Python 3:
+  python symbolicate_crash.py GR2port.map gr2toxbox_crash.log
+The standalone resolver annotates main-module RVAs with nearest MAP symbols.
+PDB-aware debugger tools provide source lines and inline frames when needed.

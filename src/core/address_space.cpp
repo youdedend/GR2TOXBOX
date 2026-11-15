@@ -18,6 +18,9 @@
 #include "core/memory.h"
 #include "core/uwp_wx.h"
 #include "core/uwp_memory.h"
+#if defined(GR2_XBOX_UWP)
+#include "core/uwp_guest_arena.h"
+#endif
 #include "core/uwp_win_compat.h"
 #include "libraries/error_codes.h"
 
@@ -190,6 +193,16 @@ struct AddressSpace::Impl {
         }
 #endif // GR2_XBOX_UWP
 
+#if defined(GR2_XBOX_UWP)
+        // Adopt the early fixed 5 GiB placeholder in-place. Releasing it here
+        // would let a concurrent system allocation steal guest addresses.
+        void* const early = Core::Xbox::TakeEarlyGuestArena();
+        if (early) {
+            const auto base = reinterpret_cast<VAddr>(early);
+            regions.emplace(base, MemoryRegion{base, PAddr(-1), Core::Xbox::EarlyGuestBytes,
+                                               PAGE_NOACCESS, -1, false});
+        }
+#endif
         // Determine the free address ranges we can access.
         VAddr next_addr = SYSTEM_MANAGED_MIN;
         MEMORY_BASIC_INFORMATION info{};
@@ -219,6 +232,9 @@ struct AddressSpace::Impl {
 
         // Reserve all detected free regions.
         for (auto region : regions) {
+#if defined(GR2_XBOX_UWP)
+            if (early && region.second.base == Core::Xbox::EarlyGuestBase) continue;
+#endif
             auto addr = static_cast<u8*>(WinCompat::VirtualAlloc2Compat(
                 process, reinterpret_cast<PVOID>(region.second.base), region.second.size,
                 MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS, NULL, 0));

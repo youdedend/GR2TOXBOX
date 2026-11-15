@@ -6,7 +6,7 @@
 # Two build jobs and one release job:
 #
 #   windows-d3d12  Desktop Win64, GR2_RENDERER=D3D12. Proves the D3D12 backend
-#                  and every HLSL SM 6.6 shader compile, and produces a runnable
+#                  and every HLSL SM 6.4 shader compile, and produces a runnable
 #                  PC build for people who want to test the renderer before
 #                  sideloading onto a console.
 #
@@ -85,47 +85,26 @@ jobs:
         run: python3 tools/shaders/check_shader_coverage.py
       - name: Verify the D3D12 shader manifest covers every HLSL file
         run: python3 tools/shaders/generate_d3d12_manifest.py --check
-      # dxc is a Windows tool, but Microsoft publishes a Linux build of it, and
-      # this runner can reach GitHub Releases even though a sandbox generally
-      # cannot. Fetching it turns local_precheck.sh's HLSL step from "skipped" into
-      # a real compile of every stage, ninety seconds into the run instead of
-      # twenty-five minutes into a Windows one -- and it is the same dxc the
-      # Windows job uses, so a shader cannot pass here and fail there for a reason
-      # this check is meant to catch.
-      #
-      # The asset name carries a build date, so it is looked up from the release
-      # rather than hard-coded; a fixed name would 404 the first time Microsoft
-      # cuts a release. `|| true` because a shader compile is an addition to this
-      # job, not a prerequisite: if GitHub is having a bad day the structural check
-      # below still runs and the Windows jobs still compile the shaders for real.
+      # No best-effort path: a green source-guard means DXC actually ran.
       - name: Fetch dxc for the HLSL compile
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -u
-          asset=$(curl -fsSL https://api.github.com/repos/microsoft/DirectXShaderCompiler/releases/latest \
-            | grep -o '"browser_download_url": *"[^"]*linux_dxc[^"]*\.x86_x64\.tar\.gz"' \
-            | head -1 | sed 's/.*"\(https[^"]*\)"/\1/')
-          if [ -z "${asset:-}" ]; then
-            echo "::warning title=dxc not fetched::no linux_dxc asset in the latest release; the HLSL compile step will skip"
-            exit 0
-          fi
-          echo "Fetching $asset"
-          if ! curl -fsSL "$asset" -o dxc.tar.gz; then
-            echo "::warning title=dxc not fetched::download failed; the HLSL compile step will skip"
-            exit 0
-          fi
-          tar -xzf dxc.tar.gz
-          # The tarball lays its binaries out one directory down.
-          found=$(find . -maxdepth 3 -type f -name dxc -perm -u+x | head -1)
-          if [ -z "$found" ]; then
-            echo "::warning title=dxc not fetched::no dxc binary in the archive; the HLSL compile step will skip"
-            exit 0
-          fi
+          set -euo pipefail
+          asset=$(gh api repos/microsoft/DirectXShaderCompiler/releases/latest \
+            --jq '.assets[].browser_download_url' | grep -E 'linux_dxc.*\.x86_64\.tar\.gz$' | head -1)
+          test -n "$asset"
+          mkdir -p "$RUNNER_TEMP/dxc"
+          curl --fail --location --retry 3 "$asset" -o "$RUNNER_TEMP/dxc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/dxc.tar.gz" -C "$RUNNER_TEMP/dxc"
+          found=$(find "$RUNNER_TEMP/dxc" -type f -name dxc | head -1)
+          test -n "$found" && test -f "$found"
           chmod +x "$found"
-          # libdxcompiler.so sits beside the binary and is found through RPATH, but
-          # make it discoverable regardless.
-          echo "LD_LIBRARY_PATH=$(cd "$(dirname "$found")" && pwd):${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
-          echo "DXC=$(cd "$(dirname "$found")" && pwd)/dxc" >> "$GITHUB_ENV"
-          "$(cd "$(dirname "$found")" && pwd)/dxc" --version | head -1
+          echo "LD_LIBRARY_PATH=$RUNNER_TEMP/dxc/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          echo "DXC=$found" >> "$GITHUB_ENV"
+          LD_LIBRARY_PATH="$RUNNER_TEMP/dxc/lib:${LD_LIBRARY_PATH:-}" "$found" --version
+      - name: Compile every HLSL stage with Linux DXC (SM 6.4, HLSL 2021, warnings fatal)
+        run: python3 tools/shaders/check_hlsl_local.py --dxc "$DXC" --require
       # Every rule in this script is a failure that cost a Windows run.
       - name: Check the ported HLSL for structural errors
         run: python3 tools/shaders/check_hlsl_structure.py
@@ -169,7 +148,7 @@ jobs:
   # Job 1: Desktop Win64 Direct3D 12
   # ---------------------------------------------------------------------------
   windows-d3d12:
-    timeout-minutes: 35
+    timeout-minutes: 60
     runs-on: windows-2022
     needs: get-info
     steps:
@@ -183,17 +162,25 @@ jobs:
       # The cache key tracks the CMake files (which decide compile flags) and the
       # compiler version, and falls back to the newest matching cache, so a change
       # to one backend still reuses the objects the other shares.
-      - name: ccache
+      - name: Restore compiled objects
+        id: object-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/gr2-ccache
+          key: objects-v2-win64-d3d12-${{ env.BUILD_TYPE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: objects-v2-win64-d3d12-${{ env.BUILD_TYPE }}-
+      - name: Install ccache
         uses: hendrikmuhs/ccache-action@v1.2.21
         with:
-          key: win64-d3d12-${{ env.BUILD_TYPE }}
+          save: false
+          restore: false
           max-size: 2G
-          append-timestamp: false
-          # Save on failure too. The action's default is to save only on success,
-          # so a job that fails at minute 18 of a cold build -- which is most of
-          # them -- threw away everything it had compiled and started from nothing
-          # again. A partial cache is still ~20 minutes of work.
-          save-always: true
+      - name: Select persistent ccache directory
+        shell: pwsh
+        run: |
+          $env:CCACHE_DIR = "${{ runner.temp }}/gr2-ccache"
+          ccache --max-size=2G
+          "CCACHE_DIR=$env:CCACHE_DIR" >> $env:GITHUB_ENV
 
       # clang-cl, not cl.exe: this is the compiler upstream's CI uses, and it is
       # not interchangeable. MSVC rejects casts clang-cl accepts in code we do
@@ -293,6 +280,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Save compiled objects even after failure
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/gr2-ccache
+          key: ${{ steps.object-cache.outputs.cache-primary-key }}
+
   # ---------------------------------------------------------------------------
   # Job 2: Xbox Series X|S UWP package
   # ---------------------------------------------------------------------------
@@ -300,7 +294,7 @@ jobs:
   # UWP-only errors surface, and gating it behind the 25-minute desktop build meant
   # waiting half an hour for an answer that was available immediately.
   xbox-uwp-msix:
-    timeout-minutes: 35
+    timeout-minutes: 60
     runs-on: windows-2022
     needs: get-info
     if: ${{ !inputs.skip_uwp }}
@@ -319,13 +313,26 @@ jobs:
       # Its own cache key: UWP objects differ from the desktop ones (different
       # WINAPI_FAMILY, different libs), and sharing a key would make each job
       # evict the other's work.
-      - name: ccache
+      - name: Restore compiled objects
+        id: object-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/gr2-ccache
+          key: objects-v2-xbox-uwp-${{ env.BUILD_TYPE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: objects-v2-xbox-uwp-${{ env.BUILD_TYPE }}-
+      - name: Install ccache
         uses: hendrikmuhs/ccache-action@v1.2.21
         with:
-          key: xbox-uwp-${{ env.BUILD_TYPE }}
+          save: false
+          restore: false
           max-size: 2G
-          append-timestamp: false
-          save-always: true
+      - name: Select persistent ccache directory
+        shell: pwsh
+        run: |
+          $env:CCACHE_DIR = "${{ runner.temp }}/gr2-ccache"
+          ccache --max-size=2G
+          "CCACHE_DIR=$env:CCACHE_DIR" >> $env:GITHUB_ENV
+
 
       - name: Set up the MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -472,7 +479,7 @@ jobs:
             $archive.Dispose()
           }
 
-          $expected = @("GR2port-XboxSeriesXS-UWP_x64.msix", "GR2port-XboxDevMode.cer")
+          $expected = @("GR2port-XboxSeriesXS-UWP_x64.msix", "GR2port-XboxDevMode.cer", "QUICKSTART-XBOX.txt", "GR2port.pdb", "GR2port.map", "symbolicate_crash.py")
           $missing = @($expected | Where-Object { $entries -notcontains $_ })
           if ($missing.Count -gt 0) {
             throw "Missing from the bundle: $($missing -join ', '). It contains: $($entries -join ', ')"
@@ -492,6 +499,9 @@ jobs:
           $innerMissing = @($required | Where-Object { $inner -notcontains $_ })
           if ($innerMissing.Count -gt 0) {
             throw "The package is missing $($innerMissing -join ', '). It contains: $($inner -join ', ')"
+          }
+          if (@($inner | Where-Object { $_ -match '\.(pdb|map)$' }).Count -gt 0) {
+            throw "Debug symbols must not be staged in the MSIX"
           }
           Write-Host "Bundle verified: $($entries -join ', ')"
           Write-Host "Package contains $($inner.Count) entries including $($required -join ', ')"
@@ -525,6 +535,13 @@ jobs:
 
           See ``docs/XBOX_DEV_MODE_GUIDE.md`` for the full walkthrough.
           "@ >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Save compiled objects even after failure
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/gr2-ccache
+          key: ${{ steps.object-cache.outputs.cache-primary-key }}
 
   # ---------------------------------------------------------------------------
   # Job 3: Release

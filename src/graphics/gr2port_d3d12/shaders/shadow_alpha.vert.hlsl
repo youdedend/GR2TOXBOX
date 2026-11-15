@@ -11,10 +11,12 @@
 #include "common/scene.hlsli"
 
 cbuffer ShadowConstants : register(b1) {
-    ArenaRef g_casters;
-    Shadows g_shadows;
+    uint2 g_casters_words;
+    uint2 g_shadows_words;
     uint g_cascade;
 };
+#define g_casters ArenaMake(g_casters_words.x, g_casters_words.y)
+#define g_shadows ArenaMake(g_shadows_words.x, g_shadows_words.y)
 
 cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
@@ -38,7 +40,7 @@ VsOutput main(uint instance : SV_InstanceID, uint vertex_index : SV_VertexID) {
 
     const float4 position = float4(model, 1.0);
     const float4 world = mul(caster.world, position);
-    float4 clip = mul(LoadShadowMatrix(g_shadows, g_cascade, caster.table), world);
+    float4 clip = mul(ArenaLoadMatrix(ArenaAdd(g_shadows, ShadowMatrixOffset(g_cascade, caster.table)), g_arena), world);
     if (clip.w > 0.5) {
         clip.z = max(-clip.w, clip.z);
     }

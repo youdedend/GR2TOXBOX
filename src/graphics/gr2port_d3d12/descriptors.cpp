@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/logging/log.h"
+#include "uwp/blackbox_log.h"
 #include "graphics/gr2port_d3d12/descriptors.h"
 
 namespace Gr2Port::D3D12 {
@@ -40,6 +41,7 @@ bool BindlessHeap::Create(Device& device) {
     srv_desc.NodeMask = 0;
     HRESULT hr = device_->CreateDescriptorHeap(&srv_desc, IID_PPV_ARGS(&srv_heap_));
     if (FAILED(hr)) {
+        if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(device_);
         LOG_CRITICAL(Graphics, "D3D12: cannot create the {}-slot bindless SRV heap: {}",
                      SrvCapacity, HresultToString(hr));
         return false;
@@ -55,6 +57,7 @@ bool BindlessHeap::Create(Device& device) {
     sampler_desc.NodeMask = 0;
     hr = device_->CreateDescriptorHeap(&sampler_desc, IID_PPV_ARGS(&sampler_heap_));
     if (FAILED(hr)) {
+        if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(device_);
         LOG_CRITICAL(Graphics, "D3D12: cannot create the {}-slot sampler heap: {}",
                      SamplerCapacity, HresultToString(hr));
         return false;

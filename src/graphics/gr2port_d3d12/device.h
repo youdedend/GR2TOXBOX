@@ -27,8 +27,8 @@ struct SDL_Window;
 /// the handles below.
 ///
 /// Targets:
-///   * Desktop Win64  — `CreateSwapChainForHwnd`, any FL 12_1+ adapter.
-///   * Xbox Series X|S — `CreateSwapChainForCoreWindow`, FL 12_1, SM 6.4 (the
+///   * Desktop Win64  — `CreateSwapChainForHwnd`, any FL 12_0+ adapter.
+///   * Xbox Series X|S — `CreateSwapChainForCoreWindow`, FL 12_0, SM 6.4 (the
 ///     console driver's ceiling), a 1,200 MiB heap budget from `Core::Xbox`.
 namespace Gr2Port::D3D12 {
 
@@ -37,14 +37,8 @@ using Microsoft::WRL::ComPtr;
 /// One GPU adapters's resolved capabilities.
 struct Caps {
     std::wstring description;
-    /// The feature level the device was created at.
-    ///
-    /// 12_1 on desktop. 11_0 on Xbox in UWP, which is what `SraKmd_arden`
-    /// reports -- the console's GPU is capable of far more, but the UWP driver
-    /// exposes the 11_0 contract, and asking for 12_1 there fails device
-    /// creation outright. Feature level and shader model are separate ceilings:
-    /// the same device takes Shader Model 6.4 DXIL.
-    D3D_FEATURE_LEVEL feature_level = D3D_FEATURE_LEVEL_12_1;
+    /// The FL12_0 minimum used for device creation on both targets.
+    D3D_FEATURE_LEVEL feature_level = D3D_FEATURE_LEVEL_12_0;
     u64 dedicated_vram = 0;
     /// Raytracing tier 1.1, used only for optional debug visualisation; the
     /// renderer runs without it.

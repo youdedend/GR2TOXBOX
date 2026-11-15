@@ -35,6 +35,10 @@ using spdlog_stdout = spdlog::sinks::stdout_color_sink_mt;
 #include "common/types.h"
 #include "core/emulator_settings.h"
 
+#if defined(GR2_BLACKBOX)
+#include "uwp/blackbox_log.h"
+#endif
+
 namespace Common::Log {
 
 static std::shared_ptr<spdlog_stdout> g_console_sink;
@@ -61,6 +65,10 @@ void VLog(Class log_class, Level level, const char* file, int line, const char* 
           fmt::string_view format, fmt::format_args args) {
     const auto& logger = ALL_LOGGERS[static_cast<size_t>(log_class)];
     if (!logger) {
+#if defined(GR2_BLACKBOX)
+        const auto early = fmt::vformat(format, args);
+        Gr2Port::Blackbox::Write(early.data(), early.size(), level >= Level::Warning);
+#endif
         return;
     }
     fmt::memory_buffer msg;
@@ -178,6 +186,9 @@ void Flush() {
     if (g_console_sink != nullptr) {
         g_console_sink->flush();
     }
+#if defined(GR2_BLACKBOX)
+    Gr2Port::Blackbox::Write("", 0, true);
+#endif
 }
 
 void UpdateSinks() {
@@ -195,6 +206,12 @@ void UpdateSinks() {
         logger->sinks() = EmulatorSettings.IsLogSkipDuplicate()
                               ? dup_filter
                               : (EmulatorSettings.IsLogSync() ? sinks : async_sink);
+#if defined(GR2_BLACKBOX)
+        // Synchronous and outside the async/duplicate filters: warnings survive
+        // immediately even if the worker or renderer thread is the one crashing.
+        logger->sinks().push_back(Gr2Port::Blackbox::MakeSink());
+        logger->flush_on(spdlog::level::warn);
+#endif
     }
 }
 

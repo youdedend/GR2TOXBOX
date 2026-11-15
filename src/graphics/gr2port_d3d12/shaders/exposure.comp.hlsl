@@ -17,12 +17,14 @@
 cbuffer ExposureConstants : register(b1) {
     // Read-only per-frame grading data, an arena ref rather than a cbuffer so
     // the std430 layout is preserved exactly (common/grade.hlsli).
-    ArenaRef g_grade;
-    ArenaRef g_meter;
+    uint2 g_grade_words;
+    uint2 g_meter_words;
     // 1 / (the number of tiles), so the sum of tile log-luminances becomes a mean.
     float g_tile_share;
     float3 g_pad;
 };
+#define g_grade ArenaMake(g_grade_words.x, g_grade_words.y)
+#define g_meter ArenaMake(g_meter_words.x, g_meter_words.y)
 
 cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;

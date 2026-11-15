@@ -19,9 +19,10 @@
 // a member called g_pad -- dxc reports the second as a redefinition with a
 // different type. Each block's padding is named after the block.
 cbuffer FogApplyConstants : register(b1) {
-    ArenaRef g_fog;
+    uint2 g_fog_words;
     float3 g_fog_pad;
 };
+#define g_fog ArenaMake(g_fog_words.x, g_fog_words.y)
 
 cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;

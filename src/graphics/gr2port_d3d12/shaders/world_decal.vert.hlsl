@@ -75,9 +75,10 @@ WorldDecal LoadWorldDecalAt(ArenaRef ref, ArenaTable table) {
 
 cbuffer DecalConstants : register(b1) {
     // The decal table, an ArenaRef where the GLSL had a buffer_reference.
-    ArenaRef g_decals;
+    uint2 g_decals_words;
     uint3 g_pad;
 };
+#define g_decals ArenaMake(g_decals_words.x, g_decals_words.y)
 
 cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;

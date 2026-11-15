@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "graphics/gr2port_d3d12/command.h"
+#include "uwp/blackbox_log.h"
 
 #include <chrono>
 
@@ -11,6 +12,7 @@
 #include "graphics/gr2port_d3d12/arena.h"
 
 namespace Gr2Port::D3D12 {
+namespace { std::atomic<std::uint32_t> pass_sequence{0}; }
 
 namespace {
 
@@ -76,6 +78,7 @@ void CommandList::SetRootSignature(const RootSignature& root) const {
 void CommandList::SetPipeline(const Pipeline& pipeline) const {
     if (list && pipeline.IsValid()) {
         list->SetPipelineState(pipeline.state.Get());
+        Blackbox::Pso(pipeline.hash);
     }
 }
 
@@ -203,6 +206,7 @@ void CommandList::BeginRenderPass(const RenderTarget* targets, u32 target_count,
     if (depth && depth->resource) {
         depth_handle = depth->view;
     }
+    Blackbox::Pass(pass_sequence.fetch_add(1, std::memory_order_relaxed));
     list->OMSetRenderTargets(target_count, handles, FALSE, (depth && depth->resource) ? &depth_handle
                                                                                    : nullptr);
 
@@ -415,10 +419,12 @@ CommandList CommandRing::BeginFrame() {
 
     // Now the slot is free: reset the allocator, and therefore the list.
     if (FAILED(frame.allocator->Reset())) {
+        BlackboxRecordDeviceRemoved(device_->device.Get());
         LOG_CRITICAL(Graphics, "D3D12 command: allocator reset failed.");
         return {};
     }
     if (FAILED(frame.list->Reset(frame.allocator.Get(), nullptr))) {
+        BlackboxRecordDeviceRemoved(device_->device.Get());
         LOG_CRITICAL(Graphics, "D3D12 command: list reset failed.");
         return {};
     }
@@ -443,6 +449,7 @@ u64 CommandRing::EndFrame(CommandList& list) {
     const u64 value = SignalFence(*device_);
     frames_[current_].fence_value = value;
     ++submitted_;
+    Blackbox::Frame(submitted_);
     current_ = (current_ + 1) % FramesInFlight;
     return value;
 }

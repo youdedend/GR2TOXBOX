@@ -17,10 +17,11 @@
 #include "common/texel.hlsli"
 
 cbuffer LuminanceConstants : register(b1) {
-    ArenaRef g_meter;
+    uint2 g_meter_words;
     uint2 g_size;
     uint2 g_offset;
 };
+#define g_meter ArenaMake(g_meter_words.x, g_meter_words.y)
 
 cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;

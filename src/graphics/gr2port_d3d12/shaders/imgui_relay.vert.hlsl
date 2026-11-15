@@ -13,12 +13,13 @@
 #include "common/arena.hlsli"
 
 cbuffer ImGuiConstants : register(b1) {
-    ArenaRef g_vertices;
+    uint2 g_vertices_words;
     float2 g_scale;
     float2 g_translate;
     uint g_texture_handle;
     uint2 g_pad;
 };
+#define g_vertices ArenaMake(g_vertices_words.x, g_vertices_words.y)
 
 cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;

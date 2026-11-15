@@ -34,7 +34,7 @@ file(WRITE "${HEADER_FILE}"
 
 namespace Gr2Port::D3D12::Shaders {
 
-/// ${SYMBOL}: ${STAGE}_6_6 DXIL container, ${BYTE_COUNT} bytes.
+/// ${SYMBOL}: ${STAGE}_6_4 DXIL container, ${BYTE_COUNT} bytes.
 inline constexpr std::uint8_t ${SYMBOL}[] = {
 ${WORDS}
 };

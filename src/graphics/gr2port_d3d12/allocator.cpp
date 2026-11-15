@@ -4,6 +4,7 @@
 #include <algorithm>
 
 #include "common/logging/log.h"
+#include "uwp/blackbox_log.h"
 #include "graphics/gr2port_d3d12/allocator.h"
 
 namespace Gr2Port::D3D12 {
@@ -45,6 +46,7 @@ bool Allocator::Create(Device& device) {
     HRESULT hr = D3D12MA::CreateAllocator(&allocator_desc_, &d3d12ma_);
     (void)callbacks;
     if (FAILED(hr)) {
+        if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(device_->device.Get());
         LOG_CRITICAL(Graphics, "D3D12: D3D12MA allocator creation failed: {}",
                      HresultToString(hr));
         return false;
@@ -132,6 +134,7 @@ ResourcePtr Allocator::CreateResource(const D3D12_RESOURCE_DESC& desc,
     HRESULT hr = d3d12ma_->CreateResource(&alloc_desc, &desc, initial_state, clear, &allocation,
                                           __uuidof(ID3D12Resource), nullptr);
     if (FAILED(hr) || allocation == nullptr) {
+        if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(device_->device.Get());
         refused_++;
         LOG_CRITICAL(Graphics, "D3D12: CreateResource({} KiB) failed: {}", size / 1_KB,
                      HresultToString(hr));

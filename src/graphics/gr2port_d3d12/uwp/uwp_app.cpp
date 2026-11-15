@@ -170,8 +170,11 @@ DisplayModeQuery QueryDisplayMode() {
         try {
             if (g_core_window != nullptr) {
                 auto* core_window = static_cast<::ABI::Windows::UI::Core::ICoreWindow*>(g_core_window);
-                const auto bounds = core_window->Bounds;
-                if (bounds.Width > 0.0f && bounds.Height > 0.0f) {
+                ABI::Windows::Foundation::Rect bounds{};
+                const HRESULT hr = core_window->get_Bounds(&bounds);
+                if (SUCCEEDED(hr) && bounds.Width > 0.0f && bounds.Height > 0.0f) {
+                    LOG_INFO(Graphics, "CoreWindow bounds: x={} y={} width={} height={}",
+                             bounds.X, bounds.Y, bounds.Width, bounds.Height);
                     const float inverse = query.composition_scale > 0.0f
                                               ? 1.0f / query.composition_scale
                                               : 1.0f;

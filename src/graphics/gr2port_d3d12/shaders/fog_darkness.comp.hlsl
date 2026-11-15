@@ -13,9 +13,10 @@
 #include "common/texel.hlsli"
 
 cbuffer FogDarknessConstants : register(b1) {
-    ArenaRef g_fog;
+    uint2 g_fog_words;
     FogGrid g_grid;
 };
+#define g_fog ArenaMake(g_fog_words.x, g_fog_words.y)
 
 cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;

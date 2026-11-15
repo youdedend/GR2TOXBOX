@@ -59,10 +59,12 @@ WorldDecal LoadWorldDecalAt(ArenaRef ref, ArenaTable table) {
 }
 
 cbuffer DecalConstants : register(b1) {
-    ArenaRef g_decals;
-    ArenaRef g_light;
+    uint2 g_decals_words;
+    uint2 g_light_words;
     uint2 g_pad;
 };
+#define g_decals ArenaMake(g_decals_words.x, g_decals_words.y)
+#define g_light ArenaMake(g_light_words.x, g_light_words.y)
 
 cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;

@@ -127,9 +127,9 @@ Fog LoadFog(ArenaRef ref, ArenaTable table) {
         fog.cumulus[i] = asfloat(buffer.Load4(ref.offset + 208 + i * 16u));
         fog.cumulus_offsets[i] = asfloat(buffer.Load4(ref.offset + 256 + i * 16u));
     }
-    [unroll] for (uint i = 0u; i < 2u; ++i) {
-        fog.layers[i] = asfloat(buffer.Load4(ref.offset + 304 + i * 16u));
-        fog.layer_offsets[i] = asfloat(buffer.Load4(ref.offset + 336 + i * 16u));
+    [unroll] for (uint second_index = 0u; second_index < 2u; ++second_index) {
+        fog.layers[second_index] = asfloat(buffer.Load4(ref.offset + 304 + second_index * 16u));
+        fog.layer_offsets[second_index] = asfloat(buffer.Load4(ref.offset + 336 + second_index * 16u));
     }
     fog.light_color = asfloat(buffer.Load4(ref.offset + 368));
     fog.light_direction = asfloat(buffer.Load4(ref.offset + 384));

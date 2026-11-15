@@ -14,7 +14,13 @@ include(${PROJECT_SOURCE_DIR}/cmake/GR2D3D12Shaders.cmake)
 set(GR2_D3D12_DIR ${CMAKE_CURRENT_LIST_DIR})
 
 # --- Host sources -----------------------------------------------------------
+target_compile_definitions(gr2port PRIVATE GR2_BLACKBOX=1)
 target_sources(gr2port PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/uwp/blackbox_log.cpp
+    ${PROJECT_SOURCE_DIR}/src/uwp/blackbox_log.h
+    ${PROJECT_SOURCE_DIR}/src/core/uwp_guest_arena.cpp
+    ${GR2_D3D12_DIR}/detile.cpp
+    ${GR2_D3D12_DIR}/detile_layout.cpp
     ${GR2_D3D12_DIR}/allocator.cpp
     ${GR2_D3D12_DIR}/allocator.h
     ${GR2_D3D12_DIR}/arena.cpp
@@ -66,6 +72,7 @@ target_link_libraries(gr2port PRIVATE gr2_d3d12ma)
 # --- Windows / DXGI libraries ----------------------------------------------
 target_link_libraries(gr2port PRIVATE
     d3d12
+    WindowsApp
     dxgi
     dxguid
     d3dcompiler
@@ -99,3 +106,14 @@ include(${GR2_D3D12_DIR}/shaders_manifest.cmake)
 add_custom_target(gr2port_d3d12_shaders DEPENDS ${GR2_D3D12_SHADER_HEADERS})
 add_dependencies(gr2port gr2port_d3d12_shaders)
 target_include_directories(gr2port PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/gr2port_d3d12_shaders)
+
+# Symbols are external to the MSIX, but shipped beside it for offline reports.
+if (MSVC AND GR2_XBOX_UWP)
+    target_compile_options(gr2port PRIVATE /Zi)
+    target_link_options(gr2port PRIVATE /DEBUG:FULL
+        "/PDB:$<TARGET_FILE_DIR:gr2port>/GR2port.pdb"
+        "/MAP:$<TARGET_FILE_DIR:gr2port>/GR2port.map")
+endif()
+
+list(LENGTH GR2_D3D12_SHADER_HEADERS GR2_COMPILED_SHADER_COUNT)
+target_compile_definitions(gr2port PRIVATE GR2_COMPILED_SHADER_COUNT=${GR2_COMPILED_SHADER_COUNT})

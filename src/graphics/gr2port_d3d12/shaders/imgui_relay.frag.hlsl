@@ -17,12 +17,13 @@
 #include "common/texel.hlsli"
 
 cbuffer ImGuiConstants : register(b1) {
-    ArenaRef g_vertices;
+    uint2 g_vertices_words;
     float2 g_scale;
     float2 g_translate;
     uint g_texture_handle;
     uint2 g_pad;
 };
+#define g_vertices ArenaMake(g_vertices_words.x, g_vertices_words.y)
 
 // The arena table: the SRV index of each arena, the value the arena accessors
 // going to DescriptorRaw() with. Declared by every stage that reads the

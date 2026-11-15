@@ -132,7 +132,9 @@ foreach ($extra in @("shaders", "userdata")) {
 }
 
 # The user-facing quick start ships inside the bundle, not inside the package.
-Copy-Item "docs/QUICKSTART-XBOX.txt" (Join-Path $OutDir "QUICKSTART-XBOX.txt") -ErrorAction SilentlyContinue
+Copy-Item "docs/QUICKSTART-XBOX.txt" (Join-Path $OutDir "QUICKSTART-XBOX.txt")
+# A nested optional data directory must not accidentally bloat the sideload.
+Get-ChildItem $StageDir -Recurse -File -Include *.pdb,*.map | Remove-Item -Force
 
 # ---------------------------------------------------------------------------
 # 2b. The AppContainer import audit
@@ -371,6 +373,13 @@ Write-Host "Note: the chain terminates in an untrusted self-signed root by desig
 # ---------------------------------------------------------------------------
 # 6. Bundle
 # ---------------------------------------------------------------------------
+# Keep symbols outside staging: never put them in the sideloaded package.
+foreach ($symbol in @("GR2port.pdb", "GR2port.map")) {
+    $file = Get-ChildItem $BuildDir -Recurse -File -Filter $symbol | Select-Object -First 1
+    if (-not $file) { throw "Missing external debug symbol: $symbol" }
+    Copy-Item $file.FullName (Join-Path $OutDir $symbol)
+}
+Copy-Item "tools/symbolicate_crash.py" (Join-Path $OutDir "symbolicate_crash.py")
 Copy-Item (Join-Path $SigningDir "GR2port-XboxDevMode.cer") $OutDir
 $bundleDir = Join-Path $OutDir "GR2port-XboxSeriesXS-UWP"
 if (Test-Path $bundleDir) { Remove-Item -Recurse -Force $bundleDir }

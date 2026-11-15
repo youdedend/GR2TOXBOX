@@ -164,7 +164,8 @@ float4x4 ArenaLoadMatrix(ArenaRef ref, ArenaTable table) {
     float4 c1 = asfloat(buffer.Load4(ref.offset + 16));
     float4 c2 = asfloat(buffer.Load4(ref.offset + 32));
     float4 c3 = asfloat(buffer.Load4(ref.offset + 48));
-    return float4x4(c0, c1, c2, c3);
+    // GLSL mat4(columns) versus HLSL matrix constructor(rows).
+    return transpose(float4x4(c0, c1, c2, c3));
 }
 
 // ---------------------------------------------------------------------------

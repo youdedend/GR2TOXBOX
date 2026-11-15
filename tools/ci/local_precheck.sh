@@ -33,11 +33,12 @@ if ! command -v "$CXX" >/dev/null 2>&1; then
     exit 1
 fi
 
-FMT_INCLUDE=externals/fmt/include
-SPDLOG_INCLUDE=externals/spdlog/include
+DEPS_ROOT=${GR2_DEPS_ROOT:-externals}
+FMT_INCLUDE="$DEPS_ROOT/fmt/include"
+SPDLOG_INCLUDE="$DEPS_ROOT/spdlog/include"
 if [ ! -d "$FMT_INCLUDE" ]; then
     echo "local_precheck: submodules are not checked out." >&2
-    echo "  git submodule update --init --depth 1 externals/fmt externals/spdlog" >&2
+    echo "  Set GR2_DEPS_ROOT to a directory containing pinned dependency headers." >&2
     exit 1
 fi
 
@@ -71,11 +72,32 @@ annotate_log() {
 # Nothing here includes a Windows or winrt header.
 UNITS=(
     "src/core/uwp_memory.cpp|"
+    "src/graphics/gr2port_d3d12/detile_layout.cpp|"
     "src/uwp/chords.cpp|"
     "src/tests/selftest_log.cpp|"
 )
 
 echo "local_precheck: $($CXX --version | head -1)"
+if ! python3 tools/ci/test_port_tools.py; then
+    failures=$((failures + 1))
+fi
+if ! python3 tools/ci/check_uwp_types.py; then
+    failures=$((failures + 1))
+fi
+if ! python3 tools/shaders/check_hlsl_local.py; then
+    failures=$((failures + 1))
+fi
+# New Windows-only logger: check both platform branches against strict SDK API
+# declarations and real spdlog, without initializing any submodules locally.
+for blackbox_uwp in 0 1; do
+    blackbox_defs=()
+    [ "$blackbox_uwp" -eq 1 ] && blackbox_defs=(-DGR2_XBOX_UWP=1)
+    if ! "$CXX" -std=c++20 -fsyntax-only -Itools/ci/uwp_stubs -Isrc \
+        -I"$FMT_INCLUDE" -I"$SPDLOG_INCLUDE" "${blackbox_defs[@]}" \
+        src/uwp/blackbox_log.cpp; then
+        failures=$((failures + 1))
+    fi
+done
 
 for entry in "${UNITS[@]}"; do
     file=${entry%%|*}
@@ -347,14 +369,14 @@ int main() {
     return 0;
 }
 M3_EOF
-if ! "$CXX" "${CXXFLAGS[@]}" -Iexternals/minimp3 -fsyntax-only "$OUT/m3.cpp" 2>"$OUT/err"; then
+if ! "$CXX" "${CXXFLAGS[@]}" -I"$DEPS_ROOT/minimp3" -fsyntax-only "$OUT/m3.cpp" 2>"$OUT/err"; then
     echo "  FAIL externals/minimp3 (desktop)"
     sed 's/^/    /' "$OUT/err" | head -20
     failures=$((failures + 1))
 else
     echo "  ok   externals/minimp3 (desktop)"
 fi
-if ! "$CXX" "${CXXFLAGS[@]}" -Iexternals/minimp3 -DMINIMP3_NO_STDIO=1 -c "$OUT/m3.cpp" \
+if ! "$CXX" "${CXXFLAGS[@]}" -I"$DEPS_ROOT/minimp3" -DMINIMP3_NO_STDIO=1 -c "$OUT/m3.cpp" \
         -o "$OUT/m3.o" 2>"$OUT/err"; then
     echo "  FAIL externals/minimp3 (MINIMP3_NO_STDIO)"
     sed 's/^/    /' "$OUT/err" | head -20
@@ -412,9 +434,9 @@ for iu_uwp in 1 0; do
         iu_label="GR2_XBOX_UWP"
     fi
     # shellcheck disable=SC2086
-    if ! "$CXX" "${CXXFLAGS[@]}" -Iexternals/sdl3/include -Isrc/uwp/sdl3_shim \
-            -Iexternals/imgui -Iexternals/json/include -Iexternals/ext-boost \
-            -Iexternals/vulkan-headers/include -Itools/ci/stubs -D_WIN32 $iu_defs \
+    if ! "$CXX" "${CXXFLAGS[@]}" -I"$DEPS_ROOT/sdl3/include" -Isrc/uwp/sdl3_shim \
+            -I"$DEPS_ROOT/imgui" -I"$DEPS_ROOT/json/include" -I"$DEPS_ROOT/ext-boost" \
+            -I"$DEPS_ROOT/vulkan-headers/include" -Itools/ci/stubs -D_WIN32 $iu_defs \
             -include tools/ci/stubs/windows.h -fsyntax-only \
             src/imgui/renderer/imgui_impl_sdl3.cpp 2>"$OUT/err"; then
         echo "  FAIL src/imgui/renderer/imgui_impl_sdl3.cpp ($iu_label)"
@@ -498,7 +520,7 @@ int main(int, char** argv) {
     return res;
 }
 MP3_EOF
-if ! "$CXX" "${CXXFLAGS[@]}" -Iexternals/minimp3 -DMINIMP3_NO_STDIO=1 \
+if ! "$CXX" "${CXXFLAGS[@]}" -I"$DEPS_ROOT/minimp3" -DMINIMP3_NO_STDIO=1 \
         -fsyntax-only "$OUT/mp3_load.cpp" 2>"$OUT/err"; then
     echo "  FAIL music_player_service MP3 path (GR2_XBOX_UWP)"
     sed 's/^/    /' "$OUT/err" | head -20
@@ -538,7 +560,7 @@ fi
 # -include it is what makes them visible before the shim's own includes.
 for file in src/uwp/sdl3_shim/*.cpp; do
     [ -f "$file" ] || continue
-    if ! "$CXX" "${CXXFLAGS[@]}" -Iexternals/sdl3/include -Isrc/uwp/sdl3_shim \
+    if ! "$CXX" "${CXXFLAGS[@]}" -I"$DEPS_ROOT/sdl3/include" -Isrc/uwp/sdl3_shim \
             -Itools/ci/stubs -include tools/ci/stubs/windows.h \
             -fsyntax-only "$file" 2>"$OUT/err"; then
         echo "  FAIL $file (SDL shim)"
@@ -559,7 +581,19 @@ done
 # for DXGI, and they must NOT be given -D_WIN32: SDL's headers take that as a real
 # Windows build and then want <process.h>, which this host does not have. The two
 # files that do include d3d12.h need it.
+# Only generated shader bytecode is stubbed, never the host dispatch module.
+cat >"$OUT/detile_comp.h" <<'DETILE_HEADER'
+#pragma once
+#include <cstdint>
+#include <span>
+namespace Gr2Port::D3D12::Shaders {
+inline constexpr std::uint8_t detile_comp[] = {0};
+inline constexpr std::span<const std::uint8_t> detile_comp_span = detile_comp;
+}
+DETILE_HEADER
+CXXFLAGS+=(-I"$OUT")
 D3D12_UNITS=(
+    "src/graphics/gr2port_d3d12/detile.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/pipeline.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/command.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/backend_surface.cpp|"
@@ -577,8 +611,8 @@ for entry in "${D3D12_UNITS[@]}"; do
     # the names the shared capture calls, so it includes the same headers those
     # modules do (meshes.h -> device.h -> vulkan.hpp). Vulkan::Headers is linked on
     # every build, D3D12 included, so this matches the real compile.
-    if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/d3d12_stub -Iexternals/sdl3/include \
-            -Iexternals/imgui -Iexternals/vulkan-headers/include $extra \
+    if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/d3d12_stub -I"$DEPS_ROOT/sdl3/include" \
+            -I"$DEPS_ROOT/imgui" -I"$DEPS_ROOT/vulkan-headers/include" $extra \
             -fsyntax-only "$file" 2>"$OUT/err"; then
         # Only the diagnostics that are not inside the vendored header count.
         grep -E 'error' "$OUT/err" | grep -v 'd3d12ma/' >"$OUT/ours" || true
@@ -625,8 +659,8 @@ D3D12_SYMBOLS=(
 )
 if command -v nm >/dev/null 2>&1 &&
         "$CXX" "${CXXFLAGS[@]}" -c -o "$OUT/backend_capture.o" \
-            -Itools/ci/d3d12_stub -Iexternals/sdl3/include -Iexternals/imgui \
-            -Iexternals/vulkan-headers/include \
+            -Itools/ci/d3d12_stub -I"$DEPS_ROOT/sdl3/include" -I"$DEPS_ROOT/imgui" \
+            -I"$DEPS_ROOT/vulkan-headers/include" \
             src/graphics/gr2port_d3d12/backend_capture.cpp 2>"$OUT/err"; then
     nm -C "$OUT/backend_capture.o" >"$OUT/syms"
     missing_syms=0
@@ -711,46 +745,15 @@ fi
 #
 # Where it is absent the check is skipped with a line saying so, rather than
 # silently passing: a shader that was never compiled must not look compiled. The
-# tarball is linux_dxc_<date>.x86_x64.tar.gz from the DirectXShaderCompiler
-# releases -- note x86_x64, which is not a typo in this comment and did cost one
-# download to discover.
+# tarball is linux_dxc_<date>.x86_64.tar.gz from DirectXShaderCompiler releases.
 DXC_BIN="${DXC:-}"
 if [ -z "$DXC_BIN" ] && command -v dxc >/dev/null 2>&1; then
     DXC_BIN=$(command -v dxc)
 fi
 if [ -n "$DXC_BIN" ] && [ -x "$DXC_BIN" ] && [ -f src/graphics/gr2port_d3d12/shaders_manifest.cmake ]; then
     echo "local_precheck: compiling HLSL with $("$DXC_BIN" --version | head -1)"
-    hlsl_failed=0
-    # The manifest names each stage file and its profile variable; the pairing is
-    # the file's own stage suffix, which is what gr2port_add_hlsl_shader derives.
-    for stage_file in src/graphics/gr2port_d3d12/shaders/*.hlsl src/graphics/gr2port_d3d12/shaders/pfx/*.hlsl; do
-        [ -f "$stage_file" ] || continue
-        case "$stage_file" in
-            *.hlsli|*/common/*) continue ;;
-        esac
-        case "$stage_file" in
-            *.vert.hlsl) profile="vs_6_4" ;;
-            *.frag.hlsl) profile="ps_6_4" ;;
-            *.comp.hlsl) profile="cs_6_4" ;;
-            *.geom.hlsl) profile="gs_6_4" ;;
-            *.hull.hlsl|*.tesc.hlsl) profile="hs_6_4" ;;
-            *.dom.hlsl|*.tese.hlsl) profile="ds_6_4" ;;
-            *) continue ;;
-        esac
-        # -HV 2021 matches the runner's dxc invocation; -WX makes a warning an
-        # error, because a warning here is a line someone should look at.
-        if ! "$DXC_BIN" -T "$profile" -E main -HV 2021 -WX -I src/graphics/gr2port_d3d12/shaders \
-                -Fo /dev/null "$stage_file" >"$OUT/err" 2>&1; then
-            echo "  FAIL $stage_file ($profile)"
-            sed 's/^/    /' "$OUT/err" | head -20
-            annotate_log "$stage_file" "$OUT/err"
-            hlsl_failed=$((hlsl_failed + 1))
-        fi
-    done
-    if [ "$hlsl_failed" -eq 0 ]; then
-        echo "  ok   HLSL compile (all stages)"
-    else
-        failures=$((failures + hlsl_failed))
+    if ! python3 tools/shaders/check_hlsl_local.py --dxc "$DXC_BIN" --require; then
+        failures=$((failures + 1))
     fi
 else
     echo "  skip HLSL compile (no dxc; set DXC=/path/to/dxc to enable)"

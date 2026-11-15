@@ -23,13 +23,14 @@
 cbuffer BloomBlurConstants : register(b1) {
     // Read-only per-frame grading data, an arena ref rather than a cbuffer so
     // the std430 layout is preserved exactly (common/grade.hlsli).
-    ArenaRef g_grade;
+    uint2 g_grade_words;
     // One texel of the source along the blur's direction.
     float2 g_step_size;
     // 1 when the last frame's bloom blends in.
     uint g_feedback;
     float g_pad;
 };
+#define g_grade ArenaMake(g_grade_words.x, g_grade_words.y)
 
 cbuffer BloomBlurTextures : register(b2) {
     uint g_source;
@@ -70,8 +71,8 @@ RowTable RowWeights(uint row) {
         table.weights[i] = exp(-float(i * i) / (2.0 * variance));
         sum += 2.0 * table.weights[i];
     }
-    [unroll] for (uint i = 0u; i < WEIGHTS; ++i) {
-        table.weights[i] /= sum;
+    [unroll] for (uint second_index = 0u; second_index < WEIGHTS; ++second_index) {
+        table.weights[second_index] /= sum;
     }
     return table;
 }
