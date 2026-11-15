@@ -372,7 +372,10 @@ jobs:
         shell: msys2 {0}
         run: |
           set -o pipefail
-          scripts/ci/build_ffmpeg_uwp.sh 2>&1 | tee ffmpeg-uwp.log
+          if ! scripts/ci/build_ffmpeg_uwp.sh 2>&1 | tee ffmpeg-uwp.log; then
+            pwsh.exe -NoProfile -File scripts/ci/annotate_failure.ps1 -LogFile ffmpeg-uwp.log
+            exit 1
+          fi
 
       - name: Select UWP codec prefix
         shell: pwsh

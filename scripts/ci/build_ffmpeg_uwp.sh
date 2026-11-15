@@ -42,7 +42,15 @@ done
 for option in DXVA2 D3D11VA D3D12VA MEDIAFOUNDATION; do
     grep -q "#define CONFIG_${option} 0" config.h
 done
-make -j"${NUMBER_OF_PROCESSORS:-2}"
+make -j"${NUMBER_OF_PROCESSORS:-2}" > build.log 2>&1 || {
+    status=$?
+    # Preserve complete compiler/make diagnostics through check-run annotations.
+    grep -Ei 'error:|fatal|make.*\*\*\*|not found|not recognized|undefined' build.log | head -n 30 | while IFS= read -r line; do
+        echo "::error::FFmpeg build: ${line//%/%25}"
+    done
+    tail -n 30 build.log
+    exit "$status"
+}
 make install
 # FFmpeg's msvc toolchain uses lib*.a names; COFF archives are linker-compatible.
 for lib in avformat avcodec swscale avutil avfilter swresample; do
