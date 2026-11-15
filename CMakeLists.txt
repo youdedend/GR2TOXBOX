@@ -1211,11 +1211,18 @@ set(IMGUI src/imgui/imgui_config.h
           src/imgui/settings_dialog_layer.h
           src/imgui/renderer/imgui_core.cpp
           src/imgui/renderer/imgui_core.h
-          # Desktop only: imgui_core.cpp drives SDL3's platform layer, and SDL3 has
-          # no UWP backend. The console shell in src/uwp/ presents through
-          # CoreWindow instead.
-          $<$<NOT:$<BOOL:${GR2_XBOX_UWP}>>:src/imgui/renderer/imgui_impl_sdl3.cpp>
-          $<$<NOT:$<BOOL:${GR2_XBOX_UWP}>>:src/imgui/renderer/imgui_impl_sdl3.h>
+          # imgui_core.cpp (above) calls ImGui::Sdl::{Init,Shutdown,NewFrame,
+          # ProcessEvent}, which only this file defines, so leaving it out is an
+          # undefined symbol at link rather than a working console path.
+          #
+          # The old reason for excluding it -- "SDL3 has no UWP backend" -- was
+          # true of upstream SDL and is the reason src/uwp/sdl3_shim/ exists. This
+          # backend is an ordinary SDL3 consumer (events, gamepad, clipboard,
+          # window ids), and the shim implements every SDL3 function it calls;
+          # tools/ci/check_sdl_shim_symbols.py is what checks that claim rather
+          # than asserting it.
+          src/imgui/renderer/imgui_impl_sdl3.cpp
+          src/imgui/renderer/imgui_impl_sdl3.h
           src/imgui/renderer/font_data.cpp
           src/imgui/renderer/font_data.h
           src/imgui/renderer/font_stack.cpp

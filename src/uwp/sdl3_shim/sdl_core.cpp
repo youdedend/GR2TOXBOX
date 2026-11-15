@@ -76,6 +76,124 @@ Uint64 NowMs() {
 
 } // namespace
 
+// --- SDL's allocator.
+//
+// SDL3 declares these as real exported functions (SDL_stdinc.h), not macros, and
+// the rest of the port calls them by name -- every SDL_free in the audio, camera,
+// mouse, trophy and input code, and the ones the shim's own callers keep. With no
+// SDL library behind this build they were simply undefined symbols at link time.
+//
+// They forward to the C library, which is what SDL itself does and what the
+// entries in sdl_iostream.cpp and sdl_gamepad.cpp already assume ("SDL_free in
+// this shim is libc's free"): a block this shim allocates can be freed by the
+// port and vice versa, and there is one heap rather than two.
+//
+// SDL_GetMemoryFunctions and the allocation counters are here too, because a caller
+// that installs custom functions expects them to be honoured. Rather than leave
+// that silently unhonoured, they report the C library's -- which is what these
+// actually are.
+
+extern "C" void* SDLCALL SDL_malloc(size_t size) {
+    return std::malloc(size);
+}
+
+extern "C" void* SDLCALL SDL_calloc(size_t nmemb, size_t size) {
+    return std::calloc(nmemb, size);
+}
+
+extern "C" void* SDLCALL SDL_realloc(void* mem, size_t size) {
+    return std::realloc(mem, size);
+}
+
+extern "C" void SDLCALL SDL_free(void* mem) {
+    std::free(mem);
+}
+
+extern "C" char* SDLCALL SDL_strdup(const char* str) {
+    // Not strdup: it is POSIX, and the MSVC CRT spells it _strdup. Doing the copy
+    // here keeps one implementation for both.
+    if (str == nullptr) {
+        return nullptr;
+    }
+    const size_t length = std::strlen(str) + 1;
+    auto* copy = static_cast<char*>(std::malloc(length));
+    if (copy != nullptr) {
+        std::memcpy(copy, str, length);
+    }
+    return copy;
+}
+
+extern "C" void SDLCALL SDL_GetMemoryFunctions(SDL_malloc_func* malloc_func,
+                                               SDL_calloc_func* calloc_func,
+                                               SDL_realloc_func* realloc_func,
+                                               SDL_free_func* free_func) {
+    // The port never installs its own; reporting the real ones is the honest answer
+    // and matches what these calls do.
+    if (malloc_func) {
+        *malloc_func = SDL_malloc;
+    }
+    if (calloc_func) {
+        *calloc_func = SDL_calloc;
+    }
+    if (realloc_func) {
+        *realloc_func = SDL_realloc;
+    }
+    if (free_func) {
+        *free_func = SDL_free;
+    }
+}
+
+// --- SDL's clipboard.
+//
+// A UWP app has Windows.ApplicationModel.DataTransfer.Clipboard, but on an Xbox
+// there is no way for the player to paste anything and nothing outside the app to
+// paste into, so a clipboard implementation would be reachable only from ImGui's
+// text fields and would carry text to nowhere. These report the honest empty
+// state instead: nothing stored, so nothing to paste.
+//
+// SDL_GetClipboardText's contract is that the caller frees the result with
+// SDL_free, so this returns an SDL_malloc'd empty string rather than a pointer to
+// storage it does not own. Returning a literal, or nullptr, would be a heap error
+// or a crash at the first caller that frees it -- ImGui's backend does exactly
+// that when a text field opens.
+
+extern "C" char* SDLCALL SDL_GetClipboardText(void) {
+    char* text = static_cast<char*>(SDL_malloc(1));
+    if (text != nullptr) {
+        text[0] = '\0';
+    }
+    return text;
+}
+
+extern "C" bool SDLCALL SDL_SetClipboardText(const char* /*text*/) {
+    // Nothing to store it in; see above. Reported as success because the caller
+    // has no corrective action available and the call did not fail.
+    return true;
+}
+
+extern "C" bool SDLCALL SDL_HasClipboardText(void) {
+    return false;
+}
+
+// The primary selection is an X11 concept with no equivalent here. Same answers,
+// for the same reason; kept separate so a reader is not left wondering why they
+// alias the clipboard.
+extern "C" char* SDLCALL SDL_GetPrimarySelectionText(void) {
+    char* text = static_cast<char*>(SDL_malloc(1));
+    if (text != nullptr) {
+        text[0] = '\0';
+    }
+    return text;
+}
+
+extern "C" bool SDLCALL SDL_SetPrimarySelectionText(const char* /*text*/) {
+    return true;
+}
+
+extern "C" bool SDLCALL SDL_HasPrimarySelectionText(void) {
+    return false;
+}
+
 // --- SDL's error string. Every shim file sets it through this, so a failed call
 // --- reports something specific rather than a stale message.
 

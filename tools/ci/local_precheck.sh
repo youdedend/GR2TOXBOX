@@ -212,6 +212,49 @@ for sc_uwp in 1 0; do
     fi
 done
 
+# ImGui's SDL3 platform backend under the packaged build. It is what defines
+# ImGui::Sdl::{Init,Shutdown,NewFrame,ProcessEvent}, which imgui_core.cpp calls on
+# every build -- so if it does not compile here, gr2port.exe does not link, which
+# is exactly what happened. Compiled in both configurations because both now build
+# it: desktop against real SDL3, the console against the shim.
+for iu_uwp in 1 0; do
+    iu_defs=""
+    iu_label="desktop"
+    if [ "$iu_uwp" = "1" ]; then
+        iu_defs="-DGR2_XBOX_UWP=1"
+        iu_label="GR2_XBOX_UWP"
+    fi
+    # shellcheck disable=SC2086
+    if ! "$CXX" "${CXXFLAGS[@]}" -Iexternals/sdl3/include -Isrc/uwp/sdl3_shim \
+            -Iexternals/imgui -Iexternals/json/include -Iexternals/ext-boost \
+            -Iexternals/vulkan-headers/include -Itools/ci/stubs -D_WIN32 $iu_defs \
+            -include tools/ci/stubs/windows.h -fsyntax-only \
+            src/imgui/renderer/imgui_impl_sdl3.cpp 2>"$OUT/err"; then
+        echo "  FAIL src/imgui/renderer/imgui_impl_sdl3.cpp ($iu_label)"
+        sed 's/^/    /' "$OUT/err" | head -20
+        annotate_log "src/imgui/renderer/imgui_impl_sdl3.cpp" "$OUT/err"
+        failures=$((failures + 1))
+    else
+        echo "  ok   src/imgui/renderer/imgui_impl_sdl3.cpp ($iu_label)"
+    fi
+done
+
+# Every SDL3 function those translation units call is defined by the shim. The
+# packaged build links no SDL library, so a missing one is an undefined symbol
+# twelve minutes into a Windows run -- which is how SDL_free and the clipboard
+# family were found. This is the check that would have caught both.
+if command -v python3 >/dev/null 2>&1; then
+    if ! python3 tools/ci/check_sdl_shim_symbols.py \
+            src/imgui/renderer/imgui_impl_sdl3.cpp >"$OUT/err" 2>&1; then
+        echo "  FAIL SDL shim (a called SDL3 function is not defined)"
+        sed 's/^/    /' "$OUT/err" | head -20
+        annotate_log "src/uwp/sdl3_shim" "$OUT/err"
+        failures=$((failures + 1))
+    else
+        echo "  ok   SDL shim ($(sed 's/ .*//' "$OUT/err") SDL3 calls defined)"
+    fi
+fi
+
 # The console build's in-memory MP3 path. music_player_service.cpp reads the file
 # with IOFile and hands the bytes to mp3dec_load_buf; the first version of that
 # called IOFile by the wrong name, used operator bool that it does not have, and

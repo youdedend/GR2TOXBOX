@@ -38,6 +38,15 @@
 
 #ifndef _WIN32_STUB_TYPES
 #define _WIN32_STUB_TYPES
+// Declaring _WIN32 makes third-party headers (Vulkan's, notably) take their
+// MSVC branch, whose calling-convention spelling this host's gcc does not know.
+// The keyword is defined as nothing, which is what it means on x86-64 anyway.
+#ifndef __stdcall
+#define __stdcall
+#endif
+#ifndef __cdecl
+#define __cdecl
+#endif
 typedef int BOOL;
 typedef unsigned long DWORD;
 typedef long LONG;
@@ -179,6 +188,15 @@ BOOL GlobalMemoryStatusEx(MEMORYSTATUSEX* status);
 #endif
 HLOCAL LocalAlloc(UINT flags, SIZE_T bytes);
 HLOCAL LocalFree(HLOCAL block);
+
+// The dynamic loader, which vulkan.hpp's dynamic-dispatch branch takes on _WIN32.
+// Declared for the same reason as the memory API above: without the declaration
+// the third-party header does not compile, and the check it is part of is worth
+// more than the names cost.
+HMODULE LoadLibraryA(LPCSTR name);
+HMODULE LoadLibraryW(LPCWSTR name);
+BOOL FreeLibrary(HMODULE module);
+void* GetProcAddress(HMODULE module, LPCSTR name);
 
 // --- memoryapi.h's surface, as src/core/uwp_win_compat.h uses it ------------
 //

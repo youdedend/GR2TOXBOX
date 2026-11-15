@@ -44,12 +44,18 @@ ShimWindow g_window;
 bool g_open = false;
 std::mutex g_window_mutex;
 
-// SDL's property bags: an ID, and string/number/boolean values in it. The only
-// consumer is SDL_CreateWindowWithProperties, which reads the size and the title.
+// SDL's property bags: an ID, and string/number/boolean/pointer values in it. The
+// port's consumer is SDL_CreateWindowWithProperties, which reads the size and the
+// title. The pointer kind is for the native-handle properties, which name a
+// desktop window (SDL_PROP_WINDOW_WIN32_HWND_POINTER and friends): there is no
+// desktop window here, so nothing sets them and they read back as their default.
+// Implemented rather than omitted because a shim that silently lacks a whole
+// property kind is how a caller ends up reading an unrelated value.
 struct PropertyBag {
     std::map<std::string, std::string> strings;
     std::map<std::string, Sint64> numbers;
     std::map<std::string, bool> booleans;
+    std::map<std::string, void*> pointers;
 };
 
 std::mutex g_properties_mutex;
@@ -181,6 +187,31 @@ extern "C" bool SDLCALL SDL_GetBooleanProperty(SDL_PropertiesID props, const cha
     }
     const auto found = it->second.booleans.find(name);
     return found != it->second.booleans.end() ? found->second : default_value;
+}
+
+extern "C" void* SDLCALL SDL_GetPointerProperty(SDL_PropertiesID props, const char* name,
+                                                void* default_value) {
+    const std::scoped_lock lock{g_properties_mutex};
+    const auto it = g_properties.find(props);
+    if (it == g_properties.end() || name == nullptr) {
+        return default_value;
+    }
+    const auto found = it->second.pointers.find(name);
+    return found != it->second.pointers.end() ? found->second : default_value;
+}
+
+extern "C" bool SDLCALL SDL_SetPointerProperty(SDL_PropertiesID props, const char* name,
+                                               void* value) {
+    if (name == nullptr) {
+        return false;
+    }
+    const std::scoped_lock lock{g_properties_mutex};
+    const auto it = g_properties.find(props);
+    if (it == g_properties.end()) {
+        return false;
+    }
+    it->second.pointers[name] = value;
+    return true;
 }
 
 // --- The window -----------------------------------------------------------
