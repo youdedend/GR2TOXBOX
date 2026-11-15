@@ -368,6 +368,28 @@ if command -v python3 >/dev/null 2>&1; then
     fi
 fi
 
+# No Shader Model 6.5+ construct in any stage. The console's driver stops at 6.4
+# and a 6.6 module does not load there at all, so a stray ResourceDescriptorHeap[]
+# is not a slow path -- it is a shader that never runs, found only when someone
+# tries it on hardware. -T *_6_4 would catch it, but dxc is absent from this host
+# more often than not, so the check that can always run is a textual one.
+#
+# The only place the names may appear is descriptors.hlsli's own comments, which
+# exist to explain what replaced them.
+sm66_left=$(grep -rn 'ResourceDescriptorHeap\|SamplerDescriptorHeap' \
+    src/graphics/gr2port_d3d12/shaders/ 2>/dev/null \
+    | grep -v 'shaders/common/descriptors.hlsli' \
+    | grep -v ':[0-9]*: *//' || true)
+if [ -n "$sm66_left" ]; then
+    echo "  FAIL HLSL is SM 6.4 (6.6-only constructs remain)"
+    printf '%s\n' "$sm66_left" | sed 's/^/    /' | head -20
+    printf '%s\n' "$sm66_left" >"$OUT/err"
+    annotate_log "src/graphics/gr2port_d3d12/shaders" "$OUT/err"
+    failures=$((failures + 1))
+else
+    echo "  ok   HLSL is SM 6.4 (no 6.6-only constructs)"
+fi
+
 # The ported HLSL, compiled. Microsoft ships a Linux x86_64 build of dxc as well as
 # the Windows one, and it compiles every stage in well under a second. The CI
 # source-guard job fetches it (see build-xbox-uwp.yml), so this step does real work
@@ -395,12 +417,12 @@ if [ -n "$DXC_BIN" ] && [ -x "$DXC_BIN" ] && [ -f src/graphics/gr2port_d3d12/sha
             *.hlsli|*/common/*) continue ;;
         esac
         case "$stage_file" in
-            *.vert.hlsl) profile="vs_6_6" ;;
-            *.frag.hlsl) profile="ps_6_6" ;;
-            *.comp.hlsl) profile="cs_6_6" ;;
-            *.geom.hlsl) profile="gs_6_6" ;;
-            *.hull.hlsl|*.tesc.hlsl) profile="hs_6_6" ;;
-            *.dom.hlsl|*.tese.hlsl) profile="ds_6_6" ;;
+            *.vert.hlsl) profile="vs_6_4" ;;
+            *.frag.hlsl) profile="ps_6_4" ;;
+            *.comp.hlsl) profile="cs_6_4" ;;
+            *.geom.hlsl) profile="gs_6_4" ;;
+            *.hull.hlsl|*.tesc.hlsl) profile="hs_6_4" ;;
+            *.dom.hlsl|*.tese.hlsl) profile="ds_6_4" ;;
             *) continue ;;
         esac
         # -HV 2021 matches the runner's dxc invocation; -WX makes a warning an

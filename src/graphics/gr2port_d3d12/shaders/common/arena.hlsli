@@ -28,6 +28,8 @@
 #ifndef GR2_COMMON_ARENA_HLSLI
 #define GR2_COMMON_ARENA_HLSLI
 
+#include "descriptors.hlsli"
+
 // ---------------------------------------------------------------------------
 // Arena kinds. Must match Gr2Port::D3D12::ArenaKind in arena.h.
 // ---------------------------------------------------------------------------
@@ -47,8 +49,8 @@ struct ArenaRef {
 };
 
 // The arena table lives in the root signature's first 32-bit constants:
-// b0 holds the SRV index of each arena, so a shader can index
-// ResourceDescriptorHeap[] without a descriptor table.
+// b0 holds the buffer-table index of each arena, so a shader reaches an arena's
+// buffer through DescriptorRaw() with no per-draw table binding.
 //   b0.x = geometry, b0.y = scene, b0.z = skinning, b0.w = particles,
 //   b1.x = scratch.
 struct ArenaTable {
@@ -107,18 +109,19 @@ ArenaRef ArenaAt(ArenaRef ref, uint index, uint element_bytes) {
 // ---------------------------------------------------------------------------
 // Loads
 //
-// ResourceDescriptorHeap[] is SM 6.6 direct heap indexing: the SRV at index N
-// is used without binding a descriptor table, which is the D3D12 equivalent of
-// Vulkan's runtimeDescriptorArray. NonUniformResourceIndex is required because
-// the index is a per-draw value the compiler cannot prove is uniform.
+// The arena's buffers are reached through the typed ByteAddressBuffer tables in
+// common/descriptors.hlsli -- the SM 6.4 form of what SM 6.6 spells as direct
+// heap indexing, and the D3D12 equivalent of Vulkan's runtimeDescriptorArray.
+// NonUniformResourceIndex is required because the index is a per-draw value the
+// compiler cannot prove is uniform.
 // ---------------------------------------------------------------------------
 
 ByteAddressBuffer ArenaBuffer(ArenaRef ref, ArenaTable table) {
-    return ResourceDescriptorHeap[NonUniformResourceIndex(ArenaIndex(ref, table))];
+    return DescriptorRaw(ArenaIndex(ref, table));
 }
 
 RWByteAddressBuffer ArenaBufferRw(ArenaRef ref, ArenaTable table) {
-    return ResourceDescriptorHeap[NonUniformResourceIndex(ArenaIndex(ref, table))];
+    return DescriptorRawRw(ArenaIndex(ref, table));
 }
 
 uint ArenaLoad(ArenaRef ref, ArenaTable table) {

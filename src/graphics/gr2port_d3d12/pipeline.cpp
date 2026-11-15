@@ -10,6 +10,10 @@
 
 #include <d3d12sdklayers.h>
 
+// The descriptor tables the root signature declares. They are shared with the
+// shader header of the same name, so the spaces and counts cannot drift.
+#include "graphics/gr2port_d3d12/descriptors.h"
+
 #include "common/logging/log.h"
 
 namespace Gr2Port::D3D12 {
@@ -61,11 +65,24 @@ u64 HashScalar(u64 hash, u64 value) {
     return hash;
 }
 
-/// The nine bytes a D3D12_ROOT_SIGNATURE_DESC needs no C++ helper for: a
-/// descriptor table over the shader-visible heaps is deliberately *absent*,
-/// because SM 6.6's ResourceDescriptorHeap[] reaches the heap without one.
+/// The root parameters: three blocks of 32-bit constants and one descriptor
+/// table per descriptor kind.
+///
+/// The tables are here because the console caps at Shader Model 6.4, which has no
+/// ResourceDescriptorHeap[] -- and a 6.6 module does not load at all on that
+/// driver, so this is not a fallback path but the only path. Each table is bound
+/// to the same range of the same heap (its base), with a different register
+/// space; the shader's declared element type is what decides how a descriptor in
+/// that range is read. See shaders/common/descriptors.hlsli, which declares the
+/// same arrays at the same spaces and sizes.
 struct RootParameterSet {
-    D3D12_ROOT_PARAMETER parameters[3];
+    /// b0, b1, b2, then one table per descriptor kind.
+    static constexpr u32 kRootConstantCount = 3;
+    static constexpr u32 kTableCount = DescriptorTables::kCount;
+    static constexpr u32 kParameterCount = kRootConstantCount + kTableCount;
+
+    D3D12_ROOT_PARAMETER parameters[kParameterCount];
+    D3D12_DESCRIPTOR_RANGE ranges[kTableCount];
     D3D12_ROOT_SIGNATURE_DESC desc;
 };
 
@@ -91,10 +108,32 @@ void BuildRootParameters(RootParameterSet& set) {
     set.parameters[2].Constants.Num32BitValues = RootConstants::PassBytes / 4;
     set.parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-    set.desc.NumParameters = 3;
+    // One descriptor table per kind, each over the whole slot space of its heap
+    // and in its own register space. The ranges are identical in offset and count
+    // because they address the same heap; that is intentional, and D3D12 permits
+    // it -- two ranges over one region are two typed views of it, which is
+    // exactly what a handle-indexed descriptor space needs when the shader model
+    // cannot pick the type at run time.
+    for (u32 i = 0; i < DescriptorTables::kCount; ++i) {
+        const DescriptorTables::Descriptor& table = DescriptorTables::kTables[i];
+        D3D12_DESCRIPTOR_RANGE& range = set.ranges[i];
+        range.RangeType = table.range_type;
+        range.NumDescriptors = table.count;
+        range.BaseShaderRegister = 0;
+        range.RegisterSpace = table.space;
+        range.OffsetInDescriptorsFromTableStart = 0;
+
+        D3D12_ROOT_PARAMETER& parameter = set.parameters[RootParameterSet::kRootConstantCount + i];
+        parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        parameter.DescriptorTable.NumDescriptorRanges = 1;
+        parameter.DescriptorTable.pDescriptorRanges = &range;
+        parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    }
+
+    set.desc.NumParameters = RootParameterSet::kParameterCount;
     set.desc.pParameters = set.parameters;
     // Static samplers are not used: the shaders take their samplers out of the
-    // sampler heap by index, because a pass picks a different one (repeating,
+    // sampler table by index, because a pass picks a different one (repeating,
     // clamping, comparison) and a static sampler would have to be baked into the
     // root signature for it.
     set.desc.NumStaticSamplers = 0;
@@ -218,8 +257,11 @@ bool CreateRootSignature(Device& device, RootSignature& out) {
                      HresultToString(hr));
         return false;
     }
-    LOG_INFO(Graphics, "D3D12 pipeline: root signature created ({} bytes of root constants)",
-             RootConstants::ArenaBytes + RootConstants::DrawBytes + RootConstants::PassBytes);
+    LOG_INFO(Graphics,
+             "D3D12 pipeline: root signature created ({} bytes of root constants, {} "
+             "descriptor tables)",
+             RootConstants::ArenaBytes + RootConstants::DrawBytes + RootConstants::PassBytes,
+             DescriptorTables::kCount);
     return true;
 }
 

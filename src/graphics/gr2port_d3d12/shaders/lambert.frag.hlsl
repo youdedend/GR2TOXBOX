@@ -84,8 +84,8 @@ struct PsInput {
 // Two explicit blocks cost nothing and cannot be miscompiled.
 float KeyShadow(PsInput input) {
     Texture2DArray<float> cascades =
-        ResourceDescriptorHeap[NonUniformResourceIndex(g_shadow_map)];
-    SamplerComparisonState sampler = SamplerDescriptorHeap[SMP_COMPARISON];
+        DescriptorDepth(g_shadow_map);
+    SamplerComparisonState sampler = DescriptorComparisonSampler(SMP_COMPARISON);
 
     const float3 first = input.shadow_clip0.xyz / input.shadow_clip0.w;
     if (min(first.x, first.y) >= 0.0 && max(first.x, first.y) <= 1.0) {
@@ -97,7 +97,7 @@ float KeyShadow(PsInput input) {
     }
     // Else the last cascade, which is a single 2D map rather than a slice of the
     // array -- the game keeps it separate because it covers the whole far field.
-    Texture2D<float> last = ResourceDescriptorHeap[NonUniformResourceIndex(g_last_shadow_map)];
+    Texture2D<float> last = DescriptorDepth(g_last_shadow_map);
     const float3 third = input.shadow_clip2.xyz / input.shadow_clip2.w;
     return last.SampleCmpLevelZero(sampler, third.xy, third.z);
 }

@@ -63,7 +63,7 @@ void main(uint3 id : SV_DispatchThreadID) {
     float shown = 1.0;
     float3 light_in = float3(0.0, 0.0, 0.0);
 
-    RWTexture3D<float4> scattered = ResourceDescriptorHeap[NonUniformResourceIndex(g_scattered)];
+    RWTexture3D<float4> scattered = DescriptorRwVolumeF4(g_scattered);
 
     [loop] for (int i = 0; i < int(g_grid.slices); ++i) {
         const float a = float(i) / float(g_grid.slices);

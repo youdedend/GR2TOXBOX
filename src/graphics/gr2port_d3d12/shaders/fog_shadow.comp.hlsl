@@ -66,13 +66,13 @@ void main(uint3 id : SV_DispatchThreadID) {
     // One comparison sample at the top level, as the game's.
     float lit;
     if (cascade == 2u) {
-        Texture2D<float> map = ResourceDescriptorHeap[NonUniformResourceIndex(g_last_shadow_map)];
-        SamplerComparisonState sampler = SamplerDescriptorHeap[SMP_COMPARISON];
+        Texture2D<float> map = DescriptorDepth(g_last_shadow_map);
+        SamplerComparisonState sampler = DescriptorComparisonSampler(SMP_COMPARISON);
         lit = map.SampleCmpLevelZero(sampler, coord.xy, coord.z);
     } else {
         Texture2DArray<float> map =
-            ResourceDescriptorHeap[NonUniformResourceIndex(g_shadow_map)];
-        SamplerComparisonState sampler = SamplerDescriptorHeap[SMP_COMPARISON];
+            DescriptorDepth(g_shadow_map);
+        SamplerComparisonState sampler = DescriptorComparisonSampler(SMP_COMPARISON);
         lit = map.SampleCmpLevelZero(sampler, float3(coord.xy, float(cascade)), coord.z);
     }
 
@@ -81,6 +81,6 @@ void main(uint3 id : SV_DispatchThreadID) {
     const float3 last = FogLastCell(corner, light.view_to_previous, fog.projection);
     const float previous = SampleVolumeLevel(g_last_shadow, last, 0.0).r;
 
-    RWTexture3D<float> shadow_out = ResourceDescriptorHeap[NonUniformResourceIndex(g_shadow_out)];
+    RWTexture3D<float> shadow_out = DescriptorRwVolumeF1(g_shadow_out);
     shadow_out[cell] = lerp(previous, lit, Blend);
 }

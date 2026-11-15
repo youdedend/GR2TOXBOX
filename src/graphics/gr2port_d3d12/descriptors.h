@@ -27,6 +27,64 @@ namespace Gr2Port::D3D12 {
 ///
 /// Slots are allocated in blocks from a free list, so a texture that comes and
 /// goes (a streaming mip, a movie frame) does not fragment the heap.
+/// The descriptor tables the root signature declares, one per descriptor kind.
+///
+/// Shader Model 6.4 has no ResourceDescriptorHeap[], and the console's driver
+/// stops at 6.4, so the shaders reach the bindless heap through these instead:
+/// each is a descriptor table over the *same* range of the *same* heap, in its
+/// own register space, and the shader's declared element type decides how a
+/// descriptor in that range is read. A handle stays one u32 index into the heap.
+///
+/// These values are the other half of shaders/common/descriptors.hlsli: the
+/// spaces, the counts and the order must match it exactly. The range type is the
+/// one the table's elements need -- SRV tables for read-only views, UAV for the
+/// writable ones, SAMPLER for the two sampler tables.
+namespace DescriptorTables {
+
+struct Descriptor {
+    /// The register space the shader declares this table in.
+    u32 space;
+    D3D12_DESCRIPTOR_RANGE_TYPE range_type;
+    /// The element count the shader declares, which is what bounds an index.
+    u32 count;
+};
+
+/// Deliberately not constexpr-friendly: D3D12_DESCRIPTOR_RANGE_TYPE is an enum
+/// from the SDK, and the array below is read at root-signature build time only.
+/// Kept as a plain array so the order is readable against the shader header.
+inline constexpr u32 kSrvCount = 65536;
+inline constexpr u32 kSamplerCount = 256;
+
+inline const Descriptor kTables[] = {
+    // Mirrors shaders/common/descriptors.hlsli, in the same order.
+    {100, D3D12_DESCRIPTOR_RANGE_TYPE_SRV, kSrvCount},   // g_tex2d
+    {101, D3D12_DESCRIPTOR_RANGE_TYPE_SRV, kSrvCount},   // g_volume
+    {102, D3D12_DESCRIPTOR_RANGE_TYPE_SRV, kSrvCount},   // g_cube
+    {103, D3D12_DESCRIPTOR_RANGE_TYPE_SRV, kSrvCount},   // g_tex2d_f
+    {104, D3D12_DESCRIPTOR_RANGE_TYPE_UAV, kSrvCount},   // g_rw3d_f4
+    {105, D3D12_DESCRIPTOR_RANGE_TYPE_UAV, kSrvCount},   // g_rw3d_f2
+    {106, D3D12_DESCRIPTOR_RANGE_TYPE_UAV, kSrvCount},   // g_rw3d_f1
+    {107, D3D12_DESCRIPTOR_RANGE_TYPE_SRV, kSrvCount},   // g_raw
+    {108, D3D12_DESCRIPTOR_RANGE_TYPE_UAV, kSrvCount},   // g_raw_rw
+    {109, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, kSamplerCount},  // g_smp
+    {110, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, kSamplerCount},  // g_smp_cmp
+};
+
+inline constexpr u32 kCount = sizeof(kTables) / sizeof(kTables[0]);
+
+/// Root parameter indices, matching the root signature's order: the three
+/// constant blocks first, then the tables in the order above. `command.cpp` binds
+/// against these rather than against literals.
+inline constexpr u32 kFirstTableParameter = 3;
+
+/// The first SRV/UAV table's index and the first sampler table's, so a caller can
+/// bind every view table to one range and both sampler tables to the other
+/// without repeating the arithmetic.
+inline constexpr u32 kFirstSrvTable = 0;
+inline constexpr u32 kFirstSamplerTable = 9;
+
+} // namespace DescriptorTables
+
 struct DescriptorSlot {
     u32 index = 0;
     /// Set when the slot refers to a sampler table rather than an SRV table.

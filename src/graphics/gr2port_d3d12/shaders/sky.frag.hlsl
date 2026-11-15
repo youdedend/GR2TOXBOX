@@ -102,8 +102,8 @@ struct PsInput {
 // A cube-map sample at the top mip, through the clamping sampler. GLSL's
 // textureLod(samplerCube(cubes[i], clamp_sampler), dir, 0.0).
 float3 CubeMap(Sky sky, uint index, float3 ray) {
-    TextureCube cube = ResourceDescriptorHeap[NonUniformResourceIndex(sky.cubes[index])];
-    SamplerState sampler = SamplerDescriptorHeap[SMP_LINEAR_CLAMP];
+    TextureCube<float4> cube = DescriptorCube(sky.cubes[index]);
+    SamplerState sampler = DescriptorSampler(SMP_LINEAR_CLAMP);
     // GLSL's mat3(m) * ray is the upper-left 3x3 of the matrix in column-major
     // order, which is mul(m3, ray) with HLSL's column-vector convention.
     const float4x4 transform = sky.transforms[index];

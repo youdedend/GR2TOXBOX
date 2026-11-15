@@ -85,6 +85,15 @@ struct CommandList {
     /// this is called by BeginRenderPass rather than by each pass.
     void SetArenaTable(const ArenaSet& arenas, const BindlessHeap& descriptors) const;
 
+    /// Binds the descriptor tables the shaders index handles through.
+    ///
+    /// Every table is bound to the same range of the same heap: a handle is one
+    /// index into it, and the shader's declared element type is what decides how
+    /// a descriptor at that index is read. There is nothing per-draw to update --
+    /// unlike the SM 6.6 direct-heap form this replaces, which needed no binding
+    /// at all, this needs the same eleven bindings once per list.
+    void SetDescriptorTables(const BindlessHeap& descriptors) const;
+
     /// Per-draw constants (b1).
     void SetDrawConstants(const void* data, u32 bytes) const;
     /// Per-pass constants (b2).

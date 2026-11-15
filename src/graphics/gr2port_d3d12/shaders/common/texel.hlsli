@@ -7,10 +7,12 @@
 // GLSL declares `uniform texture2D textures[]` and samples it as
 // `texture(sampler2D(textures[nonuniformEXT(h)], texture_sampler), uv)`. D3D12
 // splits that in two: the descriptor heap holds the SRVs, and the samplers live
-// in a separate shader-visible heap. SM 6.6's direct heap indexing reaches both:
+// in a separate shader-visible heap. Both are reached through descriptor tables,
+// because the console caps at Shader Model 6.4 -- see common/descriptors.hlsli
+// for why each resource kind gets its own table and what a handle means:
 //
-//   Texture2D t = ResourceDescriptorHeap[NonUniformResourceIndex(h)];
-//   SamplerState s = SamplerDescriptorHeap[smp];
+//   Texture2D<float4> t = DescriptorTex2D(h);
+//   SamplerState s = DescriptorSampler(SMP_LINEAR_REPEAT);
 //
 // Handles are the same 32-bit indices the host writes into draw records, so a
 // handle of 0 is the null descriptor slot -- a defined black / clamp result
@@ -24,6 +26,8 @@
 #ifndef GR2_COMMON_TEXEL_HLSLI
 #define GR2_COMMON_TEXEL_HLSLI
 
+#include "descriptors.hlsli"
+
 // Sampler heap indices. Must match Gr2Port::D3D12::BindlessHeap's startup
 // configuration in descriptors.cpp.
 #define SMP_NULL 0
@@ -35,15 +39,15 @@
 // A sampled colour at uv, through the repeating bilinear sampler that upstream's
 // texture_sampler is.
 float4 SampleTex(uint handle, float2 uv) {
-    Texture2D texture = ResourceDescriptorHeap[NonUniformResourceIndex(handle)];
-    SamplerState sampler = SamplerDescriptorHeap[SMP_LINEAR_REPEAT];
+    Texture2D<float4> texture = DescriptorTex2D(handle);
+    SamplerState sampler = DescriptorSampler(SMP_LINEAR_REPEAT);
     return texture.SampleLevel(sampler, uv, 0.0);
 }
 
 // The same, with a sampler chosen by the caller (presentation uses clamping).
 float4 SampleTexWith(uint handle, uint sampler_index, float2 uv) {
-    Texture2D texture = ResourceDescriptorHeap[NonUniformResourceIndex(handle)];
-    SamplerState sampler = SamplerDescriptorHeap[sampler_index];
+    Texture2D<float4> texture = DescriptorTex2D(handle);
+    SamplerState sampler = DescriptorSampler(sampler_index);
     return texture.SampleLevel(sampler, uv, 0.0);
 }
 
@@ -52,7 +56,7 @@ float4 SampleTexWith(uint handle, uint sampler_index, float2 uv) {
 // the caller to have done; returning zero past the edge keeps a resolution change
 // from reading a neighbouring resource out of the descriptor heap.
 float4 FetchTexel(uint handle, int2 pixel, uint mip) {
-    Texture2D texture = ResourceDescriptorHeap[NonUniformResourceIndex(handle)];
+    Texture2D<float4> texture = DescriptorTex2D(handle);
     uint width;
     uint height;
     // HLSL's Texture2D overload is (mip, out width, out height). The one that
@@ -69,16 +73,16 @@ float4 FetchTexel(uint handle, int2 pixel, uint mip) {
 // with dFdx/dFdy, which keeps the normal map's mip selection equal to the
 // surface's instead of to the marched (and therefore aliased) coordinates.
 float4 SampleTexGrad(uint handle, float2 uv, float2 dx, float2 dy) {
-    Texture2D texture = ResourceDescriptorHeap[NonUniformResourceIndex(handle)];
-    SamplerState sampler = SamplerDescriptorHeap[SMP_LINEAR_REPEAT];
+    Texture2D<float4> texture = DescriptorTex2D(handle);
+    SamplerState sampler = DescriptorSampler(SMP_LINEAR_REPEAT);
     return texture.SampleGrad(sampler, uv, dx, dy);
 }
 
 // A Texture3D, for the volumetric fog: the same bindless heap and the same
 // per-handle indexing, with an explicit mip.
 float4 SampleVolumeLevel(uint handle, float3 uv, float level) {
-    Texture3D volume = ResourceDescriptorHeap[NonUniformResourceIndex(handle)];
-    SamplerState sampler = SamplerDescriptorHeap[SMP_LINEAR_REPEAT];
+    Texture3D<float4> volume = DescriptorVolume(handle);
+    SamplerState sampler = DescriptorSampler(SMP_LINEAR_REPEAT);
     return volume.SampleLevel(sampler, uv, level);
 }
 
@@ -86,7 +90,7 @@ float4 SampleVolumeLevel(uint handle, float3 uv, float level) {
 // which the fog and decal shaders use to convert a pixel coordinate into a uv.
 // The top level is the default overload's level, so the mip is not passed.
 uint2 FetchTexelSize(uint handle) {
-    Texture2D texture = ResourceDescriptorHeap[NonUniformResourceIndex(handle)];
+    Texture2D<float4> texture = DescriptorTex2D(handle);
     uint width;
     uint height;
     texture.GetDimensions(width, height);

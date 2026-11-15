@@ -47,6 +47,6 @@ void main(uint3 id : SV_DispatchThreadID) {
         sum += SampleVolumeLevel(g_map, start + float(k) * step_size, 0.0).r;
     }
 
-    RWTexture3D<float> darkness = ResourceDescriptorHeap[NonUniformResourceIndex(g_darkness)];
+    RWTexture3D<float> darkness = DescriptorRwVolumeF1(g_darkness);
     darkness[texel] = StepShare * sum;
 }

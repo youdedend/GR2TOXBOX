@@ -93,7 +93,20 @@ enum D3D12_STENCIL_OP { D3D12_STENCIL_OP_KEEP = 1, D3D12_STENCIL_OP_REPLACE = 3 
 enum D3D12_FILL_MODE { D3D12_FILL_MODE_SOLID = 0 };
 enum D3D12_CONSERVATIVE_RASTERIZATION_MODE { D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF = 0 };
 enum D3D12_INDEX_BUFFER_STRIP_CUT_VALUE { D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED = 0 };
-enum D3D12_ROOT_PARAMETER_TYPE { D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS = 2 };
+enum D3D12_ROOT_PARAMETER_TYPE {
+    D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE = 0,
+    D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS = 2
+};
+// The four range kinds the descriptor tables use. Adding them here is what makes
+// the root-signature build of the port's table path checkable on this host: the
+// values are the real ones, and DescriptorTables' range types are compared against
+// them in descriptors.h.
+enum D3D12_DESCRIPTOR_RANGE_TYPE {
+    D3D12_DESCRIPTOR_RANGE_TYPE_SRV = 0,
+    D3D12_DESCRIPTOR_RANGE_TYPE_UAV = 1,
+    D3D12_DESCRIPTOR_RANGE_TYPE_CBV = 2,
+    D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER = 3
+};
 enum D3D12_SHADER_VISIBILITY { D3D12_SHADER_VISIBILITY_ALL = 0 };
 enum D3D12_ROOT_SIGNATURE_FLAGS { D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT = 1 };
 enum D3D_ROOT_SIGNATURE_VERSION { D3D_ROOT_SIGNATURE_VERSION_1 = 1 };
@@ -221,8 +234,20 @@ struct D3D12_COMPUTE_PIPELINE_STATE_DESC {
     D3D12_PIPELINE_STATE_FLAGS Flags;
 };
 struct D3D12_ROOT_CONSTANTS { UINT ShaderRegister, RegisterSpace, Num32BitValues; };
+struct D3D12_DESCRIPTOR_RANGE {
+    D3D12_DESCRIPTOR_RANGE_TYPE RangeType;
+    UINT NumDescriptors;
+    UINT BaseShaderRegister;
+    UINT RegisterSpace;
+    UINT OffsetInDescriptorsFromTableStart;
+};
+struct D3D12_ROOT_DESCRIPTOR_TABLE {
+    UINT NumDescriptorRanges;
+    const D3D12_DESCRIPTOR_RANGE* pDescriptorRanges;
+};
 struct D3D12_ROOT_PARAMETER {
     D3D12_ROOT_PARAMETER_TYPE ParameterType;
+    D3D12_ROOT_DESCRIPTOR_TABLE DescriptorTable;
     D3D12_ROOT_CONSTANTS Constants;
     D3D12_SHADER_VISIBILITY ShaderVisibility;
 };
@@ -247,6 +272,12 @@ struct ID3D12GraphicsCommandList7 : ID3D12GraphicsCommandList {
     virtual void SetComputeRootSignature(void*) = 0;
     virtual void SetGraphicsRoot32BitConstants(UINT, UINT, const void*, UINT) = 0;
     virtual void SetComputeRoot32BitConstants(UINT, UINT, const void*, UINT) = 0;
+    // The descriptor-table bindings. Present here because the port binds its
+    // tables every list -- this is the whole of what replaces SM 6.6 direct heap
+    // indexing, so its absence from the stub would have left the table path
+    // uncheckable on this host.
+    virtual void SetGraphicsRootDescriptorTable(UINT, D3D12_GPU_DESCRIPTOR_HANDLE) = 0;
+    virtual void SetComputeRootDescriptorTable(UINT, D3D12_GPU_DESCRIPTOR_HANDLE) = 0;
     virtual void SetPipelineState(void*) = 0;
     virtual void OMSetRenderTargets(UINT, const D3D12_CPU_DESCRIPTOR_HANDLE*, BOOL, const D3D12_CPU_DESCRIPTOR_HANDLE*) = 0;
     virtual void OMSetStencilRef(UINT) = 0;

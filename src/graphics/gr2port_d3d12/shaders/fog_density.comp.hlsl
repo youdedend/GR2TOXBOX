@@ -108,7 +108,7 @@ void main(uint3 id : SV_DispatchThreadID) {
 
     // The output is RG8_UNORM (layout rg8 in the GLSL), so the store is two
     // channels.
-    RWTexture3D<float2> clouds_out = ResourceDescriptorHeap[NonUniformResourceIndex(g_clouds_out)];
+    RWTexture3D<float2> clouds_out = DescriptorRwVolumeF2(g_clouds_out);
     clouds_out[cell] = float2(lerp(kept.r, min(1.0, DensityScale * density), DensityBlend),
                               lerp(kept.g, darkness, DarknessBlend));
 }

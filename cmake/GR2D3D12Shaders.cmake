@@ -114,8 +114,17 @@ function(gr2_hlsl_stage filename out_stage out_suffix)
             "The stage maps to HLSL vs/ps/cs/gs/hs/ds.")
     endif()
     set(${out_stage} "${stage}" PARENT_SCOPE)
-    # DXR / mesh shaders are 6.3+; everything else is 6.6.
-    set(${out_suffix} "${stage}_6_6" PARENT_SCOPE)
+    # Every stage targets Shader Model 6.4, not 6.6.
+    #
+    # Xbox in UWP is the constraint: `SraKmd_arden` stops at 6.4, and a 6.6
+    # module does not load there. The SM 6.6 feature the renderer used --
+    # ResourceDescriptorHeap[] direct heap indexing -- is exactly what 6.4 lacks,
+    # so the shaders reach the same descriptor heap through a table instead (see
+    # shaders/common/texel.hlsli and the root signature in pipeline.cpp).
+    #
+    # 6.4 is also a subset of what a 6.6-capable desktop driver accepts, so this
+    # is not a desktop downgrade: one build of every stage serves both.
+    set(${out_suffix} "${stage}_6_4" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -170,6 +179,10 @@ function(gr2port_add_hlsl_shader FILENAME SYMBOL)
         "-I${GR2_D3D12_SHADER_DIR}/common"
     )
 
+    # No -enable-16bit-types. Native 16-bit shader operations are absent on Xbox
+    # in UWP, where the driver rejects the flag, and `half` then means 32-bit --
+    # which is the same thing the flag's absence does everywhere else. The
+    # half-precision helpers in common/ are written to be correct either way.
     add_custom_command(
         OUTPUT "${dxil}" "${header}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${out_dir}"
@@ -179,7 +192,6 @@ function(gr2port_add_hlsl_shader FILENAME SYMBOL)
                 -HV 2021
                 -O3
                 -WX
-                -enable-16bit-types
                 -Qstrip_reflect
                 -Qstrip_debug
                 -Fo "${dxil}"

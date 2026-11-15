@@ -91,6 +91,26 @@ void CommandList::SetArenaTable(const ArenaSet& arenas, const BindlessHeap& desc
     list->SetComputeRoot32BitConstants(0, RootConstants::ArenaBytes / 4, table.srv_index, 0);
 }
 
+void CommandList::SetDescriptorTables(const BindlessHeap& descriptors) const {
+    if (!list) {
+        return;
+    }
+    // All view tables address the same heap range; only the register space
+    // differs, and that is baked into the root signature. So the GPU handles are
+    // the heap bases, and binding each table is the same two values repeated.
+    const D3D12_GPU_DESCRIPTOR_HANDLE srv_base = descriptors.SrvTableGpu();
+    const D3D12_GPU_DESCRIPTOR_HANDLE sampler_base = descriptors.SamplerTableGpu();
+
+    for (u32 i = 0; i < DescriptorTables::kCount; ++i) {
+        const u32 parameter = DescriptorTables::kFirstTableParameter + i;
+        const bool is_sampler = DescriptorTables::kTables[i].range_type ==
+                                D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+        const D3D12_GPU_DESCRIPTOR_HANDLE base = is_sampler ? sampler_base : srv_base;
+        list->SetGraphicsRootDescriptorTable(parameter, base);
+        list->SetComputeRootDescriptorTable(parameter, base);
+    }
+}
+
 void CommandList::SetDrawConstants(const void* data, u32 bytes) const {
     if (!list || !data) {
         return;
@@ -124,10 +144,14 @@ void CommandList::BeginRenderPass(const RenderTarget* targets, u32 target_count,
     SetRootSignature(root);
     SetArenaTable(arenas, descriptors);
 
-    // The heap the shaders index directly. Set once per list; D3D12 keeps it
-    // across pipeline changes and the backend never changes heaps.
+    // The heaps the shaders reach through the descriptor tables. Set once per
+    // list; D3D12 keeps them across pipeline changes and the backend never
+    // changes heaps.
     ID3D12DescriptorHeap* heaps[] = {descriptors.SrvHeap(), descriptors.SamplerHeap()};
     list->SetDescriptorHeaps(2, heaps);
+    // The tables themselves. SetRootSignature above installed the signature that
+    // declares them, and every one of them addresses this heap from its base.
+    SetDescriptorTables(descriptors);
 
     for (u32 i = 0; i < target_count; ++i) {
         if (targets[i].resource) {

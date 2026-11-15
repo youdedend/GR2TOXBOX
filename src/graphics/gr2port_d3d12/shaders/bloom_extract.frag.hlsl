@@ -28,9 +28,9 @@ cbuffer BloomExtractTextures : register(b2) {
     uint g_scene_depth;
 };
 
-// The arena table: the SRV index of each arena, the value the arena accessors
-// below index ResourceDescriptorHeap[] with. Declared by every stage that
-// reads the arena, because a cbuffer must be visible where it is used.
+// The arena table: the buffer-table index of each arena, the value the arena
+// accessors below pass to DescriptorRaw(). Declared by every stage that reads
+// the arena, because a cbuffer must be visible where it is used.
 cbuffer ArenaConstants : register(b1) {
     ArenaTable g_arena;
 };

@@ -57,6 +57,6 @@ void main(uint3 id : SV_DispatchThreadID) {
     const float h = humidity.z + humidity.w * cumulus + edge * edge_humidity;
     const float kept = saturate((noise - (1.0 - h)) / edges.x);
 
-    RWTexture3D<float> map = ResourceDescriptorHeap[NonUniformResourceIndex(g_map)];
+    RWTexture3D<float> map = DescriptorRwVolumeF1(g_map);
     map[texel] = pow(kept, edges.y);
 }
