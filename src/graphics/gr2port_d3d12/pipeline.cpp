@@ -399,6 +399,17 @@ bool PipelineCache::Create(Device& device, const RootSignature& root) {
     // The driver's own library: D3D12 recompiles a pipeline state from scratch
     // without one, which for several thousand variants is most of the game's
     // start-up.
+    //
+    // Not on Xbox in UWP. `SraKmd_arden` removes the device as soon as
+    // CreatePipelineLibrary is called -- no error return, a device removal -- so
+    // the call itself is the crash. The DXIL blobs are still cached on disk below,
+    // which is what saves the shader translation; what is lost is the driver's
+    // own PSO cache, and states are then created each run.
+#if defined(GR2_XBOX_UWP)
+    LOG_INFO(Graphics,
+             "D3D12 pipeline: no driver pipeline library on this platform (it removes "
+             "the device); DXIL is cached on disk and states are created each run.");
+#else
     if (device.device) {
         const HRESULT hr = device.device->CreatePipelineLibrary(
             nullptr, 0, IID_PPV_ARGS(library_.GetAddressOf()));
@@ -412,6 +423,7 @@ bool PipelineCache::Create(Device& device, const RootSignature& root) {
             library_.Reset();
         }
     }
+#endif
     return true;
 }
 
@@ -523,8 +535,16 @@ bool PipelineCache::LoadLibrary(const wchar_t* path) {
     // ID3D12PipelineLibrary has Serialize but no Deserialize: the interface was
     // designed so that deserialisation happens where the library is created.
     ComPtr<ID3D12PipelineLibrary> loaded;
+#if defined(GR2_XBOX_UWP)
+    // Loading is the same call the driver objects to, and it objects to the call
+    // rather than to what is passed to it; see Create() above. Report the cache as
+    // inapplicable so the caller rebuilds, which is where a library-less run ends
+    // up anyway.
+    const HRESULT hr = E_NOTIMPL;
+#else
     const HRESULT hr = device_->device->CreatePipelineLibrary(
         bytes.data(), bytes.size(), IID_PPV_ARGS(loaded.GetAddressOf()));
+#endif
     if (SUCCEEDED(hr)) {
         std::lock_guard lock{mutex_};
         library_ = std::move(loaded);

@@ -54,18 +54,30 @@ void ResolveCaps(IDXGIAdapter4* adapter, ID3D12Device8* device, bool tearing, Ca
     // shader model version -- there is no ShaderModel member and no
     // "what model does this device support" query, because a D3D12 device supports
     // every SM the runtime can compile. SM 6.6 is therefore a property of the
-    // build (dxc was given -T *_6_6) rather than of the device, and what has to be
-    // checked at runtime is the features the SM 6.6 shaders depend on.
-    //
+    // build (dxc's -T gives the ceiling the driver accepts) rather than of the
+    // device, and what has to be checked at runtime is the features the shaders
+    // depend on. This build targets *_6_4, the Xbox in UWP ceiling.
     // ResourceDescriptorHeap[] needs resource binding tier 3, checked below.
+    //
+    // Native 16-bit shader operations are a separate, genuinely optional feature.
+    // They are absent on Xbox in UWP, and the shaders' half-precision path is
+    // written to cope. Reading them as the answer to "is SM 6.6 available?"
+    // conflated two things: a device without 16-bit ops was reported as unable to
+    // run 6.6 shaders at all, and the check further down then refused to start.
     D3D12_FEATURE_DATA_D3D12_OPTIONS4 options4{};
-    if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS4, &options4,
-                                              sizeof(options4)))) {
-        // 16-bit ops are what the half-precision path in the shaders uses.
-        caps.shader_model_6_6 = options4.Native16BitShaderOpsSupported != FALSE;
-    } else {
-        caps.shader_model_6_6 = false;
-    }
+    caps.native_16bit_ops =
+        SUCCEEDED(device->CheckFeatureSupport(D3D_FEATURE_D3D12_OPTIONS4, &options4,
+                                              sizeof(options4))) &&
+        options4.Native16BitShaderOpsSupported != FALSE;
+
+    // Shader Model 6.6 needs no query of its own: it is a property of what the
+    // build targeted. Xbox in UWP stops at 6.4 (`SraKmd_arden`), which is what
+    // every stage here is compiled for anyway.
+#if defined(GR2_XBOX_UWP)
+    caps.shader_model_6_6 = false;
+#else
+    caps.shader_model_6_6 = true;
+#endif
 
     // Bindless: the renderer indexes ResourceDescriptorHeap[] directly, which
     // D3D12 exposes for SM 6.6 resources on 12_1 hardware. There is no separate
@@ -77,6 +89,7 @@ void ResolveCaps(IDXGIAdapter4* adapter, ID3D12Device8* device, bool tearing, Ca
                                               sizeof(options)))) {
         tier3 = options.ResourceBindingTier == D3D12_RESOURCE_BINDING_TIER_3;
     }
+    caps.binding_tier3 = tier3;
     caps.bindless = tier3 && caps.shader_model_6_6;
 
     // Raytracing is optional (debug visualisation only). XBOX_SERIES_X_DEVICE
@@ -230,14 +243,24 @@ bool CreateDevice(const DeviceDesc& desc, Device& out) {
     const bool tearing = EnableTearing(out.factory.Get(), desc.allow_tearing && !out.core_window);
 
     // --- Device ------------------------------------------------------------
-    // Feature level 12_1 is the floor: both Xbox Series X and Series S expose
-    // 12_1, and every PSO in this backend is compiled for SM 6.6 against it.
-    // 12_2 is offered first where the driver allows it; 12_1 is the contract.
+    // The feature level this build asks for. On Xbox in UWP it has to be 11_0:
+    // `SraKmd_arden` reports 11_0 and refuses a 12_1 device outright, so asking
+    // for 12_1 there is a device-creation failure, not a downgrade. Desktop
+    // keeps 12_1, which is what the D3D12 renderer is written against.
+    //
+    // Feature level and shader model are separate ceilings on this driver: an
+    // 11_0 device still accepts Shader Model 6.4 DXIL. Every stage is compiled
+    // for 6.4 for exactly that reason.
+#if defined(GR2_XBOX_UWP)
+    constexpr D3D_FEATURE_LEVEL kFeatureLevel = D3D_FEATURE_LEVEL_11_0;
+#else
+    constexpr D3D_FEATURE_LEVEL kFeatureLevel = D3D_FEATURE_LEVEL_12_1;
+#endif
 
-    hr = D3D12CreateDevice(out.adapter.Get(), D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&out.device));
+    hr = D3D12CreateDevice(out.adapter.Get(), kFeatureLevel, IID_PPV_ARGS(&out.device));
     if (FAILED(hr)) {
-        LOG_CRITICAL(Graphics, "D3D12: D3D12CreateDevice failed: {} (FL 12_1 is required)",
-                     HresultToString(hr));
+        LOG_CRITICAL(Graphics, "D3D12: D3D12CreateDevice failed: {} (FL {:#x} is required)",
+                     HresultToString(hr), static_cast<u32>(kFeatureLevel));
         return false;
     }
     // No GetFeatureLevel() round-trip: D3D12CreateDevice above already answered
@@ -301,11 +324,15 @@ bool CreateDevice(const DeviceDesc& desc, Device& out) {
              out.caps.dedicated_vram / 1_MB, out.caps.bindless, out.caps.tearing,
              out.core_window);
 
-    if (!out.caps.shader_model_6_6) {
-        LOG_CRITICAL(Graphics,
-                     "D3D12: the device does not accept Shader Model 6.6, which every "
-                     "shader in this backend is compiled for");
-        return false;
+    // Not a start condition any more. Every stage is compiled for *_6_4, which is
+    // both what Xbox in UWP accepts and a subset of what a 6.6-capable desktop
+    // driver takes. Whether the *bindless* path is usable is a separate question,
+    // answered by caps.bindless: the root signature and the shader header follow
+    // it, and the table path is the one that works on the console.
+    if (!out.caps.bindless) {
+        LOG_INFO(Graphics,
+                 "D3D12: ResourceDescriptorHeap[] unavailable (needs binding tier 3 and "
+                 "SM 6.6); descriptors are reached through a table instead");
     }
 
     const u64 budget = Core::Xbox::EffectiveD3d12HeapBudget();
