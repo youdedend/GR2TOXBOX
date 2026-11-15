@@ -137,14 +137,21 @@ Copy-Item "docs/QUICKSTART-XBOX.txt" (Join-Path $OutDir "QUICKSTART-XBOX.txt") -
 # 3. Resource index (makepri)
 # ---------------------------------------------------------------------------
 $makepri = Find-SdkTool "makepri.exe"
-Push-Location $StageDir
+# Resolve the staging directory before changing into it. Everything below runs
+# with the staging directory as the working directory, so a relative $StageDir
+# would resolve against itself -- Join-Path $StageDir 'AppxManifest.xml' from
+# inside the staging directory produces
+# staging\staging\AppxManifest.xml, and the only symptom is a "cannot find path"
+# from whichever line reads it first.
+$StageFull = (Resolve-Path $StageDir).Path
+Push-Location $StageFull
 try {
     # The qualifier set has to cover every language the manifest declares.
     # <Resource Language> in Package.appxmanifest lists en-us, ja-jp and ko-kr, and a
     # package whose PRI was built for en-US alone is rejected with a manifest/ PRI
     # mismatch -- which reads as a packaging error rather than a one-word omission.
     # Read the list from the manifest so the two cannot drift.
-    $manifestXml = [xml](Get-Content (Join-Path $StageDir "AppxManifest.xml") -Raw)
+    $manifestXml = [xml](Get-Content (Join-Path $StageFull "AppxManifest.xml") -Raw)
     $languages = @($manifestXml.Package.Resources.Resource |
         ForEach-Object { $_.Language } | Where-Object { $_ })
     if ($languages.Count -eq 0) { $languages = @("en-US") }
@@ -162,7 +169,7 @@ try {
 } finally {
     Pop-Location
 }
-if (-not (Test-Path (Join-Path $StageDir "resources.pri"))) {
+if (-not (Test-Path (Join-Path $StageFull "resources.pri"))) {
     throw "resources.pri was not produced."
 }
 

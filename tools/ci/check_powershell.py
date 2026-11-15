@@ -146,6 +146,33 @@ def check(path, problems):
             f"nothing, so a check using it silently passes"
         )
 
+    # A relative directory pushed onto the location stack and then used as the
+    # base of a Join-Path: the relative path resolves against itself, so
+    # Push-Location xbox-package/staging followed by
+    # Join-Path xbox-package/staging AppxManifest.xml yields
+    # xbox-package/staging/xbox-package/staging/AppxManifest.xml. That is a run
+    # lost to a "cannot find path" from whichever line reads it first, and it has
+    # happened here once already.
+    for push in re.finditer(r"Push-Location\s+\$(\w+)", src):
+        var = push.group(1)
+        # Only a *relative* directory is a problem. A variable that was resolved
+        # (Resolve-Path, or an absolute path) is the fix, not the bug.
+        resolved = re.search(
+            r"\$" + var + r"\s*=\s*(?:\(\s*Resolve-Path|['\"]?[A-Za-z]:|\$PWD|\$env:)",
+            src[: push.start()],
+        )
+        if resolved:
+            continue
+        pop = src.find("Pop-Location", push.end())
+        span = src[push.end(): pop if pop > 0 else len(src)]
+        for join in re.finditer(r"Join-Path\s+\$" + var + r"\b", span):
+            line = src[: push.end() + join.start()].count("\n") + 1
+            problems.append(
+                f"{path}:{line}: Join-Path uses ${var} inside a block that already "
+                f"did Push-Location ${var} -- the relative path resolves twice. "
+                f"Resolve it once before the Push-Location and use that."
+            )
+
     # Find-SdkTool must name tools that exist in the SDK
     for m in re.finditer(r'Find-SdkTool\s+"([^"]+)"', src):
         tool = m.group(1)
