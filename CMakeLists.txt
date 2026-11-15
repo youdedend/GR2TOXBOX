@@ -1230,7 +1230,12 @@ add_executable(gr2port
 create_target_directory_groups(gr2port)
 
 target_link_libraries(gr2port PRIVATE spdlog::spdlog)
-target_link_libraries(gr2port PRIVATE magic_enum::magic_enum fmt::fmt toml11::toml11 tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui ImGuiFileDialog half::half ZLIB::ZLIB PNG::PNG minimp3 dr_flac)
+target_link_libraries(gr2port PRIVATE magic_enum::magic_enum fmt::fmt toml11::toml11 tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui half::half ZLIB::ZLIB PNG::PNG minimp3 dr_flac)
+# The folder picker is desktop-only: it enumerates drives, which a UWP app cannot
+# do and a console does not have. See the ImGuiFileDialog block in externals/.
+if (NOT GR2_XBOX_UWP)
+    target_link_libraries(gr2port PRIVATE ImGuiFileDialog)
+endif()
 target_link_libraries(gr2port PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 SPIRV-Headers::SPIRV-Headers Vulkan::Headers Zydis::Zydis SDL3::SDL3 pugixml::pugixml)
 target_link_libraries(gr2port PRIVATE stb::headers lfreist-hwinfo::hwinfo nlohmann_json::nlohmann_json miniz::miniz fdk-aac CLI11::CLI11 OpenAL::OpenAL Cpp_Httplib miniupnpc::miniupnpc)
 target_link_libraries(gr2port PRIVATE Freetype::Freetype)

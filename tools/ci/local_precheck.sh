@@ -139,14 +139,26 @@ done
 # so this is the only way to type-check a backend file before a Windows runner
 # does it. Errors from the vendored D3D12MA header are filtered: the stub does
 # not declare the whole of d3d12.h, and that header is not ours to change.
+# "file|defines". The backend surface and ImGui's relay name no Direct3D type --
+# that is the point of them -- so they need the stub for the Windows names but not
+# for DXGI, and they must NOT be given -D_WIN32: SDL's headers take that as a real
+# Windows build and then want <process.h>, which this host does not have. The two
+# files that do include d3d12.h need it.
 D3D12_UNITS=(
-    src/graphics/gr2port_d3d12/pipeline.cpp
-    src/graphics/gr2port_d3d12/command.cpp
+    "src/graphics/gr2port_d3d12/pipeline.cpp|-D_WIN32"
+    "src/graphics/gr2port_d3d12/command.cpp|-D_WIN32"
+    "src/graphics/gr2port_d3d12/backend_surface.cpp|"
+    "src/graphics/gr2port_d3d12/imgui_relay.cpp|"
 )
-for file in "${D3D12_UNITS[@]}"; do
+for entry in "${D3D12_UNITS[@]}"; do
+    file="${entry%%|*}"
+    extra="${entry#*|}"
     [ -f "$file" ] || continue
-    if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/d3d12_stub -D_WIN32 \
-            -fsyntax-only "$file" 2>"$OUT/err"; then
+    # The SDL headers are real here too: ImGui's relay and the backend surface take
+    # SDL events and windows, and a stand-in for them would defeat the point.
+    # shellcheck disable=SC2086
+    if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/d3d12_stub -Iexternals/sdl3/include \
+            -Iexternals/imgui $extra -fsyntax-only "$file" 2>"$OUT/err"; then
         # Only the diagnostics that are not inside the vendored header count.
         grep -E 'error' "$OUT/err" | grep -v 'd3d12ma/' >"$OUT/ours" || true
         if [ -s "$OUT/ours" ]; then

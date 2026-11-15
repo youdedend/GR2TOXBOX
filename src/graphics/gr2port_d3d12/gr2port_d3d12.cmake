@@ -27,6 +27,14 @@ target_sources(gr2port PRIVATE
     ${GR2_D3D12_DIR}/command.h
     ${GR2_D3D12_DIR}/pipeline.cpp
     ${GR2_D3D12_DIR}/pipeline.h
+    # The frontend-facing half of the backend: the renderer's lifetime, the
+    # lost-device log, the game's photos, and ImGui's frame capture. These are the
+    # names the shared capture modules and ImGui's own code call into, and the Vulkan
+    # backend defines them in files that name vk:: types -- so a D3D12 build needs
+    # its own, or it compiles every module and then fails at link on exactly these
+    # symbols. See graphics/gr2port/backend.h for the contract.
+    ${GR2_D3D12_DIR}/backend_surface.cpp
+    ${GR2_D3D12_DIR}/imgui_relay.cpp
     ${GR2_D3D12_DIR}/uwp/uwp_app.cpp
     ${GR2_D3D12_DIR}/uwp/uwp_main.cpp
     ${GR2_D3D12_DIR}/uwp/uwp_main.h

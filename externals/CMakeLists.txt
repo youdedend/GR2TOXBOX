@@ -281,8 +281,23 @@ if (NOT TARGET stb::headers)
 endif()
 
 # hwinfo
-set(HWINFO_STATIC ON)
-add_subdirectory(hwinfo)
+#
+# hwinfo reads the machine: its Windows backend drives WMI to enumerate the CPU,
+# the battery and the GPU, and WMI is not in the onecore surface a UWP app links
+# against. It failed on the first UWP run that got this far ("unknown type name
+# 'IWbemServices'" from wmi_wrapper.h and "'WBEM_INFINITE' undeclared" from
+# battery.cpp). The console's hardware is known anyway -- it is an Xbox -- so the
+# UWP package takes the headers, for the hwinfo:: type names GR2port.cpp mentions,
+# and no implementation. The caller's use of it is guarded below.
+if (GR2_XBOX_UWP)
+    add_library(lfreist-hwinfo-hwinfo-headers INTERFACE)
+    target_include_directories(lfreist-hwinfo-hwinfo-headers INTERFACE hwinfo/include)
+    add_library(lfreist-hwinfo::hwinfo ALIAS lfreist-hwinfo-hwinfo-headers)
+    message(STATUS "hwinfo: headers only (WMI is not in the UWP surface)")
+else()
+    set(HWINFO_STATIC ON)
+    add_subdirectory(hwinfo)
+endif()
 
 if (APPLE OR ${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
     # date
@@ -341,10 +356,18 @@ add_library(dr_flac INTERFACE)
 target_include_directories(dr_flac INTERFACE dr_flac)
 
 # ImGuiFileDialog
-add_library(ImGuiFileDialog ImGuiFileDialog/ImGuiFileDialog.cpp)
-target_compile_definitions(ImGuiFileDialog PRIVATE USE_STD_FILESYSTEM)
-target_include_directories(ImGuiFileDialog INTERFACE ImGuiFileDialog/)
-target_link_libraries(ImGuiFileDialog PRIVATE Dear_ImGui)
+#
+# The folder picker in settings_dialog_imgui.cpp. Its Windows path enumerates
+# drives with GetLogicalDriveStringsA, which the onecore surface does not have, and
+# a console has no drives to pick from anyway: the packaged app's storage is its
+# own local folder. Skipped on UWP, and the caller falls back to a built-in picker
+# (see the GR2_XBOX_UWP block in settings_dialog_imgui.cpp).
+if (NOT GR2_XBOX_UWP)
+    add_library(ImGuiFileDialog ImGuiFileDialog/ImGuiFileDialog.cpp)
+    target_compile_definitions(ImGuiFileDialog PRIVATE USE_STD_FILESYSTEM)
+    target_include_directories(ImGuiFileDialog INTERFACE ImGuiFileDialog/)
+    target_link_libraries(ImGuiFileDialog PRIVATE Dear_ImGui)
+endif()
 
 #openal
 if (NOT TARGET OpenAL::OpenAL)

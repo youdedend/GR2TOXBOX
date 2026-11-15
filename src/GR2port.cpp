@@ -11,9 +11,17 @@
 #include <sstream>
 #include <fmt/core.h>
 #include <fmt/xchar.h>
+// hwinfo reads the machine through WMI, which a UWP app cannot use (see the
+// hwinfo block in externals/CMakeLists.txt). The console's hardware is fixed and
+// known, so the startup banner below says what it is rather than asking.
+#if !defined(GR2_XBOX_UWP)
 #include <hwinfo/hwinfo.h>
+#endif
 
 #include "GR2port.h"
+#if defined(GR2_XBOX_UWP)
+#include "core/uwp_memory.h"
+#endif
 #include "common/debug.h"
 #include "common/debug_files.h"
 #include "common/elf_info.h"
@@ -471,6 +479,15 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
     // The log starts with the build, the system and the game.
     LOG_INFO(Config, "GR2port build {} of {}", Common::g_scm_desc, Common::g_scm_date);
+#if defined(GR2_XBOX_UWP)
+    // A bug report from a console is worth as much as the platform allows: the
+    // model and the memory pool are what a reader needs, and both are fixed.
+    LOG_INFO(Config, "CPU Model: Xbox Series X|S (8 cores, 16 hardware threads)");
+    LOG_INFO(Config, "Total RAM: {} MiB of guest memory, out of a {} MiB pool",
+             Core::Xbox::EffectiveGuestMemoryCeiling() / (1024 * 1024),
+             Core::Xbox::PlatformPoolBytes / (1024 * 1024));
+    LOG_INFO(Config, "Operating System: Xbox System Software (UWP)");
+#else
     hwinfo::Memory ram;
     hwinfo::OS os;
     const auto cpus = hwinfo::getAllCPUs();
@@ -481,6 +498,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     }
     LOG_INFO(Config, "Total RAM: {} GB", std::round(ram.total_Bytes() / pow(1024, 3)));
     LOG_INFO(Config, "Operating System: {}", os.name());
+#endif
 
     if (param_sfo_exists) {
         LOG_INFO(Loader, "Game id: {} Title: {}", id, title);

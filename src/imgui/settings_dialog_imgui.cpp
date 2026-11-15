@@ -4,7 +4,12 @@
 
 #include <map>
 #include <ranges>
+// The folder picker enumerates drives, which a UWP app has none of and cannot
+// enumerate (see the ImGuiFileDialog block in externals/CMakeLists.txt). The UWP
+// build adds the packaged app's own game-data folder instead, below.
+#if !defined(GR2_XBOX_UWP)
 #include <ImGuiFileDialog.h>
+#endif
 #include <cmrc/cmrc.hpp>
 #include <stb_image.h>
 
@@ -430,6 +435,22 @@ void SettingsWindow::DrawGameFolderManager() {
     ImGui::BeginChild("ContentRegion", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()), child_flags,
                       window_flags);
 
+#if defined(GR2_XBOX_UWP)
+    // A console has no drives to browse and no pointer to browse them with, so the
+    // picker is replaced by the one folder a packaged app has: its own game-data
+    // folder, which the shell created and the package declares. The button is kept
+    // rather than hidden because it is still the way to register that folder as an
+    // install directory, and it is the only gesture that makes sense with a pad.
+    if (ImGui::Button("Add the console's game folder", ImVec2(400.f * uiScale, 0))) {
+        GameInstallDir dir;
+        dir.path = Common::FS::GetUserPath(Common::FS::PathType::GameDataDir);
+        dir.enabled = true;
+        m_GameInstallDirs.push_back(dir);
+        SaveInstallDirs();
+        LOG_INFO(Config, "UWP: added the packaged game folder {}",
+                 Common::FS::PathToUTF8String(dir.path));
+    }
+#else
     if (ImGui::Button("Add Folder", ImVec2(400.f * uiScale, 0))) {
         ImGuiFileDialog::Instance()->OpenDialog("OpenFolder", "Add GR2port game folder", nullptr,
                                                 ".", 1, nullptr,
@@ -465,6 +486,7 @@ void SettingsWindow::DrawGameFolderManager() {
 
         ImGuiFileDialog::Instance()->Close();
     }
+#endif
 
     ImGui::BeginChild("Game Folder List", ImVec2(0, 0), true, child_flags);
 
