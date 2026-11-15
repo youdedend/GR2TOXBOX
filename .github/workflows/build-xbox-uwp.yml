@@ -91,8 +91,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # Microsoft currently publishes v1.9.2609 with the legacy x86_x64
+          # spelling; accept corrected x86_64 too. Both are x86-64 Linux.
           asset=$(gh api repos/microsoft/DirectXShaderCompiler/releases/latest \
-            --jq '.assets[].browser_download_url' | grep -E 'linux_dxc.*\.x86_64\.tar\.gz$' | head -1)
+            --jq '.assets[].browser_download_url' | grep -E 'linux_dxc.*\.(x86_64|x86_x64)\.tar\.gz$' | head -1)
           test -n "$asset"
           mkdir -p "$RUNNER_TEMP/dxc"
           curl --fail --location --retry 3 "$asset" -o "$RUNNER_TEMP/dxc.tar.gz"
