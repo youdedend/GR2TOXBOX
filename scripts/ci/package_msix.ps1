@@ -62,9 +62,20 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 Copy-Item $exe.FullName (Join-Path $StageDir $ExeName)
 
-# Manifest: stamp the build version.
+# Manifest: stamp the build version onto the package Identity, and only there.
+#
+# A blanket -replace on Version="d.d.d.d" rewrites every Version attribute in the
+# file, and there is a second one: TargetDeviceFamily's MinVersion. That left the
+# generated manifest declaring MinVersion="0.1.0.0" -- not a valid OS version --
+# which makeappx accepts and the package then refuses to install, so the failure
+# would have looked like a signing problem on the console rather than a manifest
+# bug here. Anchoring on the Identity element is what keeps the two apart.
 $manifest = Get-Content "uwp/Package.appxmanifest" -Raw
-$manifest = $manifest -replace 'Version="\d+\.\d+\.\d+\.\d+"', "Version=`"$Version`""
+$stamped = $manifest -replace '(?s)(<Identity\b[^>]*?\bVersion=")\d+\.\d+\.\d+\.\d+(")', "`${1}$Version`${2}"
+if ($stamped -eq $manifest -and $manifest -notmatch '<Identity\b[^>]*?\bVersion=') {
+    throw "Package.appxmanifest has no Identity Version to stamp; the manifest layout changed."
+}
+$manifest = $stamped
 Set-Content -Path (Join-Path $StageDir "AppxManifest.xml") -Value $manifest -Encoding utf8
 
 # Visual assets.
@@ -98,7 +109,22 @@ Copy-Item "docs/QUICKSTART-XBOX.txt" (Join-Path $OutDir "QUICKSTART-XBOX.txt") -
 $makepri = Find-SdkTool "makepri.exe"
 Push-Location $StageDir
 try {
-    & $makepri createconfig /cf priconfig.xml /dq en-US /o | Out-Null
+    # The qualifier set has to cover every language the manifest declares.
+    # <Resource Language> in Package.appxmanifest lists en-us, ja-jp and ko-kr, and a
+    # package whose PRI was built for en-US alone is rejected with a manifest/ PRI
+    # mismatch -- which reads as a packaging error rather than a one-word omission.
+    # Read the list from the manifest so the two cannot drift.
+    $manifestXml = [xml](Get-Content (Join-Path $StageDir "AppxManifest.xml") -Raw)
+    $languages = @($manifestXml.Package.Resources.Resource |
+        ForEach-Object { $_.Language } | Where-Object { $_ })
+    if ($languages.Count -eq 0) { $languages = @("en-US") }
+    # makepri wants a comma-separated qualifier list, in BCP-47 casing.
+    $defaultQualifiers = ($languages | ForEach-Object {
+        $parts = $_ -split '-'
+        if ($parts.Count -eq 2) { "$($parts[0])-$($parts[1].ToUpper())" } else { $_ }
+    }) -join ','
+    Write-Host "Resource qualifiers: $defaultQualifiers"
+    & $makepri createconfig /cf priconfig.xml /dq $defaultQualifiers /o | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "makepri createconfig failed ($LASTEXITCODE)" }
     & $makepri new /pr . /cf priconfig.xml /of resources.pri /in AppxManifest.xml /o
     if ($LASTEXITCODE -ne 0) { throw "makepri new failed ($LASTEXITCODE)" }

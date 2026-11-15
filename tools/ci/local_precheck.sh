@@ -255,6 +255,23 @@ if command -v python3 >/dev/null 2>&1; then
     fi
 fi
 
+# The UWP package manifest and its assets, before makeappx sees them. makeappx
+# validates XML and refuses to pack a missing asset, but everything else it accepts
+# and the console rejects at install -- which is a sideload failure a long way from
+# its cause. This checks asset existence (case-sensitively), the namespace prefixes,
+# the capabilities a game on Xbox needs, and the shape of Identity and
+# TargetDeviceFamily.
+if command -v python3 >/dev/null 2>&1; then
+    if ! python3 tools/ci/check_uwp_manifest.py >"$OUT/err" 2>&1; then
+        echo "  FAIL UWP manifest"
+        sed 's/^/    /' "$OUT/err" | head -20
+        annotate_log "uwp/Package.appxmanifest" "$OUT/err"
+        failures=$((failures + 1))
+    else
+        echo "  ok   UWP manifest ($(grep -o '[0-9]* assets' "$OUT/err" | head -1), $(grep -o '[0-9]* capabilities' "$OUT/err" | head -1))"
+    fi
+fi
+
 # The console build's in-memory MP3 path. music_player_service.cpp reads the file
 # with IOFile and hands the bytes to mp3dec_load_buf; the first version of that
 # called IOFile by the wrong name, used operator bool that it does not have, and

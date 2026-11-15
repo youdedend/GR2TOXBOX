@@ -22,7 +22,7 @@ file is right.
 | 5,120 MiB memory budget | **Done, unit-tested** |
 | AppContainer Win32 shims | **Done** |
 | Direct3D 12 device / allocator / descriptors / arena | **Done** |
-| HLSL SM 6.6 shader pipeline (`dxc`, fail-loud) | **Done** |
+| HLSL SM 6.4 shader pipeline (`dxc`, fail-loud) | **Done** |
 | D3D12 command ring, root signature, PSO cache | **Done** |
 | Direct3D 12 frame graph (passes, submits, presenter) | **In progress** |
 | HLSL shader port | **In progress — 31 of 184 stages; 29 `dxc`-verified, 2 newly written** |
@@ -44,8 +44,11 @@ file is right.
   build with `makeappx`/`signtool`, and a release job.
 * The UWP build genuinely configures with `CMAKE_SYSTEM_NAME=WindowsStore`,
   `GR2_XBOX_UWP=ON`, `GR2_RENDERER=D3D12`.
-* HLSL shaders compile with `dxc -T *_6_6 -HV 2021 -WX`. A shader warning is a
-  build failure.
+* HLSL shaders compile with `dxc -T *_6_4 -HV 2021 -WX`. A shader warning is a
+  build failure. SM 6.4 is the ceiling the Xbox Series X|S driver actually
+  honours: SM 6.6's `ResourceDescriptorHeap[]`/`SamplerDescriptorHeap[]` map onto
+  Resource Binding Tier 3 imperfectly and the driver intermittently faults when
+  they are indexed dynamically.
 * **ccache in both Windows jobs, saved even when the job fails**, and the two
   jobs run in parallel. A superseded run is left to finish rather than cancelled:
   cancelling a cold build at minute 18 discards every object it had compiled.
@@ -136,11 +139,15 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
 * Shared HLSL headers: `arena.hlsli`, `vertex.hlsli`, `scene.hlsli`,
   `texel.hlsli`, `surface.hlsli`, `grade.hlsli`, `light.hlsli`, `fog.hlsli`.
 * **Root signature and pipelines** (`pipeline.*`): one root signature for the
-  whole renderer -- three root-constant blocks plus SM 6.6's direct
-  `ResourceDescriptorHeap[]` indexing, which is what replaces upstream's
-  descriptor arrays. `GraphicsPipelineDesc` in the port's own terms, and a
-  `PipelineCache` keyed by a hash of the state and the shader containers, backed
-  by the driver's `ID3D12PipelineLibrary` when the device offers one.
+  whole renderer -- three root-constant blocks plus twelve descriptor-table
+  parameters in distinct `register(..., spaceN)` spaces, which is what replaces
+  upstream's descriptor arrays. Shaders reach them through `Texture2D`/
+  `SamplerState`/`ByteAddressBuffer` arrays indexed with
+  `NonUniformResourceIndex(...)`, the Resource Binding Tier 3 pattern. `GraphicsPipelineDesc` in the port's own terms, and a
+  `PipelineCache` keyed by a hash of the state and the shader containers. On
+  desktop that cache is backed by `ID3D12PipelineLibrary` when the device offers
+  one; on UWP it is **never** created -- `CreatePipelineLibrary` is unsupported
+  there, so the UWP path caches compiled DXIL blobs on disk instead.
 * **Command ring** (`command.*`): one allocator, list and fence value per frame
   in flight, rotated; explicit transitions with named helpers; a render-pass
   begin/end pair that cannot inherit a target from the previous pass; full-screen
