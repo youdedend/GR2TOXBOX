@@ -82,6 +82,21 @@ target_link_libraries(gr2port PRIVATE
 # desktop Win32 import libraries: CreateFile2FromApp, VirtualAllocFromApp and
 # friends only resolve from there.
 if (GR2_XBOX_UWP)
+    # Store's directory supplies /MD import libraries, not the /MT CRT. Use the
+    # OneCore static runtime explicitly for the final title link; applying Store
+    # vcvars globally breaks configure-time executable probes that use /MT.
+    file(TO_CMAKE_PATH "$ENV{VCToolsInstallDir}" _gr2_vctools)
+    find_path(GR2_ONECORE_CRT_DIR NAMES libcmt.lib
+        PATHS "${_gr2_vctools}/lib/onecore/x64"
+              "${_gr2_vctools}/lib/x64/onecore"
+        NO_DEFAULT_PATH REQUIRED)
+    foreach(_runtime_lib libcpmt.lib libvcruntime.lib)
+        if (NOT EXISTS "${GR2_ONECORE_CRT_DIR}/${_runtime_lib}")
+            message(FATAL_ERROR "Missing OneCore static runtime: ${_runtime_lib}")
+        endif()
+    endforeach()
+    target_link_directories(gr2port BEFORE PRIVATE "${GR2_ONECORE_CRT_DIR}")
+    message(STATUS "UWP static CRT: ${GR2_ONECORE_CRT_DIR}")
     target_link_libraries(gr2port PRIVATE WindowsApp)
     target_compile_definitions(gr2port PRIVATE
         GR2_XBOX_UWP=1

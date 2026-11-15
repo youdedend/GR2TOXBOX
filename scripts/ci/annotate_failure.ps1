@@ -132,6 +132,16 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
     $seen[$text] = $true
     Write-Host "::error::$(Escape-Command $text)"
     $emitted++
+    # CMake often puts the actual reason on the next indented line. Emit those
+    # independently rather than attaching them to a long command/header.
+    if ($line -match 'CMake Error') {
+        for ($j = $i + 1; $j -lt [Math]::Min($i + 6, $lines.Count); $j++) {
+            $context = $lines[$j].Trim()
+            if ($context -eq '') { break }
+            Write-Host "::error::CMake detail: $(Escape-Command $context)"
+            $emitted++
+        }
+    }
     # The annotation API tolerates a few dozen per job; beyond that the summary
     # stops being readable anyway.
     if ($emitted -ge 40) { break }
