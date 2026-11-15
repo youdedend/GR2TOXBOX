@@ -51,7 +51,19 @@ const std::array<u8, 6>& NetUtilInternal::GetEthernetAddr() const {
 
 bool NetUtilInternal::RetrieveEthernetAddr() {
     std::scoped_lock lock{m_mutex};
-#ifdef _WIN32
+#if defined(GR2_XBOX_UWP)
+    // GetAdaptersInfo is from iphlpapi, which the packaged build does not link.
+    // The WinRT equivalent is Windows.Networking.Connectivity, which reports the
+    // same information through NetworkAdapter::NetworkAdapterId -- a GUID, not a
+    // MAC -- and derives the hardware address separately on the networks that
+    // expose it. Rather than reach for a WinRT component from here and pull an
+    // interface the rest of this file does not use, say plainly that this build
+    // has no hardware address to report. Every caller already treats a failure
+    // as "no MAC available": net_kernel's SystemHooks returns false and
+    // net_discovery and netctl fall through to their own paths, none of which
+    // read the vector.
+    return false;
+#elif defined(_WIN32)
     std::vector<u8> adapter_infos(sizeof(IP_ADAPTER_INFO));
     ULONG size_infos = sizeof(IP_ADAPTER_INFO);
 

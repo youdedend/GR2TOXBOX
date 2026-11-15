@@ -356,7 +356,14 @@ void SignalHandler(int sig, siginfo_t* info, void* raw_context) {
 #endif
 
 SignalDispatch::SignalDispatch() {
-#if defined(_WIN32)
+#if defined(GR2_XBOX_UWP)
+    // Vectored exception handlers are desktop-only; the packaged build has no
+    // AddVectoredExceptionHandler to register one with. What remains available is
+    // the CRT's own handler, so SIGABRT still aborts through AbortHandler and the
+    // unhandled-exception path is left to the platform's crash reporting. `handle`
+    // stays null, and RemoveHandlers knows not to try to remove one.
+    std::signal(SIGABRT, AbortHandler);
+#elif defined(_WIN32)
     ASSERT_MSG(handle = AddVectoredExceptionHandler(0, SignalHandler),
                "Failed to register exception handler.");
     std::signal(SIGABRT, AbortHandler);
@@ -385,7 +392,11 @@ SignalDispatch::SignalDispatch() {
 void SignalDispatch::RemoveHandlers() {
     // asserting here would get into an infinite loop until too
     // many nested exceptions makes the OS kill the process
-#if defined(_WIN32)
+#if defined(GR2_XBOX_UWP)
+    // Nothing was registered in the constructor, so there is nothing to remove.
+    // Only the CRT handler is put back.
+    std::signal(SIGABRT, SIG_DFL);
+#elif defined(_WIN32)
     if (!(RemoveVectoredExceptionHandler(handle))) {
         LOG_CRITICAL(Core, "Failed to remove exception handler.");
         std::quick_exit(1);

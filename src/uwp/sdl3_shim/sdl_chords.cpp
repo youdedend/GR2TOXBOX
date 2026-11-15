@@ -54,20 +54,33 @@ using Gr2Sdl::Pad::Button;
 // The chords' outputs as SDL reports them, in one table so the two halves of the
 // translation cannot drift apart. Upstream's own input_handler.h defines these
 // touchpad names; they are not SDL's.
+// The button field is typed SDL_GamepadButton, but the synthetic touchpad and
+// style names are not SDL enum values: input_handler.h defines them as
+// `SDL_GAMEPAD_BUTTON_COUNT + n` macros, so they are plain ints. Each entry casts
+// for that reason -- the enum is the narrower type, and the implicit conversion
+// from int is what MSVC rejects here.
 struct SyntheticButton {
     bool Uwp::Chords::ChordOutputs::*output;
     SDL_GamepadButton button;
 };
 
 constexpr SyntheticButton kSyntheticButtons[] = {
-    {&Uwp::Chords::ChordOutputs::touchpad_swipe_up, SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_UP},
-    {&Uwp::Chords::ChordOutputs::touchpad_swipe_down, SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_DOWN},
-    {&Uwp::Chords::ChordOutputs::touchpad_swipe_left, SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_LEFT},
-    {&Uwp::Chords::ChordOutputs::touchpad_swipe_right, SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_RIGHT},
-    {&Uwp::Chords::ChordOutputs::touchpad_center, SDL_GAMEPAD_BUTTON_TOUCHPAD_CENTER},
-    {&Uwp::Chords::ChordOutputs::normal_style, static_cast<SDL_GamepadButton>(GR2_NORMAL_STYLE)},
-    {&Uwp::Chords::ChordOutputs::lunar_style, static_cast<SDL_GamepadButton>(GR2_LUNAR_STYLE)},
-    {&Uwp::Chords::ChordOutputs::jupiter_style, static_cast<SDL_GamepadButton>(GR2_JUPITER_STYLE)},
+    {&Uwp::Chords::ChordOutputs::touchpad_swipe_up,
+     static_cast<SDL_GamepadButton>(SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_UP)},
+    {&Uwp::Chords::ChordOutputs::touchpad_swipe_down,
+     static_cast<SDL_GamepadButton>(SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_DOWN)},
+    {&Uwp::Chords::ChordOutputs::touchpad_swipe_left,
+     static_cast<SDL_GamepadButton>(SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_LEFT)},
+    {&Uwp::Chords::ChordOutputs::touchpad_swipe_right,
+     static_cast<SDL_GamepadButton>(SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_RIGHT)},
+    {&Uwp::Chords::ChordOutputs::touchpad_center,
+     static_cast<SDL_GamepadButton>(SDL_GAMEPAD_BUTTON_TOUCHPAD_CENTER)},
+    {&Uwp::Chords::ChordOutputs::normal_style,
+     static_cast<SDL_GamepadButton>(GR2_NORMAL_STYLE)},
+    {&Uwp::Chords::ChordOutputs::lunar_style,
+     static_cast<SDL_GamepadButton>(GR2_LUNAR_STYLE)},
+    {&Uwp::Chords::ChordOutputs::jupiter_style,
+     static_cast<SDL_GamepadButton>(GR2_JUPITER_STYLE)},
 };
 
 // The buttons a chord can borrow, and the swallow flag that says it did. Face
