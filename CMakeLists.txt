@@ -68,7 +68,14 @@ option(GR2_XBOX_UWP "Build the Xbox Series X|S UWP package" OFF)
 # (it wants x86_64/x64/amd64/AMD64) takes the same branch as no value at all.
 if (CMAKE_SYSTEM_NAME STREQUAL "WindowsStore"
         AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|x64|amd64|AMD64)")
-    set(CMAKE_SYSTEM_PROCESSOR "AMD64" CACHE STRING "Target processor (set by the UWP build)" FORCE)
+    # A plain set, not set(... CACHE ... FORCE). project() leaves
+    # CMAKE_SYSTEM_PROCESSOR as a *normal* variable, and a normal variable
+    # shadows the cache entry of the same name -- so the FORCE version wrote a
+    # cache value that nothing in this scope ever read, LibreSSL still saw the
+    # empty string, and the run meant to prove the fix failed exactly as before.
+    # A normal set propagates into every add_subdirectory below, which is where
+    # LibreSSL is configured.
+    set(CMAKE_SYSTEM_PROCESSOR "AMD64")
     message(STATUS "GR2toXBOX: CMAKE_SYSTEM_PROCESSOR is AMD64 (required by LibreSSL's arch include)")
 endif()
 

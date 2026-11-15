@@ -8,7 +8,19 @@
 # API. They are what a second backend (Direct3D 12) consumes, so they are built
 # for every renderer.
 # ---------------------------------------------------------------------------
-target_sources(gr2port PRIVATE
+# The scene-capture modules below are API-agnostic in intent, but many of them
+# also create their pipelines: they name vk:: types and #include the headers
+# glslang generates from the Vulkan GLSL. Under GR2_RENDERER=D3D12 none of those
+# headers exist, and every one of them failed to compile on the first D3D12 run
+# that got this far ("graphics/gr2port/shaders/enemy_boss_frag.h file not found").
+#
+# The split is derived rather than listed, because a hand-written list would rot
+# the moment someone adds a module. Each source is classified by reading it: a
+# module that mentions vk:: or includes a Vulkan shader header belongs to the
+# Vulkan backend, and the D3D12 backend builds only the rest. The count that is
+# excluded is printed at configure time, so the gap is visible rather than
+# implied -- those are the modules a D3D12 backend still owes a counterpart for.
+set(GR2PORT_SHARED_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/camera_reach.cpp
     ${CMAKE_CURRENT_LIST_DIR}/scene_ring.cpp
     ${CMAKE_CURRENT_LIST_DIR}/scene_ring.h
@@ -118,6 +130,46 @@ target_sources(gr2port PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/world.cpp
     ${CMAKE_CURRENT_LIST_DIR}/world.h
 )
+
+# Classify. A .cpp is Vulkan-only if it mentions vk:: or includes a header
+# glslang produced; a .h follows its .cpp. Headers are resolved after every
+# source, because a header can appear in the list before its own .cpp.
+set(GR2PORT_VULKAN_ONLY_BASES "")
+foreach(source IN LISTS GR2PORT_SHARED_SOURCES)
+    get_filename_component(ext "${source}" EXT)
+    if (NOT ext STREQUAL ".cpp")
+        continue()
+    endif()
+    file(READ "${source}" text)
+    if (text MATCHES "vk::" OR text MATCHES "#include \"graphics/gr2port/shaders/")
+        get_filename_component(base "${source}" NAME_WE)
+        list(APPEND GR2PORT_VULKAN_ONLY_BASES "${base}")
+    endif()
+endforeach()
+
+set(GR2PORT_SEPARATE_SOURCES "")
+set(GR2PORT_VULKAN_ONLY_SOURCES "")
+foreach(source IN LISTS GR2PORT_SHARED_SOURCES)
+    get_filename_component(base "${source}" NAME_WE)
+    if (base IN_LIST GR2PORT_VULKAN_ONLY_BASES)
+        list(APPEND GR2PORT_VULKAN_ONLY_SOURCES "${source}")
+    else()
+        list(APPEND GR2PORT_SEPARATE_SOURCES "${source}")
+    endif()
+endforeach()
+
+target_sources(gr2port PRIVATE ${GR2PORT_SEPARATE_SOURCES})
+
+if (GR2PORT_VULKAN_ONLY_BASES AND NOT GR2_RENDERER STREQUAL "VULKAN")
+    list(LENGTH GR2PORT_VULKAN_ONLY_BASES count)
+    message(STATUS
+        "GR2toXBOX: ${count} scene-capture modules name Vulkan types or shader headers "
+        "and are not built for this renderer (${GR2PORT_VULKAN_ONLY_BASES})")
+endif()
+
+if (GR2_RENDERER STREQUAL "VULKAN")
+    target_sources(gr2port PRIVATE ${GR2PORT_VULKAN_ONLY_SOURCES})
+endif()
 
 # ---------------------------------------------------------------------------
 # Upstream Vulkan renderer
