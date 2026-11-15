@@ -83,19 +83,6 @@
         <uap:SplashScreen Image="Assets\SplashScreen.png" />
       </uap:VisualElements>
 
-      <Extensions>
-        <!--
-          The application is a game: this is the declaration the Xbox memory
-          manager uses to place the title in the Game pool.
-        -->
-        <uap:Extension Category="windows.gameOsConfiguration">
-          <uap:GameOsConfiguration>
-            <uap:GameOsConfiguration.Enabled>true</uap:GameOsConfiguration.Enabled>
-          </uap:GameOsConfiguration>
-        </uap:Extension>
-      </Extensions>
-
-      <uap:ApplicationContentUriRules />
     </Application>
   </Applications>
 
@@ -118,6 +105,19 @@
       applies, so code is never writable and executable at the same time.
     -->
     <rescap:Capability Name="codeGeneration" />
+
+    <!--
+      Expanded Resources: 6 exclusive CPU cores, 5 GiB of RAM and full access to
+      the GPU, instead of the 1 GiB / shared cores / partial GPU an ordinary app
+      gets. This is the declaration that puts the title in the Game pool, and it
+      is a capability, not an extension. There is no
+      'windows.gameOsConfiguration' extension category; that spelling is not in
+      the manifest schema and makeappx rejects the package with a bare
+      0x80080204 "manifest is not valid", pointing at the Category line and
+      nothing else. The installed app's type is a console-side property, set in
+      DevHome or by enabling 'treat UWP apps as games by default' in Dev Mode.
+    -->
+    <rescap:Capability Name="expandedResources" />
 
     <!-- Save data, screenshots (photo mode) and the log file live here. -->
     <uap:Capability Name="documentsLibrary" />

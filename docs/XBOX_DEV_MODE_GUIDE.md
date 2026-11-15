@@ -123,8 +123,19 @@ To change it:
 3. Change **App → Game**.
 4. Save and launch the title.
 
-The package manifest declares `ApplicationType="Game"`; the Dev Portal setting
-must agree with it. The port detects the discrepancy at startup and logs:
+**How the two halves fit together.** The manifest can ask for the game pool but
+it cannot set the app type. The ask is the restricted capability
+`rescap:expandedResources`, which the package declares; that is what makes the
+title *eligible* for the 5 GiB pool. Whether it actually gets it is the
+console-side app type above, which is a property of the installed application,
+not of the package. There is no `ApplicationType` attribute in the manifest
+schema, and there is no `windows.gameOsConfiguration` extension category either
+— an earlier revision of this package declared one, and `makeappx` rejected the
+whole package with a bare `0x80080204`.
+
+If the capability is missing the title runs in the app pool no matter what the
+app type says; if the capability is present but the app type is still `App`, it
+also runs in the app pool. Both are checked at startup, and the port logs:
 
 ```
 Xbox memory: the package is running in App mode (limit 1280 MiB). Gravity Rush 2

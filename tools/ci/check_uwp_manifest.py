@@ -40,6 +40,9 @@ KNOWN_PREFIXES = {
 # A game on Xbox needs these; each maps to a failure that is invisible until the
 # title is on hardware.
 REQUIRED_CAPABILITIES = {
+    "rescap:expandedResources": "without it the title runs in the app pool (1 GiB, "
+    "shared cores, partial GPU) rather than the game pool, and runs out of memory at "
+    "boot",
     "rescap:codeGeneration": "without it VirtualProtectFromApp cannot grant execute, "
     "so the guest's native x86-64 code cannot run at all",
     "rescap:broadFileSystemAccess": "without it the title cannot read the player's "
@@ -167,6 +170,47 @@ def main():
             problems.append("<Identity> has no Publisher")
     if not re.search(r"<Applications>\s*<Application\b", raw):
         problems.append("no <Application> element; there would be nothing to launch")
+
+    # --- extension categories -----------------------------------------------
+    # Each uap:Extension/@Category must be a member of the schema's enumeration.
+    # A category that is not in it is rejected by makeappx with 0x80080204, a
+    # truncated list of valid values and a line number, and the line number points
+    # at Category rather than at the element that is wrong. 'windows.gameOsConfiguration'
+    # was invented here for the Game pool; the real mechanism is the
+    # rescap:expandedResources capability, and there is no such category.
+    known_categories = {
+        "windows.fileTypeAssociation", "windows.protocol", "windows.autoPlayContent",
+        "windows.autoPlayDevice", "windows.shareTarget", "windows.search",
+        "windows.fileOpenPicker", "windows.fileSavePicker", "windows.cachedFileUpdater",
+        "windows.contactPicker", "windows.cameraSettings",
+        "windows.accountPictureProvider", "windows.printTaskSettings",
+        "windows.lockScreenCall", "windows.contact", "windows.appointmentsProvider",
+        "windows.alarm", "windows.backgroundTasks", "windows.preInstalledConfigTask",
+        "windows.updateTask", "windows.restrictedLaunch", "windows.sharedFonts",
+        "windows.userDataTaskDataProvider", "windows.mediaCodec",
+        "windows.contactPanel", "windows.loopbackAccessRules",
+        "windows.devicePortalProvider", "windows.printWorkflowBackgroundTask",
+        "windows.printWorkflowForegroundTask", "windows.gameOsConfiguration",
+    }
+    # Not in the schema. Kept in the set above would defeat the check, so it is
+    # removed here and called out by name below.
+    known_categories.discard("windows.gameOsConfiguration")
+    for category in sorted(set(re.findall(r'Extension[^>]*\bCategory="([^"]+)"', raw))):
+        if category not in known_categories:
+            problems.append(
+                f"extension Category '{category}' is not in the manifest schema's "
+                f"enumeration; makeappx rejects the whole package for this"
+            )
+
+    # The Game pool is a capability, not an extension. Catch the substitution
+    # directly, because the two are easy to confuse and only one of them exists.
+    # Only real elements count; the explanatory comment mentions the old spelling.
+    if re.search(r'<rescap:Capability\s+Name="expandedResources"', raw) and \
+            re.search(r'<[A-Za-z0-9]+:Extension[^>]*Category="[^"]*gameOsConfiguration"', raw):
+        problems.append(
+            "both expandedResources and gameOsConfiguration are present; the Game "
+            "pool is declared by the capability alone"
+        )
 
     # --- languages -----------------------------------------------------------
     # The packaging script builds the resource index from this list, so a huge or
