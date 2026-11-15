@@ -1342,11 +1342,16 @@ if (GR2_XBOX_UWP)
     if (_gr2_chords_index EQUAL -1)
         target_sources(gr2port PRIVATE src/uwp/chords.cpp)
     endif()
-    # XAudio2 is the shim's audio output (see sdl_audio_uwp.cpp). Its import
-    # library ships with the Windows SDK and is not part of WindowsApp.lib, so it
-    # has to be named. The 2.9 header/library pair is what the SDK documents for a
-    # UWP app; 2.8 is the desktop one and is not in the onecore surface.
-    target_link_libraries(gr2port PRIVATE xaudio2_9)
+    # XAudio2 is the shim's audio output (see sdl_audio_uwp.cpp), and it needs no
+    # library of its own: the onecore surface's umbrella library, WindowsApp.lib --
+    # which gr2port_d3d12.cmake links for this build -- carries it.
+    #
+    # Naming xaudio2_9 explicitly was wrong and only showed up as a link error:
+    # that import library is a desktop-SDK one, and the Windows SDK installed for a
+    # WindowsStore target does not put it on the link path. Nothing is lost by
+    # dropping it, because the symbols come from the umbrella.
+    # (For reference, the other emulator that runs on this driver links
+    # WindowsApp.lib and nothing else for the same reason.)
     message(STATUS "GR2toXBOX: SDL shim: core, video, gamepad, audio, input, iostream")
 endif()
 
