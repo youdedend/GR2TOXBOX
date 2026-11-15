@@ -505,7 +505,10 @@ jobs:
           if (@($inner | Where-Object { $_ -match '\.(pdb|map)$' }).Count -gt 0) {
             throw "Debug symbols must not be staged in the MSIX"
           }
-          Write-Host "Bundle verified: $($entries -join ', ')"
+          # Keep actual archive evidence available through the check-run API,
+          # not solely through external Actions log/artifact storage hosts.
+          Write-Host "::notice title=Verified actual Xbox zip entries::$($entries -join ', ')"
+          Write-Host "::notice title=Verified actual MSIX::Entries=$($inner.Count); contains $($required -join ', '); no PDB/MAP"
           Write-Host "Package contains $($inner.Count) entries including $($required -join ', ')"
 
       - uses: actions/upload-artifact@v4

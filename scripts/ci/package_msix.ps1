@@ -158,6 +158,7 @@ if ($LASTEXITCODE -ne 0) {
     throw ("$ExeName imports APIs a packaged app may not call. The static CRT is " +
            "the usual cause on a /MT build: see tools/ci/check_uwp_imports.py.")
 }
+Write-Host "::notice title=Actual UWP binary import audit passed::$ExeName; dumpbin /imports checked by tools/ci/check_uwp_imports.py"
 Remove-Item -Force $importsLog
 
 # ---------------------------------------------------------------------------
