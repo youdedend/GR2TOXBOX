@@ -1247,10 +1247,37 @@ target_include_directories(gr2port PRIVATE "${SHADNET_PROTO_OUT}")
 # headers are on the include path from the GR2_XBOX_UWP block above, so every SDL
 # type and signature the emulator uses is still SDL's.
 if (GR2_XBOX_UWP)
+    # The shim's implementation. One file per SDL module the emulator actually
+    # calls, plus the pad's platform edge, which is the only one that includes
+    # WinRT and is therefore the only one the precheck cannot type-check.
     target_sources(gr2port PRIVATE
         src/uwp/sdl3_shim/sdl_core.cpp
+        src/uwp/sdl3_shim/sdl_video.cpp
+        src/uwp/sdl3_shim/sdl_gamepad.cpp
+        src/uwp/sdl3_shim/sdl_gamepad_uwp.cpp
+        src/uwp/sdl3_shim/sdl_chords.cpp
+        src/uwp/sdl3_shim/sdl_audio.cpp
+        src/uwp/sdl3_shim/sdl_audio_uwp.cpp
+        src/uwp/sdl3_shim/sdl_input.cpp
+        src/uwp/sdl3_shim/sdl_iostream.cpp
+        src/uwp/sdl3_shim/sdl_internal.h
+        src/uwp/sdl3_shim/pad_state.h
+        src/uwp/sdl3_shim/audio_output.h
+        src/uwp/sdl3_shim/chords_glue.h
     )
-    message(STATUS "GR2toXBOX: SDL shim sources: sdl_core.cpp")
+    # The chord layer is pure logic and is shared with the desktop self-test, so it
+    # is already listed above; this is the one place the two builds have to agree
+    # on it, and listing it twice would be an ODR violation rather than a warning.
+    list(FIND gr2port_SOURCES "src/uwp/chords.cpp" _gr2_chords_index)
+    if (_gr2_chords_index EQUAL -1)
+        target_sources(gr2port PRIVATE src/uwp/chords.cpp)
+    endif()
+    # XAudio2 is the shim's audio output (see sdl_audio_uwp.cpp). Its import
+    # library ships with the Windows SDK and is not part of WindowsApp.lib, so it
+    # has to be named. The 2.9 header/library pair is what the SDK documents for a
+    # UWP app; 2.8 is the desktop one and is not in the onecore surface.
+    target_link_libraries(gr2port PRIVATE xaudio2_9)
+    message(STATUS "GR2toXBOX: SDL shim: core, video, gamepad, audio, input, iostream")
 endif()
 
 if (NOT GR2_XBOX_UWP)

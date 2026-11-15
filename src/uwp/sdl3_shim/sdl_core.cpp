@@ -28,6 +28,8 @@
 
 #include <windows.h>
 
+#include "uwp/sdl3_shim/sdl_internal.h"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -162,13 +164,17 @@ extern "C" void SDLCALL SDL_Delay(Uint32 ms) {
     ::Sleep(ms);
 }
 
-// --- The event queue. Push filters nothing; the emulator reads what it needs and
-// --- ignores the rest, exactly as on desktop.
+// --- The event queue. The emulator reads what it needs and ignores the rest,
+// --- exactly as on desktop.
 
 extern "C" bool SDLCALL SDL_PushEvent(SDL_Event* event) {
     if (event == nullptr) {
         return false;
     }
+    // The event watches see it first, as they do on desktop: SDL's platform layer
+    // calls them from the OS's pump before the queue, and here this function is
+    // that pump.
+    Gr2SdlRunEventWatches(event);
     {
         const std::scoped_lock lock{g_event_mutex};
         if (g_events.size() >= MaxQueuedEvents) {
