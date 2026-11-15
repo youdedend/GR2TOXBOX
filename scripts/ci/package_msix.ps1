@@ -214,8 +214,64 @@ if ($LASTEXITCODE -ne 0) {
     & $signtool sign /fd SHA256 /f $pfx /p $password $msixPath
     if ($LASTEXITCODE -ne 0) { throw "signtool sign failed ($LASTEXITCODE)" }
 }
-& $signtool verify /pa /v $msixPath
-if ($LASTEXITCODE -ne 0) { throw "signtool verify failed ($LASTEXITCODE)" }
+# How to verify a package signed by a self-signed Dev Mode certificate.
+#
+# `/pa /v` alone always fails here, and not because the signature is wrong: the
+# certificate chains to itself, so Authenticode reports "the certificate chain
+# processed but terminated in a root certificate which is not trusted by the
+# trust anchor" -- which is the correct answer to "is this signed by a publicly
+# trusted authority" and the wrong question to ask of a Dev Mode package. The
+# console does not consult a public anchor either: it trusts the certificate the
+# user sideloaded alongside the package, which is exactly the .cer in this bundle.
+#
+# So verify what actually matters:
+#
+#   1. the file carries a signature at all (`/pa` without certificate-chain
+#      revocation, which cannot succeed for a self-signed cert);
+#   2. it was signed by *this* certificate -- comparing the signer thumbprint with
+#      the exported .cer is what catches a stale PFX, which would install nowhere;
+#   3. the bundle ships the .cer that matches, since that is what gets trusted.
+#
+# A failure in (2) is a real packaging bug. A failure in (1) means the package is
+# unsigned. Neither is "the chain is untrusted".
+# Run it once and keep the output: the reason it failed belongs in the message if
+# the checks below reject the package, and running it a second time just prints the
+# same failure twice.
+$verifyOutput = (& $signtool verify /pa $msixPath 2>&1 | Out-String)
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "signtool verify /pa reported a problem; checking the signer directly."
+}
+
+# The signer's thumbprint is what has to match the certificate the bundle ships.
+$expectedThumb = (Get-PfxCertificate -FilePath $pfx).Thumbprint
+$packageCert = Get-AuthenticodeSignature -FilePath $msixPath
+if ($packageCert.Status -eq 'NotSigned' -or -not $packageCert.SignerCertificate) {
+    throw "The package is not signed. signtool reported: $verifyOutput"
+}
+# 'UntrustedRoot' is expected and fine. Anything else is not: HashMismatch means
+# the file changed after it was signed, NotTrusted/NotSignatureValid means the
+# signature itself is bad. Rejecting those by name is the point of checking Status
+# at all -- accepting "any status with a signer certificate attached" would let a
+# tampered package through, which is the one thing a verify step exists to stop.
+if ($packageCert.Status -notin @('Valid', 'UntrustedRoot')) {
+    throw ("The package's signature is not sound: Status=$($packageCert.Status) " +
+           "$($packageCert.StatusMessage)")
+}
+if ($packageCert.SignerCertificate.Thumbprint -ne $expectedThumb) {
+    throw ("The package is signed by a different certificate than the one being " +
+           "shipped: package $($packageCert.SignerCertificate.Thumbprint), " +
+           "expected $expectedThumb $($packageCert.SignerCertificate.Subject)")
+}
+# The .cer next to the .msix is what the user installs into Trusted People; if it
+# is not the signer's certificate the package will refuse to install with
+# 0x800B0109 and look like a corrupt download.
+$cerPath = Join-Path $SigningDir "GR2port-XboxDevMode.cer"
+$shipped = (Get-PfxCertificate -FilePath $cerPath).Thumbprint
+if ($shipped -ne $expectedThumb) {
+    throw "The .cer in the bundle ($shipped) is not the signing certificate ($expectedThumb)."
+}
+Write-Host "Signed by $($packageCert.SignerCertificate.Subject) ($expectedThumb), and the bundle ships the matching .cer."
+Write-Host "Note: the chain terminates in an untrusted self-signed root by design; the console trusts the shipped .cer." 
 
 # ---------------------------------------------------------------------------
 # 6. Bundle

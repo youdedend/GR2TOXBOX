@@ -446,17 +446,47 @@ jobs:
             package-msix.log
           if-no-files-found: ignore
 
+      # Check the artifact that is actually uploaded -- the zip -- not the staging
+      # directory it was built from. And fail with throw, not Write-Error: Write-Error
+      # is non-terminating, so a missing file inside that loop left this step green
+      # and the job uploaded a bundle with nothing in it.
       - name: Verify the bundle contents
         shell: pwsh
         run: |
           $zip = "xbox-package/GR2port-XboxSeriesXS-UWP.zip"
-          if (-not (Test-Path $zip)) { Write-Error "The bundle was not produced." }
+          if (-not (Test-Path $zip)) { throw "The bundle was not produced." }
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip))
+          try {
+            $entries = $archive.Entries | ForEach-Object { $_.FullName }
+          } finally {
+            $archive.Dispose()
+          }
+
           $expected = @("GR2port-XboxSeriesXS-UWP_x64.msix", "GR2port-XboxDevMode.cer")
-          $entries = (Get-ChildItem xbox-package/out -File).Name
-          foreach ($name in $expected) {
-            if ($entries -notcontains $name) { Write-Error "Missing $name in the bundle." }
+          $missing = @($expected | Where-Object { $entries -notcontains $_ })
+          if ($missing.Count -gt 0) {
+            throw "Missing from the bundle: $($missing -join ', '). It contains: $($entries -join ', ')"
+          }
+
+          # The .msix has to carry the executable, the manifest and the resource
+          # index: a package that installs and has no executable launches straight
+          # into a crash with nothing in it to explain why.
+          $msix = Join-Path "xbox-package/out" "GR2port-XboxSeriesXS-UWP_x64.msix"
+          $pkg = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $msix))
+          try {
+            $inner = $pkg.Entries | ForEach-Object { $_.FullName }
+          } finally {
+            $pkg.Dispose()
+          }
+          $required = @("GR2port.exe", "AppxManifest.xml", "resources.pri")
+          $innerMissing = @($required | Where-Object { $inner -notcontains $_ })
+          if ($innerMissing.Count -gt 0) {
+            throw "The package is missing $($innerMissing -join ', '). It contains: $($inner -join ', ')"
           }
           Write-Host "Bundle verified: $($entries -join ', ')"
+          Write-Host "Package contains $($inner.Count) entries including $($required -join ', ')"
 
       - uses: actions/upload-artifact@v4
         with:
