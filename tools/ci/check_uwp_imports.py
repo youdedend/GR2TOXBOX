@@ -196,6 +196,8 @@ def main() -> int:
     if problems:
         for problem in problems:
             print(problem)
+            escaped = problem.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+            print(f"::error title=Forbidden actual UWP binary import::{escaped}")
         print()
         print(f"{len(problems)} forbidden import(s) in {args.exe}")
         return 1
@@ -206,6 +208,8 @@ def main() -> int:
     )
     for dll in sorted(imports):
         print(f"  {dll} ({len(imports[dll])} symbols)")
+    print(f"::notice title=Actual UWP import audit details::{len(imports)} DLLs; "
+          f"{total_symbols} symbols; DLLs=" + ', '.join(sorted(imports)))
     return 0
 
 

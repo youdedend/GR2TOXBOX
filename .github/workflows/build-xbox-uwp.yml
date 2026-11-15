@@ -340,6 +340,9 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
+          # Select the Store CRT archives, not desktop libcmt/vcruntime.
+          # CMAKE_SYSTEM_NAME alone does not rewrite the Ninja linker's LIB env.
+          uwp: true
 
       - name: Locate dxc
         shell: pwsh
