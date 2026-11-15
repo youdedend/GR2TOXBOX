@@ -503,6 +503,11 @@ if (APPLE AND NOT ENABLE_SYSTEM_VULKAN AND NOT ENABLE_TESTS)
 endif()
 
 # abseil (for protobuf)
+# Like protobuf, Abseil overrides the inherited runtime selection. Set its
+# independent switch before creating targets, not when protobuf is added later.
+if (MSVC AND GR2_XBOX_UWP)
+    set(ABSL_MSVC_STATIC_RUNTIME ON CACHE BOOL "" FORCE)
+endif()
 if (NOT TARGET absl::strings)
     add_subdirectory(abseil-cpp EXCLUDE_FROM_ALL)
 endif()
