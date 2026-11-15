@@ -3,6 +3,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <thread>
+
+#if defined(GR2_XBOX_UWP) && defined(_WIN32)
+// CoCreateGuid is declared in combaseapi.h, which is the narrow header COM's
+// GUID factory lives in rather than the whole of <objbase.h>. It is included only
+// for the console build, because that is the only build that calls it: the
+// desktop path uses UuidCreate from the RPC runtime.
+#include <combaseapi.h>
+#endif
 #include <boost/asio/io_context.hpp>
 
 #include "common/assert.h"

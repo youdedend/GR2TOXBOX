@@ -92,7 +92,13 @@ if (GR2_XBOX_UWP)
             "package must link the onecore UWP surface (WindowsApp.lib), not "
             "the desktop Win32 import libraries.")
     endif()
-    add_compile_definitions(GR2_XBOX_UWP=1 WINAPI_FAMILY=WINAPI_FAMILY_APP)
+    # MINIMP3_NO_STDIO drops minimp3's file loader, which opens the file with
+    # CreateFileA and maps it through GetFileSize -- desktop-only calls, and the
+    # packaged build rejects them. Its in-memory decoder, mp3dec_load_buf, stays,
+    # and music_player_service.cpp calls that directly on this build. trophy_ui
+    # already decoded from memory, so nothing else is affected.
+    add_compile_definitions(GR2_XBOX_UWP=1 WINAPI_FAMILY=WINAPI_FAMILY_APP
+                            MINIMP3_NO_STDIO=1)
 
     # The SDL3 shim. SDL 3 removed WinRT/UWP support during development and its
     # own header carries an #error saying so, while this project's entire

@@ -147,6 +147,40 @@ for compat_uwp in 1 0; do
     fi
 done
 
+# minimp3 under the console build. MINIMP3_NO_STDIO is what CMakeLists.txt defines
+# for GR2_XBOX_UWP, because minimp3's file loader opens with CreateFileA and sizes
+# the file with GetFileSize -- both desktop-only, and both rejected by the packaged
+# build. Its in-memory decoder is what music_player_service.cpp calls there instead.
+# This compiles the header both ways and checks the console build really has no
+# reference to the desktop file calls, so the define cannot silently stop working.
+cat >"$OUT/m3.cpp" <<'M3_EOF'
+#define MINIMP3_IMPLEMENTATION
+#include <minimp3_ex.h>
+int main() {
+    return 0;
+}
+M3_EOF
+if ! "$CXX" "${CXXFLAGS[@]}" -Iexternals/minimp3 -fsyntax-only "$OUT/m3.cpp" 2>"$OUT/err"; then
+    echo "  FAIL externals/minimp3 (desktop)"
+    sed 's/^/    /' "$OUT/err" | head -20
+    failures=$((failures + 1))
+else
+    echo "  ok   externals/minimp3 (desktop)"
+fi
+if ! "$CXX" "${CXXFLAGS[@]}" -Iexternals/minimp3 -DMINIMP3_NO_STDIO=1 -c "$OUT/m3.cpp" \
+        -o "$OUT/m3.o" 2>"$OUT/err"; then
+    echo "  FAIL externals/minimp3 (MINIMP3_NO_STDIO)"
+    sed 's/^/    /' "$OUT/err" | head -20
+    failures=$((failures + 1))
+else
+    if nm -C "$OUT/m3.o" 2>/dev/null | grep -qi 'CreateFile\|GetFileSize'; then
+        echo "  FAIL externals/minimp3 (MINIMP3_NO_STDIO still reaches the desktop file calls)"
+        failures=$((failures + 1))
+    else
+        echo "  ok   externals/minimp3 (MINIMP3_NO_STDIO)"
+    fi
+fi
+
 # libSceUsbd on the console. The desktop file it replaces is libusb end to end,
 # so this one stands in for the whole library and is the only definition of
 # these 65 symbols the UWP link has -- a typo in a signature or a missing

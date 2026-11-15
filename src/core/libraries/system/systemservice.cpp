@@ -1958,7 +1958,16 @@ s32 PS4_SYSV_ABI sceSystemServiceParamGetInt(OrbisSystemServiceParamId param_id,
         *value = u32(OrbisSystemParamTimeFormat::Fmt24Hour);
         break;
     case OrbisSystemServiceParamId::TimeZone: {
-#ifdef _WIN32
+#if defined(GR2_XBOX_UWP)
+        // _tzset and _timezone are desktop CRT; GetTimeZoneInformation is the
+        // onecore call. Bias is in minutes, west positive, which is the same
+        // convention _timezone uses -- so the expression is unchanged.
+        TIME_ZONE_INFORMATION tz_info{};
+        if (GetTimeZoneInformation(&tz_info) == TIME_ZONE_ID_INVALID) {
+            tz_info.Bias = 0; // No zone configured: UTC.
+        }
+        *value = -static_cast<int>(tz_info.Bias);
+#elif defined(_WIN32)
         _tzset();
         *value = -static_cast<int>(_timezone / 60);
 #else

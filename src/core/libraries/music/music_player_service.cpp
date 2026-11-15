@@ -22,6 +22,7 @@ extern "C" {
 #include <libavutil/opt.h>
 #include <libswresample/swresample.h>
 }
+#include "common/io_file.h"
 #include "common/support/avdec.h"
 
 #define DR_FLAC_IMPLEMENTATION
@@ -594,8 +595,23 @@ private:
             if (!decoded && (ext == ".mp3" || ext == ".MP3")) {
                 mp3dec_t dec;
                 mp3dec_init(&dec);
+#if defined(GR2_XBOX_UWP)
+                // minimp3's mp3dec_load opens the file with CreateFileA and maps it,
+                // which is desktop-only, so the console build compiles minimp3 with
+                // MINIMP3_NO_STDIO and reads the bytes itself. The in-memory decoder
+                // is the same one the file loader calls internally.
+                int res = -1;
+                if (IOFile mp3{host_path, FileAccessMode::Read}) {
+                    std::vector<u8> bytes(mp3.GetSize());
+                    if (!bytes.empty() && mp3.Read(bytes) == bytes.size()) {
+                        res = mp3dec_load_buf(&dec, bytes.data(), bytes.size(), &file_info,
+                                              nullptr, nullptr);
+                    }
+                }
+#else
                 int res =
                     mp3dec_load(&dec, host_path.string().c_str(), &file_info, nullptr, nullptr);
+#endif
                 if (res == 0 && file_info.samples > 0 && file_info.channels > 0 &&
                     file_info.hz > 0) {
                     decoded = true;

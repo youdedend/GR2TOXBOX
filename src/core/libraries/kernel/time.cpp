@@ -534,8 +534,22 @@ s32 PS4_SYSV_ABI sceKernelConvertUtcToLocaltime(time_t time, time_t* local_time,
     localtime_s(&tm_val, &t);
     s32 is_dst = (tm_val.tm_isdst > 0) ? 1 : 0;
     s32 dst_sec_val = is_dst ? 3600 : 0;
+#if defined(GR2_XBOX_UWP)
+    // _tzset and _timezone are desktop CRT. GetTimeZoneInformation is the Win32
+    // call, and it is in the onecore surface; its Bias is in minutes, west
+    // positive -- the same sign convention _timezone uses, so the negation below
+    // is unchanged.
+    TIME_ZONE_INFORMATION tz_info{};
+    const DWORD tz_result = GetTimeZoneInformation(&tz_info);
+    s32 west_sec_val = tz_info.Bias * 60;
+    if (tz_result == TIME_ZONE_ID_INVALID) {
+        // No zone configured: UTC, which is what a console actually runs in.
+        west_sec_val = 0;
+    }
+#else
     _tzset();
     s32 west_sec_val = -static_cast<s32>(_timezone);
+#endif
 
     if (local_time != nullptr) {
         *local_time = time + west_sec_val + dst_sec_val;
