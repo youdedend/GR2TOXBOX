@@ -93,6 +93,20 @@ if (GR2_XBOX_UWP)
             "the desktop Win32 import libraries.")
     endif()
     add_compile_definitions(GR2_XBOX_UWP=1 WINAPI_FAMILY=WINAPI_FAMILY_APP)
+
+    # The SDL3 shim. SDL 3 removed WinRT/UWP support during development and its
+    # own header carries an #error saying so, while this project's entire
+    # frontend is SDL. src/uwp/sdl3_shim/ replaces two things: the platform
+    # definition header that holds the #error, and the library behind the
+    # functions (CoreWindow, Windows.Gaming.Input and XAudio2 instead of
+    # SDL's Win32 backends). Every other SDL header is the real one, so no type
+    # or signature can drift.
+    #
+    # The include directory is added before the real SDL headers so the one
+    # replaced header wins; CMake's include order is directory order, and this
+    # block runs before externals/ is added.
+    include_directories(BEFORE ${CMAKE_CURRENT_SOURCE_DIR}/src/uwp/sdl3_shim)
+    message(STATUS "GR2toXBOX: SDL3 shim replaces SDL's UWP-incompatible platform layer")
     message(STATUS "GR2toXBOX: Xbox Series X|S UWP build (Direct3D 12, strict W^X, 5120 MiB pool)")
 elseif (GR2_RENDERER STREQUAL "D3D12")
     message(STATUS "GR2toXBOX: Windows desktop Direct3D 12 build")
@@ -1229,6 +1243,16 @@ target_include_directories(gr2port PRIVATE "${SHADNET_PROTO_OUT}")
 # cannot open: the Xbox build takes its pad input from Windows.Gaming.Input
 # instead, in src/uwp/. Linking libusb there would also fail, because the onecore
 # surface has no WinUSB.
+# The SDL3 shim's implementation, which stands in for SDL's library on UWP. Its
+# headers are on the include path from the GR2_XBOX_UWP block above, so every SDL
+# type and signature the emulator uses is still SDL's.
+if (GR2_XBOX_UWP)
+    target_sources(gr2port PRIVATE
+        src/uwp/sdl3_shim/sdl_core.cpp
+    )
+    message(STATUS "GR2toXBOX: SDL shim sources: sdl_core.cpp")
+endif()
+
 if (NOT GR2_XBOX_UWP)
     if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
         target_link_libraries(gr2port PRIVATE "/usr/lib/libusb.so")
