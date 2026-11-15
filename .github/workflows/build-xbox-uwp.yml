@@ -351,6 +351,34 @@ jobs:
           if (-not $dxc) { Write-Error "dxc.exe not found; the UWP shader build cannot run." }
           "GR2_DXC_EXECUTABLE=$($dxc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      - name: Cache UWP software codecs
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/gr2-ffmpeg-uwp
+          key: ffmpeg-uwp-x64-mt-7.1.1-${{ hashFiles('scripts/ci/build_ffmpeg_uwp.sh') }}
+
+      - name: Set up codec build tools
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          path-type: inherit
+          update: false
+          install: make nasm diffutils
+
+      - name: Build software-only FFmpeg for UWP
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: |
+          set -o pipefail
+          scripts/ci/build_ffmpeg_uwp.sh 2>&1 | tee ffmpeg-uwp.log
+
+      - name: Select UWP codec prefix
+        shell: pwsh
+        run: |
+          "GR2_FFMPEG_UWP_ROOT=${{ runner.temp }}/gr2-ffmpeg-uwp" >> $env:GITHUB_ENV
+
       - name: Configure (WindowsStore / UWP)
         shell: pwsh
         run: |
@@ -394,6 +422,7 @@ jobs:
           path: |
             build-uwp.log
             configure-uwp.log
+            ffmpeg-uwp.log
             test-host-budget.log
             test-host-run.log
           if-no-files-found: ignore

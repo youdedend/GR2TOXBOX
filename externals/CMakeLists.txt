@@ -37,7 +37,26 @@ endif()
 
 # FFmpeg
 if (NOT TARGET FFmpeg::ffmpeg)
-    add_subdirectory(ffmpeg-core)
+    if (GR2_XBOX_UWP)
+        # The desktop prebuilt contains DXVA2/GetDesktopWindow and COM capture.
+        # CI builds the same FFmpeg version with software codecs for APP family.
+        file(TO_CMAKE_PATH "$ENV{GR2_FFMPEG_UWP_ROOT}" _gr2_ffmpeg_root)
+        if (NOT EXISTS "${_gr2_ffmpeg_root}/include/libavcodec/avcodec.h")
+            message(FATAL_ERROR "Set GR2_FFMPEG_UWP_ROOT to scripts/ci/build_ffmpeg_uwp.sh output")
+        endif()
+        add_library(ffmpeg INTERFACE)
+        target_include_directories(ffmpeg INTERFACE "${_gr2_ffmpeg_root}/include")
+        foreach(_fflib avformat avcodec swscale avutil avfilter swresample)
+            set(_archive "${_gr2_ffmpeg_root}/lib/lib${_fflib}.a")
+            if (NOT EXISTS "${_archive}")
+                message(FATAL_ERROR "Missing UWP software codec archive: ${_archive}")
+            endif()
+            target_link_libraries(ffmpeg INTERFACE "${_archive}")
+        endforeach()
+        target_link_libraries(ffmpeg INTERFACE WindowsApp)
+    else()
+        add_subdirectory(ffmpeg-core)
+    endif()
     add_library(FFmpeg::ffmpeg ALIAS ffmpeg)
 endif()
 

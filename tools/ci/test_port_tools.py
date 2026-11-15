@@ -20,6 +20,17 @@ def module(name, file):
 
 
 class PortTools(unittest.TestCase):
+    def test_uwp_dxgi_symbol_allowlist(self):
+        with tempfile.TemporaryDirectory(prefix='gr2-import-') as tmp:
+            path = Path(tmp) / 'imports.txt'
+            for symbol, expected in [('CreateDXGIFactory2', 0), ('CreateDXGIFactory', 1),
+                                     ('DXGIGetDebugInterface1', 1), ('', 1)]:
+                path.write_text('    dxgi.dll\n' + (f'        12 {symbol}\n' if symbol else ''))
+                result = subprocess.run(['python3', str(ROOT / 'tools/ci/check_uwp_imports.py'),
+                                         '--exe', 'test.exe', '--imports-file', str(path)],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, expected, result.stdout)
+
     def test_dxc_scalar_splat_regression(self):
         checker = module('hlsl_structure', ROOT / 'tools/shaders/check_hlsl_structure.py')
         with tempfile.TemporaryDirectory(prefix='gr2-hlsl-') as tmp:

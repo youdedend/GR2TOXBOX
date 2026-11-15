@@ -173,6 +173,12 @@ def main() -> int:
         # Report a forbidden DLL once, and skip its symbols: naming every export of
         # user32.dll as well buries the one line that says the DLL must not be
         # imported at all.
+        # Microsoft's documented CreateDXGIFactory2 UWP entry point is exported
+        # directly by DXGI.dll, including when linked via WindowsApp.lib:
+        # github.com/MicrosoftDocs/sdk-api/blob/docs/sdk-api-src/content/dxgi1_3/nf-dxgi1_3-createdxgifactory2.md
+        # Do not allow desktop DXGI/debug exports or an unparsed empty table.
+        if dll == "dxgi.dll" and symbols and set(symbols) <= {"CreateDXGIFactory2"}:
+            continue
         if dll in FORBIDDEN_DLLS:
             problems.append(
                 f"{Path(args.exe).name} imports {dll}: {FORBIDDEN_DLLS[dll]}; "
