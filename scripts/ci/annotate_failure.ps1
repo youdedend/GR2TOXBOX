@@ -50,6 +50,11 @@ $patterns = @(
     # can be the second form.
     'error:',
     ': error ',
+    # lld's /FAILIFMISMATCH diagnostic names each conflicting object on the
+    # following lines, not on the error line. Keep each line separately so the
+    # API's annotation truncation cannot hide which library changed /MT to /MD.
+    '>>>',
+    'RuntimeLibrary|MD_DynamicRelease|MT_StaticRelease',
     'FAILED:',
     # The packaging tools. makeappx and makepri prefix their diagnostics with
     # 'MakeAppx : error:' / 'MakePri : error:' and can also print a bare

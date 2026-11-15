@@ -538,7 +538,14 @@ set(protobuf_BUILD_SHARED_LIBS        OFF CACHE INTERNAL "")
 set(protobuf_LOCAL_DEPENDENCIES_ONLY  ON  CACHE INTERNAL "")
 set(protobuf_FORCE_FETCH_DEPENDENCIES OFF CACHE INTERNAL "")
 if(MSVC)
-set(protobuf_MSVC_STATIC_RUNTIME OFF CACHE BOOL "" FORCE)
+    # protobuf overrides CMAKE_MSVC_RUNTIME_LIBRARY in its own directory.
+    # Preserve the UWP-wide /MT contract: forcing OFF here silently rebuilt its
+    # runtime with /MD and lld rejected the final link with /FAILIFMISMATCH.
+    if (GR2_XBOX_UWP)
+        set(protobuf_MSVC_STATIC_RUNTIME ON CACHE BOOL "" FORCE)
+    else()
+        set(protobuf_MSVC_STATIC_RUNTIME OFF CACHE BOOL "" FORCE)
+    endif()
 endif()
 add_subdirectory(protobuf EXCLUDE_FROM_ALL)
 
