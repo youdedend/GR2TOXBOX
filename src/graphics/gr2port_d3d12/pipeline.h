@@ -50,13 +50,34 @@ struct RootSignature {
 /// D3D12 validates the root signature against the DXIL's declared resource
 /// bindings.
 namespace RootConstants {
-/// Arena table: ArenaKind::Count uints.
-inline constexpr u32 ArenaBytes = 20;
-/// Draw constants: the largest per-draw block any shader declares (the scene
-/// constants, 24 bytes: two ArenaRefs, the base instance and padding).
-inline constexpr u32 DrawBytes = 24;
-/// Texture and sampler handles for the passes that are not per-draw.
-inline constexpr u32 PassBytes = 32;
+// Each of these must be at least as large as the biggest cbuffer any shader
+// declares at that register. It is not a "typical" size and a smaller one is not
+// merely tight: a root parameter binds exactly its declared number of 32-bit
+// values, and a shader cbuffer larger than that is truncated at bind time. The
+// renderer sets fewer constants than the shader reads and the surplus is
+// whatever was in the root argument space -- silently, with no error from D3D12
+// and nothing in a capture that looks wrong until the picture does.
+//
+// Measured, not guessed (tools/shaders/check_cbuffer_registers.py computes these
+// from the declarations):
+//
+//   b0  the arena table (ArenaTable: 5 uints = 20) in most shaders, but the
+//       per-draw block in several, and ShadowConstants is 128 bytes.
+//   b1  32 bytes: SceneConstants is two ArenaRefs + base_instance + one uint of
+//       padding, and LambertSceneRoot is the same shape.
+//   b2  16 bytes: the largest texture-handle block.
+//
+// The blocks are not uniform across shaders -- b0 holds the arena table in one
+// family and per-draw constants in another -- so each parameter has to fit the
+// largest block any shader puts there.
+
+/// b0. Arena table (20 bytes) in most shaders; the largest block here is
+/// ShadowConstants at 128 bytes (two Matrix4s of cascade data).
+inline constexpr u32 ArenaBytes = 128;
+/// b1. Two ArenaRefs, the base instance and padding: 32 bytes.
+inline constexpr u32 DrawBytes = 32;
+/// b2. Texture and sampler handles for the passes that are not per-draw.
+inline constexpr u32 PassBytes = 16;
 } // namespace RootConstants
 
 /// Serialises the root signature the shaders were compiled against and creates

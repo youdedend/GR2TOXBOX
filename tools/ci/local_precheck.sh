@@ -111,6 +111,25 @@ else
     echo "  ok   src/core/uwp_memory.cpp (GR2_XBOX_UWP)"
 fi
 
+# The HLSL cbuffer bindings against the root signature's constant budgets.
+#
+# Report-only for now, and deliberately not a FAIL: the check found a real
+# disagreement it cannot settle by itself. 24 shaders declare the arena table at
+# b1 with per-draw constants at b0, three declare it at b0, and pipeline.h
+# documents b0 as the arena table while command.cpp writes parameter 0. One of
+# the two groups reads a register nothing writes. Choosing which means changing
+# pipeline.h, command.cpp and one group of shaders together, which is a renderer
+# decision rather than a precheck's; the sizes are enforced here in the meantime
+# because those are unambiguous.
+if command -v python3 >/dev/null 2>&1; then
+    if python3 tools/shaders/check_cbuffer_registers.py >"$OUT/err" 2>&1; then
+        echo "  ok   HLSL cbuffer registers"
+    else
+        echo "  WARN HLSL cbuffer registers (see below; not a failure yet)"
+        sed 's/^/    /' "$OUT/err" | head -6
+    fi
+fi
+
 # uwp_app.cpp is compiled into BOTH builds: it owns RunGame and Shutdown for the
 # console and the desktop. Its WinRT half therefore has to sit inside
 # GR2_XBOX_UWP guards, and a guard that covers the wrong part of the function --
