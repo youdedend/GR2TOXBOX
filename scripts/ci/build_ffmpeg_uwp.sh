@@ -21,11 +21,11 @@ cd objects
 ../source/configure \
     --prefix="$prefix" --target-os=win32 --arch=x86_64 --enable-cross-compile \
     --toolchain=msvc --cc=clang-cl --cxx=clang-cl --ld=lld-link \
-    --ar=llvm-ar --nm=llvm-nm --ranlib=llvm-ranlib \
+    --ar=lib.exe --nm=llvm-nm --ranlib=true \
     --extra-cflags='-MT -DWINAPI_FAMILY=WINAPI_FAMILY_APP -D_WIN32_WINNT=0x0A00' \
     --extra-ldflags='-APPCONTAINER WindowsApp.lib' \
     --enable-static --disable-shared --disable-doc --disable-debug --disable-programs \
-    --disable-autodetect --disable-everything --disable-network --disable-devices \
+    --disable-autodetect --disable-everything --disable-network --disable-devices --disable-avdevice \
     --disable-hwaccels --disable-dxva2 --disable-d3d11va --disable-d3d12va \
     --disable-mediafoundation --disable-vulkan --enable-w32threads \
     --enable-runtime-cpudetect --enable-swscale --enable-swresample --enable-avfilter \
