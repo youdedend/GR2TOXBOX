@@ -101,7 +101,12 @@ def main():
                                  '-HV', '2021', '-WX', '-I', str(ROOT),
                                  '-Fo', os.devnull, str(path)], capture_output=True, text=True)
         if result.returncode:
-            print(f'FAIL {path}\n{result.stdout}{result.stderr}')
+            output = result.stdout + result.stderr
+            print(f'FAIL {path}\n{output}')
+            # Check-run annotations remain readable through api.github.com even
+            # when the sandbox cannot reach Actions' external log-storage hosts.
+            escaped = output[:60000].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+            print(f'::error file={path},title=DXC SM6.4 compile failed::{escaped}')
             failed += 1
     print(f'DXC HLSL 2021 SM6.4 compile: {len(files)-failed}/{len(files)} passed '
           f'in {time.monotonic()-start:.2f}s')
