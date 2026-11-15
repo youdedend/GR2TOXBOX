@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+# SPDX-FileCopyrightText: Copyright 2026 GR2toXBOX contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+"""Structural checks on the packing scripts, which only ever run on Windows.
+
+The packaging scripts cannot be executed here -- there is no PowerShell and no
+Windows SDK -- so every mistake in them costs a full Windows run to discover, and
+the packaging step is the last thing before an artifact exists. That makes the
+cheap structural checks worth having on Linux:
+
+  * here-strings (@' ... '@ and @" ... "@) are paired;
+  * braces balance once comments and strings are removed;
+  * every variable the script reads without defining is either a parameter, an
+    automatic variable, a loop variable, or comes from the environment -- a typo'd
+    variable name is silent in PowerShell (it expands to nothing), which turns a
+    check into a no-op that then fails open;
+  * every tool the script invokes through Find-SdkTool is a real SDK tool name.
+
+Not a parser: a mistake this cannot see is still a mistake, but the ones it can see
+have all cost a run at some point.
+"""
+
+import os
+import re
+import sys
+
+SCRIPTS = [
+    "scripts/ci/package_msix.ps1",
+    "scripts/ci/make_certificate.ps1",
+    "scripts/ci/annotate_failure.ps1",
+]
+
+# Variable names PowerShell provides, or that a pipeline supplies.
+AUTOMATIC = {
+    "_", "args", "env", "error", "false", "foreach", "home", "host", "input",
+    "lastexitcode", "matches", "myinvocation", "null", "ofs", "pid", "profile",
+    "psboundparameters", "pscmdlet", "psculture", "pshome", "pwd", "shellid",
+    "stacktrace", "this", "true", "gitem", "?", "^", "$", "switch",
+}
+
+# Things that appear as $Name but are not variables: subexpression forms, scope
+# qualifiers and the sigils PowerShell uses inside strings.
+NOT_A_VARIABLE = re.compile(
+    r"^(?:env|script|global|local|private|using|workflow|function|variable):"
+)
+
+
+def strip_for_balance(src):
+    """Remove comments and string literals so brace counting means something."""
+    out = []
+    i = 0
+    n = len(src)
+    while i < n:
+        # here-string
+        m = re.match(r"@(['\"])\r?\n", src[i:])
+        if m:
+            close = m.group(1) + "@"
+            end = src.find(close, i + m.end())
+            i = n if end < 0 else end + len(close)
+            continue
+        c = src[i]
+        # line comment
+        if c == "#":
+            end = src.find("\n", i)
+            i = n if end < 0 else end
+            continue
+        # block comment
+        if src.startswith("<#", i):
+            end = src.find("#>", i + 2)
+            i = n if end < 0 else end + 2
+            continue
+        # single- or double-quoted string, honouring the doubled-quote escape
+        if c in "'\"":
+            j = i + 1
+            while j < n:
+                if src[j] == c:
+                    if j + 1 < n and src[j + 1] == c:
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                j += 1
+            i = j
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def check(path, problems):
+    src = open(path, encoding="utf-8").read()
+
+    # here-string pairing
+    for tag in ('@"', "@'"):
+        count = len(re.findall(r"(?m)^\s*" + re.escape(tag) + r"\s*$", src))
+        closing = src.count(tag[::-1] + "\n") + len(re.findall(r"(?m)^" + re.escape(tag[::-1]) + r"\s*$", src))
+        # Pragmatic: count openers at line start and closers at line start.
+        openers = len(re.findall(r"(?m)^\s*" + re.escape(tag) + r"\s*$", src))
+        closers = len(re.findall(r"(?m)^" + re.escape(tag[::-1]) + r"\s*$", src))
+        if openers != closers:
+            problems.append(
+                f"{path}: {openers} '{tag}' here-string opener(s) but {closers} closer(s)"
+            )
+
+    # brace balance
+    stripped = strip_for_balance(src)
+    delta = stripped.count("{") - stripped.count("}")
+    if delta != 0:
+        problems.append(f"{path}: braces are unbalanced by {delta:+d}")
+
+    # declared names: parameters, assignments, foreach/for variables
+    declared = set()
+    for m in re.finditer(r"\$([A-Za-z_][A-Za-z0-9_]*)", src):
+        name = m.group(1)
+        after = src[m.end():]
+        # $x = ... is an assignment
+        if re.match(r"\s*(?:[-+*/%]?=)(?!=)", after):
+            declared.add(name)
+    for m in re.finditer(r"param\s*\(([\s\S]*?)\)\s*\n", src):
+        for p in re.finditer(r"\$([A-Za-z_][A-Za-z0-9_]*)", m.group(1)):
+            declared.add(p.group(1))
+    for m in re.finditer(r"foreach\s*\(\s*\$([A-Za-z_][A-Za-z0-9_]*)\s+in\b", src):
+        declared.add(m.group(1))
+    for m in re.finditer(r"\bfor\s*\(\s*\$([A-Za-z_][A-Za-z0-9_]*)", src):
+        declared.add(m.group(1))
+    # catch/try blocks bind nothing, but a -PipelineVariable or [ref] does not matter
+    for m in re.finditer(r"\$([A-Za-z_][A-Za-z0-9_]*)\s*\+=", src):
+        declared.add(m.group(1))
+
+    reads = set()
+    for m in re.finditer(r"\$([A-Za-z_][A-Za-z0-9_]*)", src):
+        reads.add(m.group(1))
+
+    # A variable that is read but never assigned, provided, or automatic. Compared
+    # case-insensitively: PowerShell variables are case-insensitive.
+    known = {n.lower() for n in declared} | {n.lower() for n in AUTOMATIC}
+    for name in sorted(reads):
+        low = name.lower()
+        if low in known:
+            continue
+        if NOT_A_VARIABLE.match(name):
+            continue
+        # $env:FOO reads $env first; that is handled by the automatic list.
+        problems.append(
+            f"{path}: ${name} is read but never assigned -- PowerShell expands it to "
+            f"nothing, so a check using it silently passes"
+        )
+
+    # Find-SdkTool must name tools that exist in the SDK
+    for m in re.finditer(r'Find-SdkTool\s+"([^"]+)"', src):
+        tool = m.group(1)
+        if tool not in {
+            "makepri.exe", "makeappx.exe", "signtool.exe", "makecert.exe",
+            "certutil.exe", "mt.exe", "c1010.exe",
+        }:
+            problems.append(f"{path}: Find-SdkTool \"{tool}\" is not a tool this expects")
+
+
+def main():
+    problems = []
+    for path in SCRIPTS:
+        if not os.path.exists(path):
+            problems.append(f"{path} is missing")
+            continue
+        check(path, problems)
+    if problems:
+        for p in problems:
+            print(p)
+        print()
+        print(f"{len(problems)} problem(s) in the packaging scripts")
+        return 1
+    print(f"packaging scripts: {len(SCRIPTS)} files structurally consistent")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

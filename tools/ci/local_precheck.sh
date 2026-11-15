@@ -255,6 +255,21 @@ if command -v python3 >/dev/null 2>&1; then
     fi
 fi
 
+# The packaging scripts only run on Windows, so a structural mistake in them -- a
+# typo'd variable, an unterminated here-string, an unbalanced brace -- costs a
+# full Windows run to find, and it is the step that decides whether an artifact
+# exists at all. These are the checks that do not need PowerShell.
+if command -v python3 >/dev/null 2>&1; then
+    if ! python3 tools/ci/check_powershell.py >"$OUT/err" 2>&1; then
+        echo "  FAIL packaging scripts"
+        sed 's/^/    /' "$OUT/err" | head -20
+        annotate_log "scripts/ci" "$OUT/err"
+        failures=$((failures + 1))
+    else
+        echo "  ok   packaging scripts"
+    fi
+fi
+
 # The UWP package manifest and its assets, before makeappx sees them. makeappx
 # validates XML and refuses to pack a missing asset, but everything else it accepts
 # and the console rejects at install -- which is a sideload failure a long way from

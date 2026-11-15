@@ -395,14 +395,48 @@ jobs:
         run: |
           ./scripts/ci/make_certificate.ps1 -OutDir xbox-package/signing
 
+      # The packaging step has no compiler to quote, so a bare exit code is all it
+      # leaves behind -- and this is the step where a failure is a console install
+      # that refuses a package for a reason nothing else reports. Tee it to a log and
+      # run it through the same annotator the build steps use, so the reason lands on
+      # the check run itself and survives a log that cannot be downloaded.
       - name: Stage, pack and sign the MSIX
         shell: pwsh
         run: |
-          ./scripts/ci/package_msix.ps1 `
-            -BuildDir build-uwp `
-            -ExeName "GR2port.exe" `
-            -Version "${{ env.GR2_VERSION }}" `
-            -SigningDir xbox-package/signing
+          # $ErrorActionPreference is left at Stop: the packaging script signals
+          # failure with throw, and a terminating error is what try/catch catches.
+          # $LASTEXITCODE is NOT usable here -- it is only set by native executables,
+          # so after a .ps1 script it still holds whatever makeappx or signtool left
+          # behind, which is 0 on the failure path. Catch instead.
+          #
+          # *>&1 rather than 2>&1: the script reports progress with Write-Host, which
+          # in PowerShell 5+ writes to the information stream, so a plain 2>&1 would
+          # capture nothing of the detail worth having.
+          $failed = $false
+          try {
+            ./scripts/ci/package_msix.ps1 `
+              -BuildDir build-uwp `
+              -ExeName "GR2port.exe" `
+              -Version "${{ env.GR2_VERSION }}" `
+              -SigningDir xbox-package/signing *>&1 |
+              Tee-Object -FilePath package-msix.log
+          } catch {
+            $failed = $true
+            $_ | Out-String | Add-Content -Path package-msix.log
+          }
+          if ($failed) {
+            ./scripts/ci/annotate_failure.ps1 -LogFile package-msix.log
+            exit 1
+          }
+
+      - name: Upload the packaging log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-msix-log
+          path: |-
+            package-msix.log
+          if-no-files-found: ignore
 
       - name: Verify the bundle contents
         shell: pwsh

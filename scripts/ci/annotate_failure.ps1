@@ -50,7 +50,32 @@ $patterns = @(
     # can be the second form.
     'error:',
     ': error ',
-    'FAILED:'
+    'FAILED:',
+    # The packaging tools. makeappx and makepri prefix their diagnostics with
+    # 'MakeAppx : error:' / 'MakePri : error:' and can also print a bare
+    # 'Error: <reason>' line; signtool prints 'SignTool Error:' and a bare
+    # 'Error information:'. The packaging step is where a failure has no compiler
+    # to quote, so these are the only lines that carry a reason at all.
+    'MakeAppx\s*:\s*error',
+    'MakePri\s*:\s*error',
+    'SignTool Error',
+    'Error information',
+    '^Error:',
+    'failed with error',
+    'The specified path|The system cannot find the file|does not exist',
+    # A terminating PowerShell error, which is how package_msix.ps1 signals every
+    # one of its own failures (it uses throw, not exit).
+    'Exception:',
+    'throw',
+    # The signing certificate and the manifest are checked by hand-written throws
+    # in package_msix.ps1; this catches the rest of the family.
+    'signing certificate|Signing certificate',
+    'resources\.pri|AppxManifest',
+    # Every failure package_msix.ps1 raises for itself is spelled
+    # "<tool> <verb> failed (<exit code>)", so this matches the whole family
+    # without listing each one: makepri createconfig failed (1), makeappx pack
+    # failed (1), signtool verify failed (1).
+    'failed \(\d+\)'
 )
 
 function Escape-Command([string]$Text) {

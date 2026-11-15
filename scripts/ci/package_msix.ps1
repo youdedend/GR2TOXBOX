@@ -70,6 +70,20 @@ Copy-Item $exe.FullName (Join-Path $StageDir $ExeName)
 # which makeappx accepts and the package then refuses to install, so the failure
 # would have looked like a signing problem on the console rather than a manifest
 # bug here. Anchoring on the Identity element is what keeps the two apart.
+# A package version is four 16-bit fields, and anything outside that makes
+# makeappx fail with a message about the manifest rather than about the version.
+if ($Version -notmatch '^\d{1,5}\.\d{1,5}\.\d{1,5}\.\d{1,5}$') {
+    throw "Version '$Version' is not a quad-dotted package version (each field 0-65535)."
+}
+foreach ($field in $Version -split '\.') {
+    if ([int]$field -gt 65535) {
+        throw "Version '$Version' has a field above 65535, which a package version cannot express."
+    }
+    if ([int]$field -ne 0 -and $field -match '^0\d') {
+        throw "Version '$Version' has a leading zero in a field, which makeappx rejects."
+    }
+}
+
 $manifest = Get-Content "uwp/Package.appxmanifest" -Raw
 $stamped = $manifest -replace '(?s)(<Identity\b[^>]*?\bVersion=")\d+\.\d+\.\d+\.\d+(")', "`${1}$Version`${2}"
 if ($stamped -eq $manifest -and $manifest -notmatch '<Identity\b[^>]*?\bVersion=') {
@@ -88,11 +102,27 @@ foreach ($dll in $dlls) {
     Write-Host "  + $($dll.Name)"
     Copy-Item $dll.FullName (Join-Path $StageDir $dll.Name)
 }
-# A Store app cannot load loose DLLs from outside its package, so an unexpected
-# dependency is a packaging bug worth catching here.
-$known = @("dxcompiler.dll", "dxil.dll", "openal32.dll", "avcodec-*.dll",
-           "avformat-*.dll", "avutil-*.dll", "swresample-*.dll", "swscale-*.dll")
 Write-Host "Packaged DLLs: $($dlls.Name -join ', ')"
+
+# A packaged app cannot load loose DLLs from outside its package, so a DLL that
+# turns up beside the executable and is not staged is a dependency that will fail
+# at load on the console with nothing but a missing-import in the event log. The
+# allow-list is what the build is expected to produce; anything else is either a
+# new dependency that has to be staged deliberately or a build directory that has
+# picked up a stray toolchain DLL.
+$known = @("dxcompiler.dll", "dxil.dll", "openal32.dll", "avcodec-*.dll",
+           "avformat-*.dll", "avutil-*.dll", "swresample-*.dll", "swscale-*.dll",
+           "zlib*.dll", "libz*.dll")
+$unexpected = @($dlls | Where-Object {
+    $name = $_.Name
+    -not ($known | Where-Object { $name -like $_ })
+} | ForEach-Object { $_.Name })
+if ($unexpected.Count -gt 0) {
+    # Warn rather than fail: a legitimate new dependency must not need a script
+    # edit to ship, but it must be visible in the log when a load fails later.
+    Write-Warning "These DLLs are staged but are not in the expected set: $($unexpected -join ', ')."
+    Write-Warning "If they are a real dependency, add them to the allow-list in package_msix.ps1."
+}
 
 # Optional data folders the renderer reads at runtime.
 foreach ($extra in @("shaders", "userdata")) {
