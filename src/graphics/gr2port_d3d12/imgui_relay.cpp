@@ -1,29 +1,5 @@
 // SPDX-FileCopyrightText: Copyright 2026 GR2toXBOX contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// ImGui's windows over the D3D12 backend's picture: the capture half.
-//
-// On the Vulkan side this namespace does two things at once, and the two pull in
-// opposite directions. `Capture` runs on the present thread, immediately after
-// ImGui::Render, and copies the draw lists and the pixels of any texture they
-// sample. `Record` runs inside the frame's last rendering and draws them. The
-// first needs nothing from the graphics API; the second needs a command list.
-//
-// So this file implements the first and leaves the second to pipeline.cpp, for the
-// same reason it is left there on Vulkan: the drawing half has to reproduce ImGui's
-// texture-backend contract exactly, and a mistake in it is a dangling texture or a
-// leak rather than a build error. Splitting the file is what makes that verifiable
-// -- the capture half can be reasoned about and tested without a device.
-//
-// Why the capture half matters even before the D3D12 backend can present anything:
-// ImGui's code in the frontend calls these five entry points unconditionally
-// (texture_manager.cpp registers the pixels of every icon a layer decodes,
-// imgui_core.cpp relays its events and captures its frame). Without definitions the
-// port does not link, and without link there is no binary to look at while the
-// drawing half is written. This is the contract those callers are owed, held to
-// exactly, so the pixels they hand over are not silently dropped on the floor: they
-// are kept, and the drawing half is what will consume them.
-
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_video.h>
@@ -36,15 +12,10 @@
 
 #include "graphics/gr2port/backend.h"
 
-// Deliberately not imgui.h. This file needs two things from ImGui -- that
-// ImGui::Texture is a type, and the ImDrawData its Capture is handed -- and
-// backend.h forward-declares the first. Pulling ImGui in would put its whole API
-// and its ImTextureID definition in front of a file whose job is to copy plain
-// pointers, and it would drag imgui_texture.h's RefCountedTexture (whose
-// definition lives in the frontend's texture manager) in as a link dependency of
-// the backend. The frame's own description is read through the members SDL and
-// ImGui agree on, which Capture does below.
-struct ImDrawData;
+#include "imgui/imgui_texture.h"
+#include "graphics/gr2port_d3d12/imgui_snapshot.h"
+#include <cstring>
+#include <limits>
 
 namespace Gr2Port::ImGuiRelay {
 
@@ -69,24 +40,21 @@ CanvasMapping g_mapping;
 /// The pixels of each texture a layer has handed over, keyed by the texture's
 /// address. Kept rather than discarded: the drawing half uploads from here, and a
 /// layer that decodes an icon expects it to survive until the texture is gone.
-struct UploadedTexture {
-    std::vector<u8> pixels;
-    u32 width = 0;
-    u32 height = 0;
-};
-// Keyed by the texture's address as an opaque pointer. ImGui::Texture is an empty
-// struct in this port -- its only purpose is to be an address a layer names -- and
-// this file does not include imgui.h, so the address is what it keeps.
-std::map<const void*, UploadedTexture> g_textures;
-
-/// The draw data of the last captured frame. A copy, because ImGui reuses its
-/// buffers on the next NewFrame and the drawing half runs one frame behind the
-/// present thread.
-struct CapturedFrame {
-    ImDrawData* draw_data = nullptr;
-    bool valid = false;
-};
-CapturedFrame g_frame;
+using Key = std::uint64_t;
+std::map<Key,std::shared_ptr<const Pixels>> g_textures;
+std::shared_ptr<const Snapshot> g_frame;
+std::uint64_t g_revision = 0;
+Key KeyOf(const ImGui::Texture* p) { return reinterpret_cast<std::uintptr_t>(p); }
+Key KeyOf(const ImTextureData* p) { return (Key{1}<<63) | reinterpret_cast<std::uintptr_t>(p); }
+ImGui::Texture g_own_texture;
+std::shared_ptr<const Pixels> CopyPixels(const void* data, u32 width, u32 height) {
+    if (!data || !width || !height || width>16384 || height>16384 || std::uint64_t(width)*height*4>64ull*1024*1024) return {};
+    auto image=std::make_shared<Pixels>();
+    image->revision=++g_revision; image->width=width; image->height=height;
+    const auto* bytes=static_cast<const u8*>(data);
+    image->rgba.assign(bytes,bytes+size_t(width)*height*4);
+    return image;
+}
 
 // The cursor position ImGui's backend last set, so WarpBack can restore it after a
 // frame that moved the mouse without the user moving it. SDL's relative-mode warp
@@ -109,41 +77,58 @@ float ToCanvas(const float window_coordinate, const float offset, const float sc
 
 } // namespace
 
+std::shared_ptr<const Snapshot> Latest() {
+    const std::scoped_lock lock{g_mutex}; return g_frame;
+}
+void ResetSnapshots() {
+    const std::scoped_lock lock{g_mutex}; g_frame.reset(); g_textures.clear();
+}
 void Capture(ImDrawData& draw_data) {
     const std::scoped_lock lock{g_mutex};
-
-    // The frame's draw data is kept by address, not copied. Copying would need
-    // ImGui's types -- which this file deliberately does not include, see above --
-    // and ImGui guarantees the data stays valid until the next NewFrame, which is
-    // the window the drawing half has.
-    g_frame.draw_data = &draw_data;
-    g_frame.valid = true;
-
-    // The cursor is hidden while ImGui's frame draws its own, and Capture is the
-    // only point that knows a frame was rendered at all. WarpBack reads this to
-    // decide whether a warp is owed.
-    g_warp_pending = true;
-}
-
-void KeepPixels(const ImGui::Texture* texture, const void* pixels, u32 width, u32 height) {
-    if (texture == nullptr || pixels == nullptr || width == 0 || height == 0) {
-        return;
+    // ImGui 1.92 owns a mutable atlas. Copy before acknowledging its requests.
+    if (draw_data.Textures) for (ImTextureData* texture : *draw_data.Textures) {
+        if ((texture->Status==ImTextureStatus_WantCreate || texture->Status==ImTextureStatus_WantUpdates)
+            && texture->Format==ImTextureFormat_RGBA32) {
+            if(auto image=CopyPixels(texture->Pixels,u32(texture->Width),u32(texture->Height))) {
+                g_textures[KeyOf(texture)]=std::move(image);
+                texture->SetTexID(&g_own_texture); texture->SetStatus(ImTextureStatus_OK);
+            }
+        } else if(texture->Status==ImTextureStatus_WantDestroy && texture->UnusedFrames>0) {
+            g_textures.erase(KeyOf(texture)); texture->SetTexID(ImTextureID_Invalid);
+            texture->SetStatus(ImTextureStatus_Destroyed);
+        }
     }
-    const size_t bytes = static_cast<size_t>(width) * height * 4;
-    const std::scoped_lock lock{g_mutex};
-    UploadedTexture& entry = g_textures[texture];
-    entry.width = width;
-    entry.height = height;
-    entry.pixels.resize(bytes);
-    std::copy_n(static_cast<const u8*>(pixels), bytes, entry.pixels.begin());
+    auto frame=std::make_shared<Snapshot>();
+    frame->position[0]=draw_data.DisplayPos.x; frame->position[1]=draw_data.DisplayPos.y;
+    frame->size[0]=draw_data.DisplaySize.x; frame->size[1]=draw_data.DisplaySize.y;
+    frame->framebuffer_scale[0]=draw_data.FramebufferScale.x;
+    frame->framebuffer_scale[1]=draw_data.FramebufferScale.y;
+    for(const ImDrawList* list : draw_data.CmdLists) {
+        const auto vb=u32(frame->vertices.size()), ib=u32(frame->indices.size());
+        for(const ImDrawVert& v : list->VtxBuffer)
+            frame->vertices.push_back({{v.pos.x,v.pos.y},{v.uv.x,v.uv.y},v.col});
+        for(ImDrawIdx i : list->IdxBuffer) frame->indices.push_back(u32(i));
+        for(const ImDrawCmd& cmd : list->CmdBuffer) {
+            // Callbacks contain application pointers. Never execute them later on
+            // another thread; reset-state callbacks are unnecessary (we bind each draw).
+            if(cmd.UserCallback || !cmd.ElemCount || cmd.IdxOffset>u32(list->IdxBuffer.Size) ||
+               cmd.ElemCount>u32(list->IdxBuffer.Size)-cmd.IdxOffset) continue;
+            const Key key=cmd.TexRef._TexData ? KeyOf(cmd.TexRef._TexData) : KeyOf(cmd.TexRef._TexID);
+            auto image=g_textures.find(key); if(image==g_textures.end()) continue;
+            frame->commands.push_back({cmd.ElemCount,ib+cmd.IdxOffset,vb+cmd.VtxOffset,
+                {cmd.ClipRect.x,cmd.ClipRect.y,cmd.ClipRect.z,cmd.ClipRect.w},image->second});
+        }
+    }
+    g_frame=std::move(frame);
+    g_warp_pending=true;
 }
-
+void KeepPixels(const ImGui::Texture* texture,const void* pixels,u32 width,u32 height) {
+    if(!texture) return;
+    const std::scoped_lock lock{g_mutex};
+    if(auto image=CopyPixels(pixels,width,height)) g_textures[KeyOf(texture)]=std::move(image);
+}
 void Forget(const ImGui::Texture* texture) {
-    if (texture == nullptr) {
-        return;
-    }
-    const std::scoped_lock lock{g_mutex};
-    g_textures.erase(texture);
+    const std::scoped_lock lock{g_mutex}; g_textures.erase(KeyOf(texture));
 }
 
 const SDL_Event* ForImGui(const SDL_Event* event, SDL_Event& copy) {
@@ -192,18 +177,7 @@ bool WarpBack() {
     return true;
 }
 
-// --- The relay's state, for the drawing half --------------------------------
-//
-// The drawing half needs the captured frame and the canvas mapping. It does not
-// exist yet -- no swapchain, no pass list -- so these two entry points are the seam
-// it will join at: the swapchain, once it exists, calls SetWindow with the window
-// it presents to and SetCanvasMapping with where ImGui's canvas sits in it.
-//
-// Nothing calls them today, and the defaults are correct without them: a warp with
-// no window does nothing (WarpBack), and an identity mapping passes coordinates
-// through unchanged (ForImGui). That is the property to keep in mind when wiring
-// them up -- they may stay uncalled indefinitely without being wrong.
-
+// Input mapping is independent of the immutable render snapshots.
 void SetWindow(SDL_Window* window) {
     const std::scoped_lock lock{g_mutex};
     g_window = window;

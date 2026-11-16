@@ -17,6 +17,8 @@
 
 #include "common/logging/log.h"
 #include "core/uwp_memory.h"
+#include "graphics/gr2port_d3d12/presenter.h"
+#include <atomic>
 
 #if defined(GR2_XBOX_UWP)
 // The HDMI query. WinRT only exists on the console build; the desktop build
@@ -48,7 +50,7 @@ namespace {
 /// Set by RunGame, cleared by Shutdown. A second RunGame while the game is up
 /// (the app model activating a window again after a suspend) is a no-op rather
 /// than a second emulator.
-bool g_running = false;
+std::atomic<bool> g_running{false};
 /// The console's core window, kept so NotifyDisplayChanged can resize the
 /// swapchain without the caller having to keep it.
 void* g_core_window = nullptr;
@@ -77,22 +79,26 @@ bool RunGame(void* core_window) {
     }
 #endif
 
-    // The emulator's own loop is started by the caller's window and device
-    // plumbing; this function's contract is the part both entry points share --
-    // the budget report, the run state and the shutdown order. The per-frame work
-    // belongs to the renderer, so RunGame returns once the game has been handed
-    // control, and the entry point's loop drives it.
-    g_running = true;
-    LOG_INFO(Graphics, "UWP: game run started (core window: {}).",
-             core_window != nullptr ? "yes" : "no");
+    g_running=true;
+#if defined(GR2_XBOX_UWP)
+    bool success=false;
+    try { success=ConsoleSession(); }
+    catch(const winrt::hresult_error& error) {
+        LOG_CRITICAL(Graphics,"UWP session failed: {}",winrt::to_string(error.message()));
+    }
+    Shutdown();
+    return success;
+#else
     return true;
+#endif
 }
+void* CoreWindowHandle() { return g_core_window; }
+bool SessionRunning() { return g_running.load(); }
+void RequestStop() { g_running=false; }
 
 void Shutdown() {
-    if (!g_running) {
-        return;
-    }
     g_running = false;
+    Renderer::Shutdown();
     g_core_window = nullptr;
     LOG_INFO(Graphics, "UWP: game run stopped.");
 }
@@ -101,6 +107,7 @@ void NotifyDisplayChanged() {
     if (!g_running) {
         return;
     }
+    Renderer::RequestResize();
     // The backend recreates the swapchain at the window's new size on the next
     // present; the message only has to reach the log so a resolution change is
     // visible in a report of a frame-pacing problem.
@@ -176,7 +183,7 @@ DisplayModeQuery QueryDisplayMode() {
                     LOG_INFO(Graphics, "CoreWindow bounds: x={} y={} width={} height={}",
                              bounds.X, bounds.Y, bounds.Width, bounds.Height);
                     const float inverse = query.composition_scale > 0.0f
-                                              ? 1.0f / query.composition_scale
+                                              ? query.composition_scale
                                               : 1.0f;
                     // Bounds is in DIPs; multiply back out to physical pixels.
                     query.width = static_cast<unsigned int>(

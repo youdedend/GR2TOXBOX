@@ -1,3 +1,6 @@
+#if defined(GR2_XBOX_UWP)
+#include "graphics/gr2port_d3d12/uwp/uwp_main.h"
+#endif
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-FileCopyrightText: Copyright 2026 GR2port
 // SPDX-License-Identifier: GPL-2.0-or-later
@@ -148,11 +151,21 @@ void WindowSDL::SetIcon(std::span<const u8> png_data) {
     SetWindowIcon(window, std::vector<u8>(png_data.begin(), png_data.end()));
 }
 
+#if defined(GR2_XBOX_UWP)
+// CoreWindow messages must be processed by this UI thread, not the render worker.
+#endif
 void WindowSDL::WaitEvent() {
+#if defined(GR2_XBOX_UWP)
+    if(!Gr2Port::Uwp::PumpConsoleEvents()) {is_open=false;return;}
+#endif
     // Called on main thread
     SDL_Event event;
 
+#if defined(GR2_XBOX_UWP)
+    if (!SDL_WaitEventTimeout(&event,1)) {
+#else
     if (!SDL_WaitEvent(&event)) {
+#endif
         return;
     }
 

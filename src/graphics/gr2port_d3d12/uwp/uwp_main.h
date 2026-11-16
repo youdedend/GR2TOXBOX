@@ -28,6 +28,12 @@ bool RunGame(void* core_window);
 /// Stops the emulator and releases the device. Called from the view's
 /// Uninitialize, and after the game's own shutdown on desktop.
 void Shutdown();
+void RequestStop();
+bool SessionRunning();
+void* CoreWindowHandle();
+// UI-thread pump, shared by the launcher and the emulator WindowSDL loop.
+bool PumpConsoleEvents();
+bool ConsoleSession();
 
 /// Tells the backend that the display's mode or DPI changed, so the swapchain is
 /// recreated at the new size rather than presenting a stretched frame.

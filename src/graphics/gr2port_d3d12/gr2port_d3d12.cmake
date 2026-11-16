@@ -14,7 +14,7 @@ include(${PROJECT_SOURCE_DIR}/cmake/GR2D3D12Shaders.cmake)
 set(GR2_D3D12_DIR ${CMAKE_CURRENT_LIST_DIR})
 
 # --- Host sources -----------------------------------------------------------
-target_compile_definitions(gr2port PRIVATE GR2_BLACKBOX=1)
+target_compile_definitions(gr2port PRIVATE GR2_BLACKBOX=1 GR2_RENDERER_D3D12=1)
 target_sources(gr2port PRIVATE
     ${PROJECT_SOURCE_DIR}/src/uwp/blackbox_log.cpp
     ${PROJECT_SOURCE_DIR}/src/uwp/blackbox_log.h
@@ -42,8 +42,10 @@ target_sources(gr2port PRIVATE
     ${GR2_D3D12_DIR}/backend_surface.cpp
     ${GR2_D3D12_DIR}/backend_capture.cpp
     ${GR2_D3D12_DIR}/imgui_relay.cpp
+    ${GR2_D3D12_DIR}/imgui_gpu.cpp
     ${GR2_D3D12_DIR}/uwp/display_mode.h
     ${GR2_D3D12_DIR}/uwp/uwp_app.cpp
+    ${GR2_D3D12_DIR}/uwp/uwp_launcher.cpp
     ${GR2_D3D12_DIR}/uwp/uwp_main.cpp
     ${GR2_D3D12_DIR}/uwp/uwp_main.h
 )

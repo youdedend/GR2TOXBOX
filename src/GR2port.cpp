@@ -21,6 +21,10 @@
 #include "GR2port.h"
 #if defined(GR2_XBOX_UWP)
 #include "core/uwp_memory.h"
+#include "graphics/gr2port_d3d12/uwp/uwp_main.h"
+#include "graphics/gr2port_d3d12/uwp/console_boot.h"
+#include "core/prompt_packs/prompt_packs.h"
+#include "graphics/gr2port_d3d12/presenter.h"
 #endif
 #include "common/debug.h"
 #include "common/debug_files.h"
@@ -623,6 +627,9 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
         window->WaitEvent();
     }
 
+#if defined(GR2_XBOX_UWP)
+    Gr2Port::Renderer::Shutdown();
+#endif
     std::quick_exit(0);
 }
 
@@ -851,3 +858,32 @@ void Emulator::UpdatePlayTime(const std::string_view serial) {
 }
 
 } // namespace Core
+
+#if defined(GR2_XBOX_UWP)
+// UI-thread handoff into exactly the same Core::Emulator::Run used by -nolauncher.
+// Run owns FileSys mounts, Memory::Instance (adopts the early arena), HLE, linker,
+// eboot loading, input and the WindowSDL loop. No second process/second arena.
+namespace Gr2Port::Uwp {
+void InitializeConsoleSettings(const std::filesystem::path& local_state) {
+    using Common::FS::PathType;
+    for(const auto& [type,name] : std::initializer_list<std::pair<PathType,const char*>>{
+        {PathType::UserDir,"userdata"},{PathType::LogDir,"userdata/log"},
+        {PathType::ScreenshotsDir,"userdata/screenshots"},{PathType::ShaderDir,"userdata/shader"},
+        {PathType::GameDataDir,"userdata/data"},{PathType::CapturesDir,"userdata/captures"},
+        {PathType::CacheDir,"userdata/cache"},{PathType::TrophyDir,"userdata/trophy"},
+        {PathType::SaveDataDir,"userdata/savedata"}}) {
+        const auto path=local_state/name;
+        std::filesystem::create_directories(path); Common::FS::SetUserPath(type,path);
+    }
+    Common::Log::Setup(Common::FS::LOG_FILE);
+    EmulatorSettings.Load(); UserSettings.Load();
+}
+void BootConsoleGame(const std::filesystem::path& root) {
+    PromptPacks::InstallBundled();
+    auto* emulator=Common::Singleton<Core::Emulator>::Instance();
+    emulator->executableName="GR2port.exe";
+    EmulatorState::GetInstance()->SetGameRunning(true);
+    emulator->Run(root);
+}
+}
+#endif

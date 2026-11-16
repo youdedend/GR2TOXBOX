@@ -9,7 +9,7 @@ This file is the single honest answer to "how far along is this?". It is updated
 in the same commit as the work it describes. If it disagrees with the README, this
 file is right.
 
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-15
 
 ---
 
@@ -25,7 +25,7 @@ file is right.
 | HLSL SM 6.4 shader pipeline (`dxc`, fail-loud) | **Done** |
 | D3D12 command ring, root signature, PSO cache | **Done** |
 | Direct3D 12 frame graph (passes, submits, presenter) | **In progress** |
-| HLSL shader port | **In progress — 53 of 184 engine stages + 1/1 detile; 54 DXC/Slang-verified** |
+| HLSL shader port | **In progress — 71 of 184 engine stages + 1/1 detile; 72 DXC/Slang-verified** |
 | UWP shell (`IFrameworkView`, launcher, gamepad) | **In progress** |
 | **UWP package builds at all** | **Yes — SDL3 replaced by an in-tree shim** |
 | Gamepad chord remapping | **Done, unit-tested** |
@@ -130,7 +130,7 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
 
 ### Renderer foundation
 
-* `ID3D12Device8` on FL 12_1, DIRECT + COMPUTE queues, timeline fence,
+* `ID3D12Device8` on FL 12_0, DIRECT + COMPUTE queues, timeline fence,
   flip-model swapchain for both HWND and CoreWindow, tearing/HDR/color-space.
 * Bindless heaps (65,536 SRV/UAV, 256 samplers) with null descriptors.
 * Unified Bindless Arena (5 arenas, 1,088 MiB) with `{arena, uint32 offset}`
@@ -153,6 +153,19 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
   begin/end pair that cannot inherit a target from the previous pass; full-screen
   draws, dispatches and the frame's submit.
 
+### Presenter and console session (implemented, not hardware-verified)
+
+* Actual HWND/CoreWindow clear/ImGui presentation, GPU-fenced uploads and resize
+  handling are wired to the existing device, root and command ring.
+* RunGame blocks in the controller launcher; A chooses a folder with the system
+  picker, X reselects, A/Menu boots a GameCheck-validated dump through the normal
+  in-process emulator path. FutureAccessList plus LocalState persist the choice.
+* UI-thread events/gamepads/presentation keep pumping before and after handoff;
+  the existing early 5 GiB arena is adopted. Blackbox mirrors to game/gr2_logs.
+* Local precheck compiles presenter/ImGui GPU code and WinRT launcher contracts,
+  and executes owned-snapshot lifetime/concurrency tests. This is not an Xbox
+  boot, device-removal, resize, suspend/resume, or game-rendering test.
+
 ### Input
 
 * Xbox chord layer mapping View+LB/RB/B/L3/Y (and optionally the D-Pad) onto the
@@ -163,18 +176,19 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
 
 ## What does not work yet
 
-1. **131 of 184 engine shaders remain.** `python3 tools/shaders/check_shader_coverage.py`
-   reports 53 engine counterparts plus the separate 1/1 GCN detile kernel.
-   The latest 14-stage batch adds world/alpha surfaces (including layered/gem),
-   character depth, movie screens, half-resolution particles, velocity,
-   motion-blur triangle/tile/neighbor, SSAO depth/history, active emitters and
-   both HUD text geometry variants. Compilation is not GPU/runtime parity proof.
-   See [the batch contract](SHADER_BATCH2.md), especially raw scratch outputs.
+1. **113 of 184 engine shaders remain.** Coverage is 71 engine counterparts
+   plus the separate 1/1 GCN detile kernel (72 stages). Batch 3 adds skinning,
+   soft-body simulation/writeback, light-grid/world-lines and branch/grass/leaf
+   simulation and shading, including leaf hull/domain/geometry and shadow
+   domain/geometry. Both Microsoft DXC and Slang pass all 72 stages locally.
+   Compilation is not GPU/runtime parity proof. See [Batch 3](SHADER_BATCH3.md).
 
-2. **The frame graph.** `presenter.*` and `renderer.*` are not written: the pass
-   order, render-target setup and the presenter's CoreWindow path are next.
-   `command.*` and `pipeline.*` now exist, so this is sequencing rather than
-   foundation work.
+2. **The scene frame graph.** The real swapchain clear/ImGui presenter now exists
+   in `backend_surface.cpp`: HWND/CoreWindow RTVs, barriers, ring submission,
+   Present, resize and shutdown. Immutable owned ImGui snapshots and RGBA8 GPU
+   uploads replace raw draw-data pointers. The game's pass order, scene resources,
+   uploads and draw execution remain unimplemented. No hardware rendering or
+   successful eboot progress has been demonstrated.
 3. **The D3D12 capture.** The scene capture's API-agnostic half is built and
    running in the D3D12 job; what is missing is the renderer side of it, and
    `src/graphics/gr2port_d3d12/backend_capture.cpp` now defines the twelve entry
@@ -219,8 +233,11 @@ have a complete renderer. The README says so plainly.
    passes.
 3. `presenter.*` + `renderer.*`: reproduce upstream's pass order
    (`frame_graph_draws.cpp` is the reference) against the arena.
-4. `launcher.*`: the D3D12 launcher UI and the in-process reboot path `Relaunch`
-   already points to.
+4. Hardware-test the blocking controller launcher and in-process boot bridge.
+   It now restores FutureAccessList/LocalState, opens a UI-thread FolderPicker,
+   validates with GameCheck and hands off to Core::Emulator::Run while continuing
+   CoreWindow pumping/presentation. Relaunch and actual game progress still need
+   runtime validation; the scene renderer is not playable.
 5. Audio, FSR 3.1, preset tuning.
 
 ---

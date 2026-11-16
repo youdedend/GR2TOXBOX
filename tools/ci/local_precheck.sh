@@ -320,6 +320,18 @@ else
     echo "  ok   src/graphics/gr2port_d3d12/uwp/uwp_app.cpp (desktop guards)"
 fi
 
+# Compile the entire UI-thread picker/persistence/event loop against narrow WinRT
+# signatures and the real SDL/ImGui headers; never skip the console-only source.
+if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/uwp_stubs -I"$DEPS_ROOT/sdl3/include" \
+        -I"$DEPS_ROOT/imgui" '-DIMGUI_USER_CONFIG="imgui/imgui_config.h"' -DGR2_XBOX_UWP=1 \
+        -fsyntax-only src/graphics/gr2port_d3d12/uwp/uwp_launcher.cpp 2>"$OUT/err"; then
+    echo "  FAIL UWP launcher WinRT contracts"
+    cat "$OUT/err"
+    failures=$((failures + 1))
+else
+    echo "  ok   UWP launcher WinRT contracts (picker, access cache, dispatcher)"
+fi
+
 # The AppContainer Win32 wrappers, which had never been host-checked -- and that is
 # why two of them shipped with the wrong number of arguments for the FromApp call
 # they forward to. VirtualAlloc2FromApp takes seven parameters and
@@ -591,12 +603,16 @@ inline constexpr std::uint8_t detile_comp[] = {0};
 inline constexpr std::span<const std::uint8_t> detile_comp_span = detile_comp;
 }
 DETILE_HEADER
+for shader in imgui_relay_vert imgui_relay_frag; do
+    sed "s/detile_comp/$shader/g" "$OUT/detile_comp.h" >"$OUT/$shader.h"
+done
 CXXFLAGS+=(-I"$OUT")
 D3D12_UNITS=(
     "src/graphics/gr2port_d3d12/detile.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/pipeline.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/command.cpp|-D_WIN32"
-    "src/graphics/gr2port_d3d12/backend_surface.cpp|"
+    "src/graphics/gr2port_d3d12/backend_surface.cpp|-D_WIN32"
+    "src/graphics/gr2port_d3d12/imgui_gpu.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/backend_capture.cpp|"
     "src/graphics/gr2port_d3d12/imgui_relay.cpp|"
 )
@@ -612,7 +628,7 @@ for entry in "${D3D12_UNITS[@]}"; do
     # modules do (meshes.h -> device.h -> vulkan.hpp). Vulkan::Headers is linked on
     # every build, D3D12 included, so this matches the real compile.
     if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/d3d12_stub -I"$DEPS_ROOT/sdl3/include" \
-            -I"$DEPS_ROOT/imgui" -I"$DEPS_ROOT/vulkan-headers/include" $extra \
+            -I"$DEPS_ROOT/imgui" -I"$DEPS_ROOT/vulkan-headers/include" '-DIMGUI_USER_CONFIG="imgui/imgui_config.h"' $extra \
             -fsyntax-only "$file" 2>"$OUT/err"; then
         # Only the diagnostics that are not inside the vendored header count.
         grep -E 'error' "$OUT/err" | grep -v 'd3d12ma/' >"$OUT/ours" || true
@@ -793,6 +809,20 @@ if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
             failures=$((failures + 1))
         fi
     done
+fi
+
+if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
+    if "$CXX" -std=c++23 -O0 -pthread -ffunction-sections -fdata-sections -Wl,--gc-sections \
+        '-DIMGUI_USER_CONFIG="imgui/imgui_config.h"' -Isrc -I"$DEPS_ROOT/imgui" -I"$DEPS_ROOT/sdl3/include" \
+        src/tests/imgui_snapshot_test.cpp src/graphics/gr2port_d3d12/imgui_relay.cpp \
+        "$DEPS_ROOT/imgui/imgui.cpp" "$DEPS_ROOT/imgui/imgui_draw.cpp" \
+        "$DEPS_ROOT/imgui/imgui_tables.cpp" "$DEPS_ROOT/imgui/imgui_widgets.cpp" \
+        -o "$OUT/snapshot" 2>"$OUT/err" && "$OUT/snapshot"; then
+        echo "  ok   ImGui immutable snapshot lifetime/concurrent publication test"
+    else
+        echo "  FAIL ImGui snapshot test"; cat "$OUT/err"
+        failures=$((failures + 1))
+    fi
 fi
 
 if [ "$failures" -ne 0 ]; then

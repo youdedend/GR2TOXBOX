@@ -556,13 +556,16 @@ bool Present(Device& device, bool vsync) {
 }
 
 void WaitForFence(Device& device, u64 value) {
-    if (!device.timeline_fence || !device.timeline_event) {
+    if (!value || !device.timeline_fence || !device.timeline_event) {
         return;
     }
     if (device.timeline_fence->GetCompletedValue() >= value) {
         return;
     }
-    device.timeline_fence->SetEventOnCompletion(value, device.timeline_event);
+    if(FAILED(device.timeline_fence->SetEventOnCompletion(value, device.timeline_event))) {
+        BlackboxRecordDeviceRemoved(device.device.Get());
+        return;
+    }
     WaitForSingleObjectEx(device.timeline_event, INFINITE, FALSE);
 }
 
@@ -570,8 +573,12 @@ u64 SignalFence(Device& device) {
     const u64 value = ++device.timeline_value;
     if (device.graphics_queue && device.timeline_fence) {
         const HRESULT hr = device.graphics_queue->Signal(device.timeline_fence.Get(), value);
-        if (IsDeviceLost(hr)) BlackboxRecordDeviceRemoved(device.device.Get());
-    }
+        if (FAILED(hr)) {
+            BlackboxRecordDeviceRemoved(device.device.Get());
+            LOG_ERROR(Graphics,"D3D12 fence signal failed: {}",HresultToString(hr));
+            return 0;
+        }
+    } else return 0;
     return value;
 }
 

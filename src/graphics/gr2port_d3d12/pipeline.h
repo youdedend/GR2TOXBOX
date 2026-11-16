@@ -188,6 +188,7 @@ struct Pipeline {
     std::span<const u8> ds;
     std::span<const u8> cs;
     u64 hash = 0;
+    u32 patch_control_points = 0;
 
     [[nodiscard]] bool IsValid() const noexcept {
         return state != nullptr;

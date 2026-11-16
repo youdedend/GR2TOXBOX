@@ -1,30 +1,18 @@
 // SPDX-FileCopyrightText: Copyright 2026 GR2toXBOX contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The frontend-facing half of the D3D12 backend: the renderer's lifetime, the
-// lost-device log, the game's photos and the pipeline-build log.
-//
-// The D3D12 backend today owns a device, a command list and a pipeline library. It
-// has no swapchain and no pass recording, so it cannot draw a frame -- and these
-// four namespaces are what the *frontend* asks of a renderer regardless of whether
-// one can draw: start a render thread, decide from the last run's log whether the
-// device was lost, hand the JPEG encoder a photo, report how long the pipeline
-// build took. None of them is allowed to be missing at link time, and none of them
-// should lie.
-//
-// So each answer here is the true one for a backend without a present path, and it
-// says so in the log rather than pretending. That is deliberate: a stub that
-// returns success would turn "the renderer does not present yet" into a black
-// window with no explanation, which is the failure mode this whole console port
-// keeps having to dig out of logs.
-
 #include <SDL3/SDL_messagebox.h>
+#include <SDL3/SDL_video.h>
+#include <SDL3/SDL_properties.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <mutex>
+#include <thread>
+#include <atomic>
+#include <memory>
+#include <cstdlib>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -32,6 +20,12 @@
 #include "common/logging/log.h"
 #include "graphics/gr2port/backend.h"
 #include "graphics/gr2port/frame_stats.h"
+#include "graphics/gr2port/window.h"
+#include "graphics/gr2port_d3d12/presenter.h"
+#include "graphics/gr2port_d3d12/uwp/uwp_main.h"
+#include "graphics/gr2port_d3d12/imgui_gpu.h"
+#include "uwp/blackbox_log.h"
+
 
 #if defined(GR2_XBOX_UWP)
 #include "uwp/sdl3_shim/pad_state.h"
@@ -41,10 +35,7 @@ namespace Gr2Port {
 
 namespace {
 
-/// Whether Renderer::Start has been called. The render thread itself arrives with
-/// the swapchain; until then this is what a caller's "did the renderer start" test
-/// answers against. Guarded because Start is allowed to be called from the UWP
-/// view's thread and checked from the game's.
+/// Start is idempotent; the UWP view owns its session, desktop owns a worker.
 std::mutex g_state_mutex;
 bool g_renderer_started = false;
 
@@ -59,18 +50,120 @@ bool g_trace_armed = false;
 
 // --- Renderer ---------------------------------------------------------------
 
-void Renderer::Start() {
-    const std::scoped_lock lock{g_state_mutex};
-    if (g_renderer_started) {
-        LOG_INFO(Graphics, "D3D12: the renderer was already started; ignored.");
-        return;
+namespace Renderer {
+namespace {
+struct Surface {
+    D3D12::Device device;
+    D3D12::CommandRing ring;
+    D3D12::RootSignature root;
+    D3D12::BindlessHeap heap;
+    D3D12::ImGuiGpu imgui;
+    D3D12::ComPtr<ID3D12DescriptorHeap> rtvs;
+    std::array<D3D12::ComPtr<ID3D12Resource>,D3D12::FramesInFlight> buffers;
+    u64 frames=0;
+    bool ready=false;
+    bool Targets() {
+        auto rtv=rtvs->GetCPUDescriptorHandleForHeapStart();
+        for(u32 i=0;i<device.buffer_count;++i) {
+            if(FAILED(device.swapchain->GetBuffer(i,IID_PPV_ARGS(buffers[i].GetAddressOf())))) return false;
+            device.device->CreateRenderTargetView(buffers[i].Get(),nullptr,rtv);
+            rtv.ptr+=device.rtv_descriptor_size;
+        }
+        return true;
     }
-    g_renderer_started = true;
-    LOG_INFO(Graphics,
-             "D3D12: the renderer has no present path yet -- the device, command list and "
-             "pipeline library are built, the swapchain and the passes are not. The game "
-             "will run, its capture will fill, and nothing will be drawn.");
+    ~Surface() {
+        if(device.graphics_queue && device.timeline_fence)
+            D3D12::WaitForFence(device,D3D12::SignalFence(device));
+        imgui.Destroy(); ring.Destroy(); heap.Destroy();
+        if(device.timeline_event) CloseHandle(device.timeline_event);
+    }
+};
+std::mutex surface_mutex;
+std::unique_ptr<Surface> surface;
+std::jthread worker;
+std::atomic<bool> resize_requested{false};
 }
+bool Initialize(void* core_window) {
+    const std::scoped_lock lock{surface_mutex};
+    if(surface) return surface->ready;
+    auto next=std::make_unique<Surface>();
+    D3D12::DeviceDesc desc; desc.core_window=core_window;
+#if !defined(GR2_XBOX_UWP)
+    SDL_Window* window=Window::Show(); if(!window) return false;
+    desc.hwnd=SDL_GetPointerProperty(SDL_GetWindowProperties(window),SDL_PROP_WINDOW_WIN32_HWND_POINTER,nullptr);
+    const auto size=Window::PixelSize(); desc.width=size.width; desc.height=size.height;
+#endif
+    if(!D3D12::CreateDevice(desc,next->device)||!D3D12::CreateSwapchain(next->device,desc)) return false;
+    D3D12_DESCRIPTOR_HEAP_DESC rtvs{}; rtvs.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    rtvs.NumDescriptors=next->device.buffer_count;
+    if(FAILED(next->device.device->CreateDescriptorHeap(&rtvs,IID_PPV_ARGS(next->rtvs.GetAddressOf()))) ||
+       !next->Targets() || !next->ring.Create(next->device) ||
+       !D3D12::CreateRootSignature(next->device,next->root) || !next->heap.Create(next->device) ||
+       !next->imgui.Create(next->device,next->root,next->heap)) return false;
+    next->ready=true; surface=std::move(next);
+    Blackbox::Milestone("swapchain, backbuffer RTVs, command ring and ImGui PSO ready");
+    return true;
+}
+bool Tick() {
+    const std::scoped_lock lock{surface_mutex};
+    if(!surface||!surface->ready) return false;
+    auto& s=*surface; auto& d=s.device;
+#if !defined(GR2_XBOX_UWP)
+    const auto size=Window::PixelSize();
+    if(!size.width||!size.height) return true;
+    if(size.width!=d.swapchain_width||size.height!=d.swapchain_height) resize_requested=true;
+#endif
+    if(resize_requested.exchange(false)) {
+        D3D12::WaitForFence(d,D3D12::SignalFence(d));
+        for(auto& buffer:s.buffers) buffer.Reset();
+#if defined(GR2_XBOX_UWP)
+        // DPI changes also need a new inverse composition transform. Recreate the
+        // single swapchain only after all old backbuffer references are released.
+        d.swapchain.Reset(); D3D12::DeviceDesc desc; desc.core_window=Uwp::CoreWindowHandle();
+        if(!D3D12::CreateSwapchain(d,desc)||!s.Targets()) {s.ready=false;return false;}
+#else
+        if(!D3D12::ResizeSwapchain(d,size.width,size.height)||!s.Targets()) {s.ready=false;return false;}
+#endif
+        Blackbox::Milestone("swapchain resize completed after GPU idle");
+    }
+    auto list=s.ring.BeginFrame(); if(!list.IsValid()) {s.ready=false;return false;}
+    const auto index=d.swapchain->GetCurrentBackBufferIndex();
+    auto rtv=s.rtvs->GetCPUDescriptorHandleForHeapStart(); rtv.ptr+=size_t(index)*d.rtv_descriptor_size;
+    list.ToRenderTarget(s.buffers[index].Get(),D3D12_RESOURCE_STATE_PRESENT);
+    list.list->OMSetRenderTargets(1,&rtv,FALSE,nullptr); list.SetFullViewport();
+    const float clear[4]={0.018f,0.025f,0.045f,1.f};
+    list.list->ClearRenderTargetView(rtv,clear,0,nullptr);
+    const bool drawn=s.imgui.Record(list,u32(s.frames%D3D12::FramesInFlight),ImGuiRelay::Latest());
+    list.list->OMSetRenderTargets(0,nullptr,FALSE,nullptr);
+    list.Transition(s.buffers[index].Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PRESENT);
+    if(!s.ring.EndFrame(list)) {s.ready=false;return false;}
+    ++s.frames;
+    Blackbox::Pass(0xffff0001u);
+    const bool presented=D3D12::Present(d,true);
+    if(!presented||!drawn) {s.ready=false;Blackbox::Milestone("present/overlay failed; session stopped");return false;}
+    return true;
+}
+void RequestResize() { resize_requested=true; }
+void Shutdown() {
+    if(worker.joinable()) {worker.request_stop();worker.join();}
+    const std::scoped_lock lock{surface_mutex}; surface.reset();
+    ImGuiRelay::ResetSnapshots();
+    const std::scoped_lock state{g_state_mutex}; g_renderer_started=false;
+}
+void Start() {
+    const std::scoped_lock lock{g_state_mutex};
+    if(g_renderer_started) return;
+    g_renderer_started=true;
+#if !defined(GR2_XBOX_UWP)
+    worker=std::jthread([](std::stop_token stop) {
+        if(!Initialize(nullptr)) {Blackbox::Milestone("desktop swapchain initialization failed");return;}
+        while(!stop.stop_requested()&&Tick()) std::this_thread::yield();
+    });
+    std::atexit([]{Shutdown();});
+    std::at_quick_exit([]{Shutdown();});
+#endif
+}
+} // namespace Renderer
 
 // --- Pipeline builds --------------------------------------------------------
 //

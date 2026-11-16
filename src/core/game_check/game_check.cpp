@@ -133,7 +133,9 @@ std::string Say(std::string_view english, const Args&... args) {
     }
 }
 
+thread_local std::string* g_validation_error=nullptr;
 void Tell(const std::string& text) {
+    if(g_validation_error) { *g_validation_error=text; return; }
     LOG_ERROR(Loader, "GR2port: {}", text);
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Gravity Rush 2", text.c_str(), nullptr);
 }
@@ -414,6 +416,15 @@ bool CheckIn(const std::filesystem::path& folder, std::optional<Game>& game) {
 }
 
 } // namespace
+
+std::optional<Game> ValidateFolder(const std::filesystem::path& folder,std::string& error) {
+    error.clear();
+    struct Guard { std::string* previous; ~Guard(){g_validation_error=previous;} } guard{g_validation_error};
+    g_validation_error=&error;
+    std::optional<Game> game;
+    if(!CheckIn(folder,game) && error.empty()) error="No Gravity Rush 2 dump found in this folder.";
+    return game;
+}
 
 std::optional<Game> Find() {
     const std::filesystem::path beside = Common::FS::GetExecutableDirectory();

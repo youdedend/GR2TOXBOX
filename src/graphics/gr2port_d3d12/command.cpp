@@ -78,6 +78,9 @@ void CommandList::SetRootSignature(const RootSignature& root) const {
 void CommandList::SetPipeline(const Pipeline& pipeline) const {
     if (list && pipeline.IsValid()) {
         list->SetPipelineState(pipeline.state.Get());
+        if(pipeline.patch_control_points) list->IASetPrimitiveTopology(
+            static_cast<D3D_PRIMITIVE_TOPOLOGY>(D3D_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST+
+                                              pipeline.patch_control_points-1u));
         Blackbox::Pso(pipeline.hash);
     }
 }
@@ -441,7 +444,11 @@ u64 CommandRing::EndFrame(CommandList& list) {
     if (!device_ || !list.list) {
         return 0;
     }
-    list.list->Close();
+    if(FAILED(list.list->Close())) {
+        BlackboxRecordDeviceRemoved(device_->device.Get());
+        LOG_ERROR(Graphics,"D3D12 command: close failed; refusing submission");
+        return 0;
+    }
 
     ID3D12CommandList* lists[] = {list.list};
     device_->graphics_queue->ExecuteCommandLists(1, lists);

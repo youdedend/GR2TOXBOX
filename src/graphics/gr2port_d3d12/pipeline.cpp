@@ -318,6 +318,11 @@ bool CreateGraphicsPipeline(ID3D12Device8* device, const RootSignature& root,
         return false;
     }
 
+    if(desc.hs.empty()!=desc.ds.empty() || (!desc.hs.empty() &&
+       (desc.patch_control_points<1 || desc.patch_control_points>32)) || desc.color_formats.size()>8) {
+        LOG_ERROR(Graphics,"D3D12 pipeline: invalid hull/domain pair, patch size or RTV count");
+        return false;
+    }
     D3D12_GRAPHICS_PIPELINE_STATE_DESC state{};
     state.pRootSignature = root.signature.Get();
 
@@ -359,7 +364,7 @@ bool CreateGraphicsPipeline(ID3D12Device8* device, const RootSignature& root,
     // buffer_reference pulling and needs no input layout at all.
     state.InputLayout = {nullptr, 0};
     state.IBStripCutValue = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
-    state.PrimitiveTopologyType = desc.topology;
+    state.PrimitiveTopologyType = desc.hs.empty() ? desc.topology : D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH;
     state.NumRenderTargets = static_cast<UINT>(desc.color_formats.size());
     for (size_t i = 0; i < desc.color_formats.size() && i < 8; ++i) {
         state.RTVFormats[i] = desc.color_formats[i];
@@ -367,18 +372,8 @@ bool CreateGraphicsPipeline(ID3D12Device8* device, const RootSignature& root,
     state.DSVFormat = desc.depth_format;
     state.SampleDesc.Count = desc.sample_count;
     state.SampleDesc.Quality = 0;
-    // Patch control points are deliberately not set: D3D12_GRAPHICS_PIPELINE_STATE_DESC
-    // has no such member. It exists only in the pipeline state *stream*
-    // (D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PATCH_CONTROL_POINTS), which is the
-    // description a tessellating pipeline needs. The tessellation stages are not
-    // ported yet, so nothing asks for it; when leaf.tesc/leaf.tese are, the
-    // stream description is what will build them, not this struct.
-    if (!desc.hs.empty() && desc.patch_control_points != 0) {
-        LOG_WARNING(Graphics,
-                    "D3D12 pipeline: a hull shader was given but the pipeline-state "
-                    "description cannot carry its {} control points; building it as "
-                    "non-tessellated", desc.patch_control_points);
-    }
+    // Patch arity is an IA topology, not a PSO stream subobject. The HS/DS
+    // bytecode carries its own control-point contracts; SetPipeline binds the IA.
 
     const HRESULT hr = device->CreateGraphicsPipelineState(
         &state, IID_PPV_ARGS(out.state.GetAddressOf()));
@@ -392,6 +387,7 @@ bool CreateGraphicsPipeline(ID3D12Device8* device, const RootSignature& root,
         return false;
     }
 
+    out.patch_control_points=desc.hs.empty()?0:desc.patch_control_points;
     out.vs = desc.vs;
     out.ps = desc.ps;
     out.gs = desc.gs;

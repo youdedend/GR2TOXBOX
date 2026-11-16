@@ -26,6 +26,8 @@ struct Game {
 /// Finds the game and checks the dump. On a problem, tells the player in a message box and
 /// returns nothing. The box for no game at all lets the player choose the folder that holds it.
 std::optional<Game> Find();
+// Noninteractive launcher validation using the same version/ELF/archive checks.
+std::optional<Game> ValidateFolder(const std::filesystem::path& folder, std::string& error);
 
 /// Whether folder holds a dump of the game or of its update, checked or not.
 bool HoldsGame(const std::filesystem::path& folder);
