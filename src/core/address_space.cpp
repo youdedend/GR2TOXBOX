@@ -136,6 +136,7 @@ struct MemoryRegion {
     u32 prot;
     s32 fd;
     bool is_mapped;
+    bool exec_capable{};
 };
 
 struct AddressSpace::Impl {
@@ -271,10 +272,18 @@ struct AddressSpace::Impl {
         // would refuse it if it were). The backing file is not fully committed
         // here either: pages are committed as the guest faults them in, which is
         // what keeps the process inside the Xbox budget.
-        backing_handle = WinCompat::CreateFileMapping2Compat(INVALID_HANDLE_VALUE, nullptr, FILE_MAP_ALL_ACCESS,
-                                                PAGE_READWRITE, SEC_COMMIT, BackingSize);
-
-        ASSERT_MSG(backing_handle, "{}", Common::GetLastErrorMsg());
+#if defined(GR2_XBOX_UWP)
+        backing_handle = reinterpret_cast<HANDLE>(
+            Core::Xbox::CreateGuestBackingSection(BackingSize));
+#else
+        backing_handle = WinCompat::CreateFileMapping2Compat(INVALID_HANDLE_VALUE, nullptr,
+                                                              FILE_MAP_ALL_ACCESS,
+                                                              PAGE_READWRITE, SEC_COMMIT,
+                                                              BackingSize);
+#endif
+        ASSERT_MSG(backing_handle,
+                   "Unable to create sparse LocalState guest backing section ({}): {}",
+                   BackingSize, Common::GetLastErrorMsg());
         // Allocate a virtual memory for the backing file map as placeholder
         backing_base = static_cast<u8*>(WinCompat::VirtualAlloc2Compat(process, nullptr, BackingSize,
                                                       MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
@@ -307,6 +316,43 @@ struct AddressSpace::Impl {
         }
     }
 
+    bool ProtectCodeBackingAlias(const MemoryRegion& region, VAddr guest_addr, u64 size,
+                                 bool executable) {
+#if defined(GR2_XBOX_UWP)
+        if (region.exec_capable && region.phys_base != -1 && size != 0) {
+            const u64 physical = region.phys_base + (guest_addr - region.base);
+            DWORD old_protect{};
+            const ULONG alias_protect = executable ? PAGE_READONLY : PAGE_READWRITE;
+            if (!WinCompat::VirtualProtectCompat(backing_base + physical, size, alias_protect,
+                                                  &old_protect)) {
+                UNREACHABLE_MSG("Failed to protect guest writable alias for address {:#x}, "
+                                "physical offset {:#x}: {}",
+                                guest_addr, physical, Common::GetLastErrorMsg());
+            }
+        }
+#else
+        (void)region;
+        (void)guest_addr;
+        (void)size;
+        (void)executable;
+#endif
+        return true;
+    }
+
+    [[noreturn]] void GuestMappingFailure(VAddr address, u64 size) {
+        const DWORD error = GetLastError();
+#if defined(GR2_XBOX_UWP)
+        if (error == ERROR_COMMITMENT_LIMIT) {
+            UNREACHABLE_MSG("Xbox guest memory hard stop: a {:#x}-byte mapping at {:#x} exceeded "
+                            "the configured {} MiB guest ceiling under the 5,120 MiB pool. "
+                            "Reduce guest memory or graphics load.",
+                            size, address, Core::Xbox::EffectiveGuestMemoryCeiling() / 1_MB);
+        }
+#endif
+        UNREACHABLE_MSG("Guest mapping at {:#x}, size {:#x} failed: {}", address, size,
+                        Common::GetLastErrorMsg());
+    }
+
     void* MapRegion(MemoryRegion* region,
                     std::span<const MEMORY_BASIC_INFORMATION> protections = {}) {
         VAddr virtual_addr = region->base;
@@ -316,6 +362,12 @@ struct AddressSpace::Impl {
         s32 fd = region->fd;
 
         void* ptr = nullptr;
+#if defined(GR2_XBOX_UWP)
+        if (phys_addr != -1 && region->exec_capable) {
+            const bool execute_view = prot == PAGE_EXECUTE || prot == PAGE_EXECUTE_READ;
+            ProtectCodeBackingAlias(*region, virtual_addr, size, execute_view);
+        }
+#endif
         if (phys_addr != -1) {
             HANDLE backing = fd != -1 ? reinterpret_cast<HANDLE>(fd) : backing_handle;
             if (fd != -1 && prot == PAGE_READONLY) {
@@ -324,6 +376,7 @@ struct AddressSpace::Impl {
                 ptr = WinCompat::VirtualAlloc2Compat(process, reinterpret_cast<PVOID>(virtual_addr), size,
                                     MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER,
                                     PAGE_READWRITE, nullptr, 0);
+                if (!ptr) GuestMappingFailure(virtual_addr, size);
 
                 // Use ReadFile to read file contents into the memory area.
                 // Create an OVERLAPPED with the file offset, then supply that to ReadFile
@@ -349,7 +402,7 @@ struct AddressSpace::Impl {
                     ptr = WinCompat::MapViewOfFile3Compat(backing, process, reinterpret_cast<PVOID>(virtual_addr),
                                          phys_addr, size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE,
                                          nullptr, 0);
-                    ASSERT_MSG(ptr, "MapViewOfFile3 failed. {}", Common::GetLastErrorMsg());
+                    if (!ptr) GuestMappingFailure(virtual_addr, size);
                     bool ret = WinCompat::VirtualProtectCompat(ptr, size, prot, &resultvar);
                     ASSERT_MSG(ret, "VirtualProtect failed. {}", Common::GetLastErrorMsg());
                 } else {
@@ -357,7 +410,7 @@ struct AddressSpace::Impl {
                         WinCompat::MapViewOfFile3Compat(backing, process,
                                                         reinterpret_cast<PVOID>(virtual_addr),
                                        phys_addr, size, MEM_REPLACE_PLACEHOLDER, prot, nullptr, 0);
-                    ASSERT_MSG(ptr, "MapViewOfFile3 failed. {}", Common::GetLastErrorMsg());
+                    if (!ptr) GuestMappingFailure(virtual_addr, size);
                 }
             }
         } else {
@@ -365,7 +418,7 @@ struct AddressSpace::Impl {
                 WinCompat::VirtualAlloc2Compat(process, reinterpret_cast<PVOID>(virtual_addr), size,
                               MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, prot, nullptr, 0);
         }
-        ASSERT_MSG(ptr, "{}", Common::GetLastErrorMsg());
+        if (!ptr) GuestMappingFailure(virtual_addr, size);
 
         for (const auto& info : protections) {
             const VAddr info_base = reinterpret_cast<VAddr>(info.BaseAddress);
@@ -375,6 +428,11 @@ struct AddressSpace::Impl {
                 continue;
             }
             DWORD old_flags{};
+#if defined(GR2_XBOX_UWP)
+            const bool execute_view = info.Protect == PAGE_EXECUTE ||
+                                      info.Protect == PAGE_EXECUTE_READ;
+            ProtectCodeBackingAlias(*region, begin, end - begin, execute_view);
+#endif
             const bool ret =
                 WinCompat::VirtualProtectCompat(LPVOID(begin), end - begin, info.Protect, &old_flags);
             ASSERT_MSG(ret, "VirtualProtectEx failed. {}", Common::GetLastErrorMsg());
@@ -420,6 +478,18 @@ struct AddressSpace::Impl {
         }
         ASSERT_MSG(ret, "Unmap on virtual_addr {:#x}, size {:#x} failed: {}", virtual_addr, size,
                    Common::GetLastErrorMsg());
+#if defined(GR2_XBOX_UWP)
+        // Drop an executable alias before restoring write access to its shared
+        // writable section alias.
+        if (region->exec_capable && phys_base != -1) {
+            DWORD old_protect{};
+            if (!WinCompat::VirtualProtectCompat(backing_base + phys_base, size,
+                                                  PAGE_READWRITE, &old_protect)) {
+                UNREACHABLE_MSG("Failed to restore guest writable alias at {:#x}: {}",
+                                virtual_addr, Common::GetLastErrorMsg());
+            }
+        }
+#endif
     }
 
     void SplitRegion(VAddr virtual_addr, u64 size) {
@@ -466,9 +536,9 @@ struct AddressSpace::Impl {
 
             // Store a new region matching the removed area.
             it = regions.emplace_hint(std::next(it), virtual_addr,
-                                      MemoryRegion(virtual_addr, next_region_phys_base,
+                                      MemoryRegion{virtual_addr, next_region_phys_base,
                                                    next_region_size, region.prot, region.fd,
-                                                   region.is_mapped));
+                                                   region.is_mapped, region.exec_capable});
         }
 
         // At this point, the region's base will match virtual_addr.
@@ -488,9 +558,9 @@ struct AddressSpace::Impl {
 
             // Store the new region matching the remaining space
             regions.emplace_hint(std::next(it), next_region_addr,
-                                 MemoryRegion(next_region_addr, next_region_phys_base,
+                                 MemoryRegion{next_region_addr, next_region_phys_base,
                                               next_region_size, region.prot, region.fd,
-                                              region.is_mapped));
+                                              region.is_mapped, region.exec_capable});
 
             // Use VirtualFreeEx to create the split.
             if (!VirtualFreeEx(process, LPVOID(region.base), region.size,
@@ -510,7 +580,8 @@ struct AddressSpace::Impl {
         }
     }
 
-    void* Map(VAddr virtual_addr, PAddr phys_addr, u64 size, ULONG prot, s32 fd = -1) {
+    void* Map(VAddr virtual_addr, PAddr phys_addr, u64 size, ULONG prot, s32 fd = -1,
+              bool exec_capable = false) {
         std::scoped_lock lk{mutex};
         // Get a pointer to the region containing virtual_addr
         auto it = std::prev(regions.upper_bound(virtual_addr));
@@ -530,6 +601,7 @@ struct AddressSpace::Impl {
         region.phys_base = phys_addr;
         region.prot = prot;
         region.fd = fd;
+        region.exec_capable = exec_capable;
         return MapRegion(&region);
     }
 
@@ -622,6 +694,23 @@ struct AddressSpace::Impl {
         return virtual_addr;
     }
 
+    bool IsGuestCodeMapping(VAddr virtual_addr, u64 size) {
+        std::scoped_lock lk{mutex};
+        if (size == 0 || virtual_addr > UINT64_MAX - size) return false;
+        const VAddr end = virtual_addr + size;
+        auto it = regions.upper_bound(virtual_addr);
+        if (it == regions.begin()) return false;
+        --it;
+        VAddr current = virtual_addr;
+        while (current < end) {
+            if (it == regions.end() || it->second.base > current || !it->second.is_mapped ||
+                !it->second.exec_capable || it->second.phys_base == -1) return false;
+            current = std::min(end, it->second.base + it->second.size);
+            ++it;
+        }
+        return true;
+    }
+
     void Protect(VAddr virtual_addr, u64 size, bool read, bool write, bool execute) {
         std::scoped_lock lk{mutex};
         DWORD new_flags{};
@@ -675,6 +764,20 @@ struct AddressSpace::Impl {
             const u64 range_addr = std::max(region.base, virtual_addr);
             const u64 range_size = std::min(region.base + region.size, virtual_end) - range_addr;
             DWORD old_flags{};
+#if defined(GR2_XBOX_UWP)
+            if (region.exec_capable && region.phys_base != -1) {
+                // Remove both possible permissions from the guest view first;
+                // then switch the backing alias, and finally grant the requested
+                // guest permission. This keeps every individual view W^X-safe.
+                if (!WinCompat::VirtualProtectCompat(LPVOID(range_addr), range_size,
+                                                      PAGE_READONLY, &old_flags)) {
+                    UNREACHABLE_MSG("Failed to quiesce executable guest view at {:#x}: {}",
+                                    range_addr, Common::GetLastErrorMsg());
+                }
+                ProtectCodeBackingAlias(region, range_addr, range_size,
+                                        new_flags == PAGE_EXECUTE || new_flags == PAGE_EXECUTE_READ);
+            }
+#endif
             if (!WinCompat::VirtualProtectCompat(LPVOID(range_addr), range_size, new_flags, &old_flags)) {
                 UNREACHABLE_MSG(
                     "Failed to change virtual memory protection for address {:#x}, size "
@@ -939,13 +1042,23 @@ void* AddressSpace::Map(VAddr virtual_addr, u64 size, PAddr phys_addr, bool is_e
         }
     }
 #if ARCH_X86_64
+#if defined(GR2_XBOX_UWP)
+    // The loader populates executable pages through the non-executable alias;
+    // AddressSpace::Protect switches aliases only after relocation completes.
+    const auto prot = PAGE_READWRITE;
+#else
     const auto prot = is_exec ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE;
+#endif
 #else
     // On non-native architectures, we can simplify things by ignoring the execute flag for the
     // canonical copy of the memory and rely on the JIT to map translated code as executable.
     constexpr auto prot = PAGE_READWRITE;
 #endif
+#ifdef _WIN32
+    return impl->Map(virtual_addr, phys_addr, size, prot, -1, is_exec);
+#else
     return impl->Map(virtual_addr, phys_addr, size, prot);
+#endif
 }
 
 void* AddressSpace::MapFile(VAddr virtual_addr, u64 size, u64 offset, u32 prot, uintptr_t fd) {
@@ -1032,6 +1145,17 @@ void AddressSpace::Protect(VAddr virtual_addr, u64 size, MemoryPermission perms)
         // cache sees the bytes the loader or the patcher wrote.
         Core::Wx::FlushInstructionCacheRange(reinterpret_cast<void*>(virtual_addr), size);
     }
+}
+
+bool AddressSpace::IsGuestCodeMapping(VAddr virtual_addr, u64 size) {
+#if defined(_WIN32) && defined(GR2_XBOX_UWP)
+    return Core::Xbox::IsValidGuestRange(virtual_addr, size) &&
+           impl->IsGuestCodeMapping(virtual_addr, size);
+#else
+    (void)virtual_addr;
+    (void)size;
+    return false;
+#endif
 }
 
 boost::icl::interval_set<VAddr> AddressSpace::GetUsableRegions() {

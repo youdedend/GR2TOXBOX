@@ -63,7 +63,8 @@ void CeilingStopsCommitWithPlainLanguage() {
     GuestMemoryModel m(0x10000, 0x18000, P); std::string e; std::uint64_t a = 0;
     bool ok = m.Reserve(a, 2 * P, e) && !m.Commit(a, 2 * P, GuestMemoryModel::ReadAccess, e);
     const auto stats = m.GetStats();
-    ok = ok && e.find("ceiling reached") != std::string::npos && stats.committed_bytes == 0 &&
+    ok = ok && e.find("ceiling reached") != std::string::npos &&
+         e.find("8192 bytes") != std::string::npos && stats.committed_bytes == 0 &&
          m.TelemetryLine().find("ceiling=") != std::string::npos;
     Check(ok, "memory ceiling produces a readable hard stop and telemetry");
 }

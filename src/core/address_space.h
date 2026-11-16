@@ -98,6 +98,10 @@ public:
     /// Protects requested region.
     void Protect(VAddr virtual_addr, u64 size, MemoryPermission perms);
 
+    /// True when the complete range is a mapped guest-code region whose backing
+    /// alias is managed by the strict-W^X transition path.
+    [[nodiscard]] bool IsGuestCodeMapping(VAddr virtual_addr, u64 size);
+
     // Returns an interval set containing all usable regions.
     boost::icl::interval_set<VAddr> GetUsableRegions();
 

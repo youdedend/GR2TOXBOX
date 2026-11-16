@@ -89,6 +89,11 @@ inline constexpr u64 SeriesSCeilingBytes = 4600_MB;
 /// The process's current committed bytes, or zero when unknown.
 [[nodiscard]] u64 AppMemoryUsage() noexcept;
 
+/// Creates the UWP LocalState sparse-file section used as guest physical backing.
+/// The section's maximum permits RW and RX views; callers must never map a view
+/// writable and executable, and must close the returned section handle.
+[[nodiscard]] std::uintptr_t CreateGuestBackingSection(u64 size) noexcept;
+
 /// Effective guest memory ceiling: GuestMemoryCeilingBytes on a console, and
 /// the upstream PS4 Pro devkit figure on desktop (so PC behaviour is
 /// unchanged).

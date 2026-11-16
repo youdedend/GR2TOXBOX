@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <string>
 #include "common/logging/log.h"
 #include "core/uwp_memory.h"
 
@@ -30,27 +31,31 @@
 #endif
 
 #if defined(GR2_XBOX_UWP)
-// Deliberately no <windows.h>. The only Win32 symbols this file needs are in the
-// desktop branch below, and windows.h defines min/max as macros unless NOMINMAX
-// is set -- which turned `std::min(excess, flex - FlexibleFloor)` in
-// ClampGuestMemoryRegions into a syntax error under MSVC. The console branch
-// needs nothing from it: the projections carry their own declarations.
-// The runtime probes below go through C++/WinRT. The projections are not part of
-// every toolchain's default include path -- a plain `cl` invocation outside the
-// CMake build has neither the NuGet package nor the SDK's cppwinrt folder -- so
-// they are used when the toolchain can see them and skipped otherwise. What they
-// feed (the device family, the pool limit, the current usage) is diagnostic: the
-// budget clamp itself is compile-time arithmetic and behaves identically either
-// way, which is why the CI host build can assert it without the projections.
-// Both projections are required: MemoryManager is in Windows.System, and
-// AnalyticsInfo is in Windows.System.Profile. Checking only the first let a
-// build compile with the second missing and fail on the namespace instead.
+// Console probes use C++/WinRT projections only when the toolchain provides them.
+// The optional LocalState sparse-backing helper also needs Win32 app APIs; its
+// limited windows.h inclusion below always sets NOMINMAX so std::min in the
+// budget clamp remains well-formed. Host self-tests without projections retain
+// the compile-time arithmetic and do not include Windows headers. Both system
+// projections are required together: MemoryManager is in Windows.System, and
+// AnalyticsInfo is in Windows.System.Profile.
 #if __has_include(<winrt/Windows.System.h>) && __has_include(<winrt/Windows.System.Profile.h>)
 #include <winrt/Windows.System.h>
 #include <winrt/Windows.System.Profile.h>
 #define GR2_HAS_WINRT_SYSTEM 1
 #else
 #define GR2_HAS_WINRT_SYSTEM 0
+#endif
+#if __has_include(<winrt/Windows.Storage.h>) && __has_include(<fileapifromapp.h>)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <winrt/Windows.Storage.h>
+#include <fileapifromapp.h>
+#include <memoryapi.h>
+#include <winioctl.h>
+#define GR2_HAS_WINRT_STORAGE 1
+#else
+#define GR2_HAS_WINRT_STORAGE 0
 #endif
 #elif GR2_HAS_DESKTOP_WIN32
 // NOMINMAX before <windows.h>, always. The clamp below is written with std::min,
@@ -158,6 +163,40 @@ u64 AppMemoryUsage() noexcept {
     }
     return 0;
 #else
+    return 0;
+#endif
+}
+
+std::uintptr_t CreateGuestBackingSection(u64 size) noexcept {
+#if defined(GR2_XBOX_UWP) && GR2_HAS_WINRT_STORAGE
+    try {
+        const auto local = winrt::Windows::Storage::ApplicationData::Current().LocalFolder().Path();
+        std::wstring path{local.c_str()};
+        path += L"\\gr2-guest-dmem.bin";
+        CREATEFILE2_EXTENDED_PARAMETERS params{};
+        params.dwSize = sizeof(params);
+        params.dwFileAttributes = FILE_ATTRIBUTE_TEMPORARY;
+        params.dwFileFlags = FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_RANDOM_ACCESS;
+        HANDLE file = CreateFile2FromAppW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                                          CREATE_ALWAYS, &params);
+        if (file == INVALID_HANDLE_VALUE) return 0;
+        DWORD returned = 0;
+        if (!DeviceIoControl(file, FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &returned, nullptr)) {
+            CloseHandle(file);
+            return 0;
+        }
+        // File-backed sections allocate sparse extents only as pages are touched.
+        // The section maximum allows distinct PAGE_READWRITE and
+        // PAGE_EXECUTE_READ views; neither alias is ever PAGE_EXECUTE_READWRITE.
+        HANDLE section = CreateFileMappingFromApp(file, nullptr, PAGE_EXECUTE_READWRITE,
+                                                   size, nullptr);
+        CloseHandle(file); // DELETE_ON_CLOSE; the section retains the file object.
+        return reinterpret_cast<std::uintptr_t>(section);
+    } catch (...) {
+        return 0;
+    }
+#else
+    (void)size;
     return 0;
 #endif
 }

@@ -5,6 +5,8 @@
 #include <fmt/format.h> // fmt::ptr; log.h only pulls in <fmt/base.h>
 #include "common/error.h"
 #include "common/logging/log.h"
+#include "core/address_space.h"
+#include "core/memory.h"
 #include "core/uwp_wx.h"
 
 #ifdef _WIN32
@@ -46,6 +48,26 @@ struct AlignedRange {
     const u64 end = base + size;
     const u64 aligned_end = (end + page - 1) & ~(page - 1);
     return {reinterpret_cast<u8*>(aligned_begin), aligned_end - aligned_begin};
+}
+
+bool ProtectTrackedGuestCode(void* addr, u64 size, bool executable) {
+#ifdef GR2_XBOX_UWP
+    auto* memory = Core::Memory::Instance();
+    if (!memory) return false;
+    auto& address_space = memory->GetAddressSpace();
+    const auto guest_address = reinterpret_cast<VAddr>(addr);
+    if (!address_space.IsGuestCodeMapping(guest_address, size)) return false;
+    const auto permissions = executable
+                                 ? Core::MemoryPermission::Read | Core::MemoryPermission::Execute
+                                 : Core::MemoryPermission::Read | Core::MemoryPermission::Write;
+    address_space.Protect(guest_address, size, permissions);
+    return true;
+#else
+    (void)addr;
+    (void)size;
+    (void)executable;
+    return false;
+#endif
 }
 } // namespace
 
@@ -106,6 +128,13 @@ bool SealExecutable(void* addr, u64 size) {
     // The instruction cache must be coherent with the writes before the host
     // is allowed to fetch from the range.
     FlushInstructionCacheRange(addr, size);
+#ifdef GR2_XBOX_UWP
+    if (ProtectTrackedGuestCode(addr, size, true)) {
+        g_seal_count.fetch_add(1, std::memory_order_relaxed);
+        g_bytes_sealed.fetch_add(size, std::memory_order_relaxed);
+        return true;
+    }
+#endif
 
 #ifdef _WIN32
     const auto range = AlignOut(addr, size);
@@ -142,6 +171,12 @@ bool OpenForPatch(void* addr, u64 size) {
     if (size == 0) {
         return true;
     }
+#ifdef GR2_XBOX_UWP
+    if (ProtectTrackedGuestCode(addr, size, false)) {
+        g_open_for_patch_count.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+#endif
 #ifdef _WIN32
     const auto range = AlignOut(addr, size);
     DWORD old_protect{};

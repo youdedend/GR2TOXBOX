@@ -142,7 +142,12 @@ bool GuestMemoryModel::Commit(std::uint64_t address, std::uint64_t size, unsigne
         std::ostringstream s; s << "Invalid or W^X-violating guest commit at 0x" << std::hex << address; error = s.str(); return false;
     }
     if (size > impl_->ceiling - std::min(impl_->ceiling, impl_->committed)) {
-        error = "Guest memory ceiling reached; reduce the guest memory allocation or lower graphics load."; return false;
+        std::ostringstream s;
+        s << "Guest memory ceiling reached while committing " << size
+          << " bytes (configured ceiling " << impl_->ceiling
+          << " bytes); reduce guest memory or graphics load.";
+        error = s.str();
+        return false;
     }
     auto it = impl_->Find(address); auto first = (address - it->first) / PageSize; auto count = size / PageSize;
     for (std::uint64_t i = first; i < first + count; ++i) {
