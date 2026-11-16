@@ -371,12 +371,12 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
    symbol contract, SM 6.4 HLSL with Microsoft DXC `-WX` and Slang, host bounds
    tests and ASan/UBSan. These checks and Windows/UWP CI prove compilation and
    packaging only—not D3D12 execution, visual parity, or hardware behavior.
-   **Slice 5C is in progress.** The D3D12 path now runs the existing four-sample
-   spatial world-contour estimate after the G-buffer and supplies its raw-buffer
-   output to deferred shading. This is a static spatial estimate only: upstream
-   temporal reprojection/history, AO, fog, bloom, glass, water, particles and
-   other advanced transparent passes are not implemented. Leaf/grass/branch
-   draw and shadow passes remain incomplete as well. Full texture-quality
+   **Slice 5C is in progress.** The D3D12 path now runs the four-sample
+   world-contour estimate after the G-buffer and supplies its raw-buffer output
+   to deferred shading. Ping-pong history reprojects camera motion and rejects
+   large depth changes before temporal averaging. AO, fog, bloom,
+   glass, water, particles and other advanced transparent passes are not
+   implemented. Leaf/grass/branch draw and shadow passes remain incomplete as well. Full texture-quality
    convergence, `Photo::Read`, FSR and physical Xbox runtime verification remain
    outstanding. This build is still **not claimed playable**.
 

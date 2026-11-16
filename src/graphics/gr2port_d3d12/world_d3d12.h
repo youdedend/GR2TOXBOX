@@ -31,9 +31,11 @@ struct CoreTargets {
     u32 width = 0, height = 0, pitch = 0;
     ResourcePtr aa;
     DescriptorSlot aa_uav;
-    ResourcePtr world_lines;
-    DescriptorSlot world_lines_srv, world_lines_uav;
-    D3D12_RESOURCE_STATES world_lines_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    std::array<ResourcePtr, 2> world_lines;
+    std::array<DescriptorSlot, 2> world_lines_srv, world_lines_uav;
+    std::array<D3D12_RESOURCE_STATES, 2> world_lines_state{
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS};
+    bool world_lines_initialized = false;
     D3D12_RESOURCE_STATES aa_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
     D3D12_RESOURCE_STATES scratch_state = D3D12_RESOURCE_STATE_COMMON;
     ArenaAllocation meter, zero;
