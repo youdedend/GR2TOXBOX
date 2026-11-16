@@ -10,10 +10,7 @@
 //
 // gl_InstanceIndex becomes SV_InstanceID and gl_BaseInstance becomes the
 // `base_instance` root constant (scene.hlsli explains why HLSL has no equivalent).
-// The GLSL's reverse-depth fix-up, clip.z = 0.5 * (w - z), is not repeated: the
-// OpenGL-to-D3D12 depth flip lives in the projection the host uploads, which is the
-// same choice world_decal.vert and the rest of the ported set make. Applying it
-// twice would give the identity and a half-filled depth buffer.
+// Shared capture supplies raw OpenGL clip matrices; apply the GLSL Z conversion.
 
 #include "common/scene.hlsli"
 
@@ -29,7 +26,7 @@
 // world_decal's pair: HLSL has no shared interface file for one record read by two
 // stages, and a header for a single struct would cost more indirection than the
 // duplication does. If one changes, both change.
-#define LAMBERT_CONSTANTS_BYTES 224u
+#define LAMBERT_CONSTANTS_BYTES 656u
 
 struct LambertConstants {
     float4 light_direction;
@@ -103,7 +100,9 @@ VsOutput main(uint vertex_index : SV_VertexID, uint instance : SV_InstanceID) {
                                   g_arena)
                    : unskinned,
                1.0);
-    output.position = mul(draw.world_view_projection, model);
+    float4 clip = mul(draw.world_view_projection, model);
+    clip.z = 0.5 * (clip.w - clip.z);
+    output.position = clip;
 
     // The character constants for this draw's material. `material` is 1-based and
     // 0 means none, which underflows to a slot before the table; the GLSL has the

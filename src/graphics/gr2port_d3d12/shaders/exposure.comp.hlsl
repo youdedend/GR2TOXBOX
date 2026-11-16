@@ -12,6 +12,7 @@
 // ref into a UAV-backed arena (ARENA_SCRATCH, see common/grade.hlsli); the
 // atomics in luminance.comp.hlsl need the same treatment.
 
+#define METER_COMPUTE 1
 #include "common/grade.hlsli"
 
 cbuffer ExposureConstants : register(b1) {

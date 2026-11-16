@@ -91,11 +91,11 @@ float3 Composite(Grade grade, float3 c) {
 
 float4 main(PsInput input) : SV_Target {
     const Grade grade = LoadGrade(g_grade, g_arena);
-    float2 texcoord = 0.5 * input.uv + 0.5;
+    float2 texcoord = float2(0.5 * input.uv.x + 0.5, 0.5 - 0.5 * input.uv.y);
     // The distortion is a lens bulge plus a two-frequency wobble that fades out
     // towards the edges of the frame.
     if (grade.distorted != 0u) {
         texcoord = Distort(texcoord, grade);
     }
-    return float4(Composite(grade, SampleTex(g_picture, texcoord).rgb), 1.0);
+    return float4(Composite(grade, SampleTexWith(g_picture, SMP_LINEAR_CLAMP, texcoord).rgb), 1.0);
 }

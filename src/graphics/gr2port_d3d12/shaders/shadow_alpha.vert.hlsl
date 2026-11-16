@@ -44,7 +44,7 @@ VsOutput main(uint instance : SV_InstanceID, uint vertex_index : SV_VertexID) {
     if (clip.w > 0.5) {
         clip.z = max(-clip.w, clip.z);
     }
-    clip.z = 0.5 * (clip.w - clip.z);
+    clip.z = 0.5 * (clip.z + clip.w);
 
     VsOutput output;
     output.position = clip;

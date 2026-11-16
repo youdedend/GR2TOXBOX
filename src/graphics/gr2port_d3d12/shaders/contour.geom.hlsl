@@ -11,12 +11,8 @@
 //
 // The stage translates directly: an adjacency triangle in, a four-vertex strip per
 // silhouette edge out, GLSL's EmitVertex and EndPrimitive becoming HLSL's Append and
-// RestartStrip. The one thing that does *not* translate is the depth convention.
-// Upstream flips depth when it emits ("OpenGL depth, -w near to w far, to reverse
-// depth", in its own comment), because the game's clip space is OpenGL's. D3D12
-// already is reverse depth and takes the clip position as it stands, so the emitted
-// z is the vertex's own and the flip is not repeated here -- doing it twice would
-// put the outline behind the character it outlines.
+// RestartStrip. Shared capture keeps the game's raw OpenGL clip coordinates;
+// depth conversion belongs here, not in the preceding intermediate VS.
 //
 // The ribbon carries the same four numbers to contour.frag: x along the edge (0 at
 // one end, 1 at the other), y across the ribbon (1 at the outer side, 0 at the
@@ -66,7 +62,7 @@ struct GsOutput {
 // and appended in order, because Direct3D has no per-vertex output registers.
 GsOutput EmitRibbon(float2 xy, float z, float w, float4 ribbon, uint contour_index) {
     GsOutput output;
-    output.position = float4(xy, z, w);
+    output.position = float4(xy, 0.5 * (w - z), w);
     output.ribbon = ribbon;
     output.contour_index = contour_index;
     return output;

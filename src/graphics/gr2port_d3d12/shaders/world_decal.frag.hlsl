@@ -21,7 +21,7 @@
 // HLSL has no separate interface file for a struct both stages read, and the two
 // stages' structs would have to be kept identical by hand either way. If one
 // changes, this one changes with it.
-#define WORLD_DECAL_BYTES 320u
+#define WORLD_DECAL_BYTES 304u
 
 struct WorldDecal {
     float4x4 world_view_projection;
@@ -42,14 +42,14 @@ struct WorldDecal {
 WorldDecal LoadWorldDecalAt(ArenaRef ref, ArenaTable table) {
     ByteAddressBuffer buffer = ArenaBuffer(ref, table);
     WorldDecal decal;
-    decal.world_view_projection = ArenaLoadMatrix(ArenaAdd(ref, 0u), table);
-    decal.view_to_decal = ArenaLoadMatrix(ArenaAdd(ref, 64u), table);
-    decal.world_view = ArenaLoadMatrix(ArenaAdd(ref, 128u), table);
-    decal.normal_transform = asfloat(buffer.Load4(ref.offset + 192));
-    decal.color_transform = asfloat(buffer.Load4(ref.offset + 208));
-    decal.parallax = asfloat(buffer.Load4(ref.offset + 224));
-    decal.normal_scale = asfloat(buffer.Load4(ref.offset + 240));
-    decal.color_scale = asfloat(buffer.Load4(ref.offset + 256));
+    decal.world_view_projection = ArenaLoadMatrix(ArenaAdd(ref, 64u), table);
+    decal.view_to_decal = ArenaLoadMatrix(ArenaAdd(ref, 128u), table);
+    decal.world_view = ArenaLoadMatrix(ArenaAdd(ref, 0u), table);
+    decal.normal_transform = asfloat(buffer.Load4(ref.offset + 240));
+    decal.color_transform = asfloat(buffer.Load4(ref.offset + 224));
+    decal.parallax = asfloat(buffer.Load4(ref.offset + 256));
+    decal.normal_scale = asfloat(buffer.Load4(ref.offset + 208));
+    decal.color_scale = asfloat(buffer.Load4(ref.offset + 192));
     decal.roughness = asfloat(buffer.Load(ref.offset + 272));
     decal.metallic = asfloat(buffer.Load(ref.offset + 276));
     decal.translucency = asfloat(buffer.Load(ref.offset + 280));

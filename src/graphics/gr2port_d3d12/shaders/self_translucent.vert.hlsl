@@ -46,6 +46,8 @@ VsOutput main(uint vertex_index : SV_VertexID) {
 
     // The GLSL uses world_view here, not world_view_projection: the draw's
     // world_view already carries the game's WorldViewProj for this pass.
-    output.position = mul(draw.world_view, float4(model, 1.0));
+    float4 clip = mul(draw.world_view, float4(model, 1.0));
+    clip.z = 0.5 * (clip.w - clip.z);
+    output.position = clip;
     return output;
 }

@@ -44,7 +44,7 @@ StageIO main(uint vertex_index : SV_VertexID, uint instance : SV_InstanceID) {
     output.view_position = (mul(world_view, float4(model, 1.0))).xyz;
     float4 clip = mul(draw.world_view_projection, float4(model, 1.0));
     // OpenGL depth, -w near to w far, to reverse depth, 1 near to 0 far.
-    // Depth conversion is already part of the uploaded D3D projection.
+    clip.z = 0.5 * (clip.w - clip.z);
     output.position = clip;
     output.texcoord = LoadTexcoord(vertices, stride, draw.texcoord, vertex_index, g_arena);
     const float3 n = LoadNormal(vertices, stride, draw.normal, vertex_index, g_arena);

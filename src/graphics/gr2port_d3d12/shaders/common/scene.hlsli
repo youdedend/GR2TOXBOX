@@ -122,13 +122,13 @@ Draw LoadDrawAt(ArenaRef ref, ArenaTable table) {
     draw.world_view_projection = ArenaLoadMatrix(ArenaAdd(ref, 64), table);
     draw.color_scale = asfloat(buffer.Load4(ref.offset + 128));
     draw.texcoord_transform = asfloat(buffer.Load4(ref.offset + 144));
-    draw.vertices = ArenaMake(ARENA_GEOMETRY, buffer.Load(ref.offset + 160));
+    draw.vertices = ArenaMake(buffer.Load(ref.offset + 164), buffer.Load(ref.offset + 160));
     draw.stride = buffer.Load(ref.offset + 168);
     draw.position = buffer.Load(ref.offset + 172);
     draw.texcoord = buffer.Load(ref.offset + 176);
     draw.texture = buffer.Load(ref.offset + 180);
-    draw.skin = ArenaMake(ARENA_SKINNING, buffer.Load(ref.offset + 184));
-    draw.palette = ArenaMake(ARENA_SKINNING, buffer.Load(ref.offset + 192));
+    draw.skin = ArenaMake(buffer.Load(ref.offset + 188), buffer.Load(ref.offset + 184));
+    draw.palette = ArenaMake(buffer.Load(ref.offset + 196), buffer.Load(ref.offset + 192));
     draw.bones = buffer.Load(ref.offset + 200);
     draw.decal = buffer.Load(ref.offset + 204);
     draw.normal = buffer.Load(ref.offset + 208);

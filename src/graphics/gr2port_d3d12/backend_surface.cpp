@@ -21,6 +21,8 @@
 #include "common/logging/log.h"
 #include "core/game_check/game_patches.h"
 #include "graphics/gr2port_d3d12/ui_d3d12.h"
+#include "graphics/gr2port_d3d12/look_d3d12.h"
+#include "graphics/gr2port/movies.h"
 #include "graphics/gr2port/backend.h"
 #include "graphics/gr2port/frame_stats.h"
 #include "graphics/gr2port/window.h"
@@ -71,6 +73,9 @@ struct Surface {
     D3D12::ArenaSet arenas;
     D3D12::ResidencyContext residency;
     D3D12::UiRenderer ui;
+    D3D12::CoreTargets core;
+    D3D12::WorldRenderer world;
+    D3D12::LookRenderer look;
     D3D12::UiState::Slots retained;
     Scene::Header latest{};
     bool has_picture=false;
@@ -80,13 +85,14 @@ struct Surface {
     bool AttachScene() {
         const D3D12::ArenaDesc descriptions[]{
             {D3D12::ArenaKind::Geometry,256_MB,false,false},
-            {D3D12::ArenaKind::Scratch,16_MB,false,true},
+            {D3D12::ArenaKind::Scratch,16_MB,true,false},
             {D3D12::ArenaKind::Scene,SceneRing::Slots*SceneRing::SlotBytes(),false,true},
         };
         if (!allocator.Create(device) || !arenas.Create(device,allocator,heap,descriptions))return false;
         residency={&device,&allocator,&arenas,&heap,&root,0};
         if(!Meshes::Start(residency)||!Textures::Start(residency)||
-           !ui.Start(residency,device.swapchain_format,GamePatches::AspectRatio()))return false;
+           !ui.Start(residency,device.swapchain_format,GamePatches::AspectRatio())||
+           !core.Start(residency)||!world.Start(core)||!look.Start(core))return false;
         const auto storage=arenas.Allocate(D3D12::ArenaKind::Scene,SceneRing::Slots*SceneRing::SlotBytes());
         if (!storage.cpu || storage.size != SceneRing::Slots*SceneRing::SlotBytes()) return false;
         // Serialized scene addresses are offset-low / arena-high, not GPU VAs.
@@ -114,7 +120,7 @@ struct Surface {
         // Shutdown must follow game/capture producer quiescence, as on Vulkan.
         retained.DrainAfterIdle([](u32 slot){SceneRing::Release(slot);});
         if (attached) SceneRing::Attach(nullptr, 0);
-        ui.Stop(); Textures::Stop(); Meshes::Stop();
+        look.Stop(); world.Stop(); core.Stop(); ui.Stop(); Textures::Stop(); Meshes::Stop();
         imgui.Destroy(); arenas.Destroy(); allocator.Destroy();
         ring.Destroy(); heap.Destroy();
         if(device.timeline_event) CloseHandle(device.timeline_event);
@@ -189,15 +195,33 @@ bool Tick() {
             if(!s.retained.Hold(packet.slot,submission)){
                 SceneRing::Release(packet.slot);ui_ok=false;
             }else{
-                ui_ok=s.ui.Prepare(list,header,packet.data,submission)&&
-                    s.ui.Record(list,header,packet.data,packet.address);
+                ui_ok=s.ui.Prepare(list,header,packet.data,submission);
+                Textures::Refresh(list,submission,std::span{header.dynamic}.first(
+                    std::min(header.dynamic_textures,Scene::MaxDynamicTextures)));
+                Movies::Collect();
+                if(ui_ok&&!header.ui.only){
+                    const auto extent=s.ui.WorldExtent(header);
+                    if(extent.width){
+                        ui_ok=s.core.Resize(extent.width,extent.height)&&
+                            s.world.Record(list,header,packet.data,packet.address,s.ring.CurrentFrameIndex());
+                        if(ui_ok){
+                            s.look.RecordSky(list,header,packet.address);
+                            s.look.RecordPost(list,packet.address);
+                            const auto target=s.ui.BeginWorld(list,header);
+                            if(target.width)s.look.RecordComposite(list,packet.address,target.width,target.height);
+                            s.ui.EndWorld(list);
+                        }
+                    }
+                }
+                if(ui_ok)ui_ok=s.ui.Record(list,header,packet.data,packet.address);
                 if(ui_ok&&s.ui.HasPicture(header)){s.latest=header;s.has_picture=true;}
             }
         }else SceneRing::Release(packet.slot);
         ++s.captured_packets;
         if(s.captured_packets==1||s.captured_packets%600==0){
-            char note[160];std::snprintf(note,sizeof(note),"UI packets consumed=%llu latest=%llu (device output unverified)",
-                static_cast<unsigned long long>(s.captured_packets),static_cast<unsigned long long>(s.seen));
+            char note[160];std::snprintf(note,sizeof(note),"scene packets=%llu latest=%llu skipped-3D=%llu (device output unverified)",
+                static_cast<unsigned long long>(s.captured_packets),static_cast<unsigned long long>(s.seen),
+                static_cast<unsigned long long>(s.world.Skipped()));
             Blackbox::Milestone(note);
         }
     }

@@ -23,27 +23,18 @@
 //  64   float4x4 transforms[2]            128
 // 192   float4x4 view_to_astro            64 (not used here)
 // 256   float4   sun_direction
-// 272   float4   sun_color
-// 288   float    sun_size
-// 292   float    sun_outer
-// 296   float    blend
-// 300   uint     cubes[2]
-// 308   uint     cloud
-// 312   float2   cloud_fade
-// 320   float4   cloud_layers[2]          32
-// 352   float4   cloud_color
-// = 368 bytes.
+// Shared Scene::Sky is 304 bytes, not a separately packed constant buffer.
 #define SKY_CUBE_TRANSFORMS 64u
-#define SKY_SUN_DIRECTION 256u
-#define SKY_SUN_COLOR 272u
-#define SKY_SUN_SIZE 288u
-#define SKY_SUN_OUTER 292u
-#define SKY_BLEND 296u
-#define SKY_CUBES 300u
-#define SKY_CLOUD 308u
-#define SKY_CLOUD_FADE 312u
-#define SKY_CLOUD_LAYERS 320u
-#define SKY_CLOUD_COLOR 352u
+#define SKY_SUN_DIRECTION 208u
+#define SKY_SUN_COLOR 192u
+#define SKY_SUN_SIZE 280u
+#define SKY_SUN_OUTER 284u
+#define SKY_BLEND 288u
+#define SKY_CUBES 292u
+#define SKY_CLOUD 300u
+#define SKY_CLOUD_FADE 272u
+#define SKY_CLOUD_LAYERS 240u
+#define SKY_CLOUD_COLOR 224u
 
 struct Sky {
     float4x4 inverse_view_projection;
@@ -123,7 +114,7 @@ float CloudLayer(Sky sky, float4 layer, float2 plane) {
 
 float4 main(PsInput input) : SV_Target {
     const Sky sky = LoadSky(g_sky, g_arena);
-    const float2 position = 0.5 * input.uv + 0.5;
+    const float2 position = float2(input.uv.x, -input.uv.y);
 
     // The GLSL's `vec4(position, 1.0, 1.0)` puts a point at the far plane in the
     // direction of the pixel, which is what the direction of the unprojected

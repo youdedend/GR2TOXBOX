@@ -624,6 +624,8 @@ D3D12_UNITS=(
     "src/graphics/gr2port_d3d12/textures_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
     "src/graphics/gr2port_d3d12/ui_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
     "src/graphics/gr2port_d3d12/ui_state.cpp|"
+    "src/graphics/gr2port_d3d12/world_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
+    "src/graphics/gr2port_d3d12/look_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
     "src/graphics/gr2port_d3d12/texture_layout.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/descriptors.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/imgui_relay.cpp|"
@@ -839,6 +841,27 @@ fi
 # Explicit skip if not installed; local shader work must run this with --require.
 if ! python3 tools/shaders/check_hlsl_local.py; then
     failures=$((failures + 1))
+fi
+
+# Audit all non-pfx VS/DS and their final GS stages against paired GLSL.
+if ! python3 tools/shaders/check_clip_depth.py; then
+    failures=$((failures + 1))
+fi
+if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
+    for mode in host asan-ubsan; do
+        sanitize=()
+        if [ "$mode" = asan-ubsan ]; then
+            sanitize=(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fno-pie -no-pie)
+        fi
+        if "$CXX" "${CXXFLAGS[@]}" -O1 -g "${sanitize[@]}" -Itools/ci/d3d12_stub \
+                src/tests/core_state_test.cpp -o "$OUT/core-state-$mode" 2>"$OUT/err" && \
+                ASAN_OPTIONS=detect_leaks=1 "$OUT/core-state-$mode"; then
+            echo "  ok   core 3D $mode clip/root/arena/bounds tests"
+        else
+            echo "  FAIL core 3D $mode tests";cat "$OUT/err"
+            failures=$((failures + 1))
+        fi
+    done
 fi
 
 # Production UI state helpers: no copied renderer logic in the tests.

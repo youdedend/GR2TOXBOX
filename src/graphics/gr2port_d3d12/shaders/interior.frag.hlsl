@@ -27,6 +27,12 @@ struct StageIO {
     float4 position : SV_Position;
     float3 world_position : TEXCOORD0;
     float4 world_normal : TEXCOORD1;
+    // Retain character.vert's physical signature/packing for PSO linkage.
+    float4 tangent : TEXCOORD2;
+    float2 texcoord : TEXCOORD3;
+    float2 decal_texcoord : TEXCOORD4;
+    float2 model_xy : TEXCOORD5;
+    float4 vertex_color : TEXCOORD6;
     nointerpolation uint draw_index : TEXCOORD7;
 };
 static BatchLight light;

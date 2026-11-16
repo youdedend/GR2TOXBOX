@@ -25,6 +25,11 @@ target_sources(gr2port PRIVATE
     ${GR2_D3D12_DIR}/textures_d3d12.cpp
     ${GR2_D3D12_DIR}/ui_d3d12.cpp
     ${GR2_D3D12_DIR}/ui_d3d12.h
+    ${GR2_D3D12_DIR}/world_d3d12.cpp
+    ${GR2_D3D12_DIR}/world_d3d12.h
+    ${GR2_D3D12_DIR}/look_d3d12.cpp
+    ${GR2_D3D12_DIR}/look_d3d12.h
+    ${GR2_D3D12_DIR}/core_state.h
     ${GR2_D3D12_DIR}/ui_state.cpp
     ${GR2_D3D12_DIR}/ui_state.h
     ${GR2_D3D12_DIR}/texture_layout.cpp

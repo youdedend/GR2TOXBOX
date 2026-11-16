@@ -24,7 +24,7 @@ file is right.
 | Direct3D 12 device / allocator / descriptors / arena | **Done** |
 | HLSL SM 6.4 shader pipeline (`dxc`, fail-loud) | **Done** |
 | D3D12 command ring, root signature, PSO cache | **Done** |
-| Direct3D 12 frame graph (passes, submits, presenter) | **In progress** |
+| Direct3D 12 frame graph (passes, submits, presenter) | **Core 3D + UI implemented; runtime unverified; 5B/5C remain** |
 | HLSL shader port | **In progress — 96 of 184 engine stages + 1/1 detile; 97 DXC/Slang-verified** |
 | UWP shell (`IFrameworkView`, launcher, gamepad) | **In progress** |
 | **UWP package builds at all** | **Yes — SDL3 replaced by an in-tree shim** |
@@ -190,9 +190,10 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
 2. **The scene frame graph.** The real swapchain clear/ImGui presenter now exists
    in `backend_surface.cpp`: HWND/CoreWindow RTVs, barriers, ring submission,
    Present, resize and shutdown. Immutable owned ImGui snapshots and RGBA8 GPU
-   uploads replace raw draw-data pointers. The game's pass order, scene resources,
-   mesh/texture uploads now exist; UI and world draw execution remain unimplemented. No hardware rendering or
-   successful eboot progress has been demonstrated.
+   uploads replace raw draw-data pointers. UI drawing and the Slice 5A core
+   deferred/forward/post-process order are implemented below; the full frame graph
+   is not complete. No hardware rendering or successful eboot progress has been
+   demonstrated.
 3. **The D3D12 capture consumer (Slice 4A).** All of the shared `capture.cpp`
    now builds on D3D12 as well as Vulkan; its six real Capture entry points
    replace the old backend stubs. `Upscaler::Extent` / `RenderSize(width,height)`
@@ -200,10 +201,9 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
    uses 1:1 dimensions pending FSR. A 120 MiB (five 24 MiB slots) CPU-mapped,
    GPU-readable, read-only Scene Arena is attached during Surface creation with
    an encoded `{arena,offset}` address, **not** a raw GPU VA. The presenter polls
-   `TryTake(seen,packet)` without waiting for a game frame, counts packets in
-   Blackbox milestones, and immediately releases them because Slice 4A submits
-   **no GPU reads** of their data. Slice 4B must hold consumed slots through GPU
-   fence completion when it adds actual UI draws.
+   `TryTake(seen,packet)` without waiting for a game frame. Slice 4A originally
+   released packets without GPU reads; since 4B-2 all consumed drawing packets
+   remain pinned through their graphics submission fence, including in Slice 5A.
 
    `local_precheck.sh` compiles shared capture on both API paths, checks twenty
    actual Capture/backend symbol definitions with a relocatable link (no duplicate
@@ -222,7 +222,8 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
    allowing startup to proceed to Movies, FrameGraphDraws and Renderer. This
    control-flow change is compiled and link-audited; game execution is unverified.
 
-   D3D12 adds a 256 MiB GPU-only Geometry Arena, 16 MiB CPU-visible Scratch Arena,
+   D3D12 adds a 256 MiB GPU-only Geometry Arena, 16 MiB Scratch Arena (GPU-only
+   and UAV-backed since 5A),
    and the existing 120 MiB Scene Arena. A D3D12MA R16 index buffer has 48M
    indices on the 1,200 MiB console budget (64M on larger desktop budgets).
    Free-range allocation reuses geometry/index regions only after the graphics
@@ -297,8 +298,61 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
    GPU output. Boot logos, movies, title/menu/comic/HUD now have a recording and
    presentation path; none has been observed on a device in this workspace.
    `Photo::Read` remains false. No eboot progress, physical Xbox execution or
-   visual/GPU parity is claimed. 3D world, character, deferred, fog and particle
-   execution and full texture-quality convergence remain separate work.
+   visual/GPU parity is claimed. Slice 5A now supplies the core 3D path below;
+   remaining modules and full texture-quality convergence are still separate.
+
+   **Slice 5A — core 3D backbone implemented, device execution unverified.**
+   `world_d3d12.{h,cpp}` and `look_d3d12.{h,cpp}` create bounded scene targets
+   at the valid UI world target's dimensions (shared `Header` has no width/height
+   fields). Resize/resource/descriptor replacement waits for prior graphics work.
+   Depth is R32 typeless / D32 DSV / R32 SRV, cleared to zero; scene pipelines use
+   GREATER_EQUAL reverse depth, positive viewports and counter-clockwise fronts.
+   G-buffers match Vulkan's sRGB albedo, RG16F normal and RGBA8 material; the HDR
+   scene is RGBA16F. Four world surface lists, world decals, and rigid Lambert,
+   Vision, Character and Interior lists feed deferred lighting and depth-tested
+   sky. Missing/deformed/skinned streams are skipped once per attempted command,
+   counted in render-thread telemetry, and never dereferenced by this slice.
+
+   Neutral initialized 2D/array shadow/occlusion SRVs and RGBA-zero line/self
+   translucency/bloom inputs keep absent passes bound. A fence-safe per-frame
+   copy of Light explicitly disables point lights and traced shadows and supplies
+   a zero fallback grid. The comparison sampler always passes pending 5B cascades.
+   Captured Light/Scene packets are not rewritten in place.
+
+   Luminance -> exposure -> tonemap -> antialias-off -> composite now execute.
+   Persistent 16-byte meter state starts at `{0,1,1,0}` in GPU-only Scratch,
+   survives target resize, and uses UAV barriers and explicit UAV/SRV transitions.
+   Writable arena views are contiguous SRV/UAV pairs: b0 still carries only five
+   SRV indices; the shared UAV accessor selects the adjacent view. Meter compute
+   reads through the UAV, not an SRV in UAV state. The existing antialias shader
+   writes a row-pitched raw UAV buffer, copied into a typeless RGBA8 picture with
+   an sRGB SRV (sRGB UAVs are not supported). Composite writes directly into
+   `UiRenderer::BeginWorld`'s preserved RGBA8 target, then `EndWorld` restores SRV
+   state before HUD/menu recording. New packets refresh `Header::dynamic` textures
+   and call `Movies::Collect` in addition to UI texture refresh.
+
+   The clip-depth audit checks all **17** non-pfx VS/DS stages against GLSL,
+   including final GS conversions: missing world/character/Lambert/decal/glass/
+   self-translucent/contour reverse-Z fixups are restored. Intermediate contour
+   and leaf VS/DS outputs remain raw to avoid double conversion; leaf GS already
+   converts. Shadow/leaf-shadow shaders retain **forward depth as in GLSL**, not
+   the scene's reverse depth. Draw packed-pointer high words, 656-byte Lambert
+   Character stride, 304-byte world-decal offsets and 304-byte Sky offsets were
+   corrected to match shared capture. Newly executed sky/post stages account for
+   D3D12's fullscreen Y orientation without changing the existing UI present path.
+
+   Production-helper root sizes/offsets/word order, rigid readiness and index
+   bounds are checked normally and under ASan/UBSan; a source parity/ABI guard
+   accompanies **97/97 Microsoft DXC -WX** and **97/97 Slang**. The root remains
+   **37 DWORDs**, FontPack is untouched, and packaging keeps PDB/MAP external.
+   Passing compilation/tests is **not** proof of observed geometry, boot progress,
+   visual parity, or physical Xbox execution.
+
+   **5B:** deformers/skinning/cloth, cascaded shadows, point-light grids and their
+   actual execution remain separate. **5C:** fog, bloom, AO, particles and other
+   advanced/transparent/vegetation passes remain separate. Full texture-quality
+   convergence, `Photo::Read`, FSR and physical Xbox runtime verification also
+   remain outstanding. This build is still **not claimed playable**.
 
 4. **ImGuiRelay.** ~~Resolved~~ — `backend_surface.cpp` and `imgui_relay.cpp`
    supply the frontend-facing entry points without naming a graphics API, so the

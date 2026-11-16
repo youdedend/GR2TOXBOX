@@ -106,7 +106,7 @@ bool ArenaSet::Create(Device& device, Allocator& allocator, BindlessHeap& descri
         // One SRV per arena. The descriptor is what a shader's
         // ResourceDescriptorHeap[arena] resolves to; a ByteAddressBuffer view
         // (DXGI_FORMAT_UNKNOWN, stride 0) is the buffer_reference replacement.
-        DescriptorSlot srv = descriptors.AllocateSrv(1);
+        DescriptorSlot srv = descriptors.AllocateSrv(desc.writable ? 2 : 1);
         if (!srv) {
             LOG_CRITICAL(Graphics, "D3D12: no bindless slot for arena '{}'",
                          static_cast<u32>(desc.kind));
@@ -123,7 +123,7 @@ bool ArenaSet::Create(Device& device, Allocator& allocator, BindlessHeap& descri
             // Not a separate heap: D3D12 puts CBV, SRV and UAV descriptors in
             // one heap type, so the UAV slot comes from the same allocator and is
             // simply written with a UAV view instead of an SRV view.
-            uav = descriptors.AllocateSrv(1);
+            uav = {srv.index + 1};
             if (!uav) {
                 LOG_CRITICAL(Graphics, "D3D12: no bindless UAV slot for arena '{}'",
                              static_cast<u32>(desc.kind));

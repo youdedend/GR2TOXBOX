@@ -111,8 +111,15 @@ Grade LoadGrade(ArenaRef ref, ArenaTable table) {
 // 1 / MeterScale from scene.glsl: the fixed-point scale of the log-luminance sum.
 static const float MeterScale = 256.0;
 
+uint MeterRead(ArenaRef ref, ArenaTable table) {
+#ifdef METER_COMPUTE
+    return ArenaBufferRw(ref, table).Load(ref.offset);
+#else
+    return ArenaLoad(ref, table);
+#endif
+}
 float MeterLoadExposure(ArenaRef meter, ArenaTable table) {
-    return asfloat(ArenaLoad(ArenaAdd(meter, METER_EXPOSURE), table));
+    return asfloat(MeterRead(ArenaAdd(meter, METER_EXPOSURE), table));
 }
 
 void MeterStoreExposure(ArenaRef meter, ArenaTable table, float exposure) {
@@ -120,7 +127,7 @@ void MeterStoreExposure(ArenaRef meter, ArenaTable table, float exposure) {
 }
 
 float MeterLoadAdapted(ArenaRef meter, ArenaTable table) {
-    return asfloat(ArenaLoad(ArenaAdd(meter, METER_ADAPTED), table));
+    return asfloat(MeterRead(ArenaAdd(meter, METER_ADAPTED), table));
 }
 
 void MeterStoreAdapted(ArenaRef meter, ArenaTable table, float adapted) {
@@ -128,7 +135,7 @@ void MeterStoreAdapted(ArenaRef meter, ArenaTable table, float adapted) {
 }
 
 int MeterLoadLogSum(ArenaRef meter, ArenaTable table) {
-    return asint(ArenaLoad(ArenaAdd(meter, METER_LOG_SUM), table));
+    return asint(MeterRead(ArenaAdd(meter, METER_LOG_SUM), table));
 }
 
 void MeterStoreLogSum(ArenaRef meter, ArenaTable table, int log_sum) {

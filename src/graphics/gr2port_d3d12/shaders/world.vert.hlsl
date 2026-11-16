@@ -13,11 +13,7 @@
 //      root constants holding ArenaRefs (common/scene.hlsli).
 //   2. gl_BaseInstance becomes the `base_instance` root constant; gl_VertexIndex
 //      replaces GLSL's implicit vertex index.
-//   3. The GL clip-space conversion `clip.z = 0.5 * (clip.w - clip.z)` is
-//      replaced by the D3D reverse-Z projection: the game's projection matrix is
-//      the OpenGL [-w, w] one, so the port applies the same affine transform to
-//      the *matrix* on the host side and the shader keeps clip.z as computed.
-//      See dot with ReverseZNote below.
+//   3. Shared capture stores raw OpenGL matrices: convert Z in the shader.
 
 #include "common/scene.hlsli"
 
@@ -76,9 +72,8 @@ VsOutput main(uint vertex_index : SV_VertexID) {
     const float4x4 world_view = draw.world_view;
     const float3 view_position = mul(world_view, float4(model, 1.0)).xyz;
 
-    // The projection already carries the D3D reverse-Z transform (see the header
-    // note), so clip is used as computed: no 0.5 * (w - z) fix-up.
     float4 clip = mul(draw.world_view_projection, float4(model, 1.0));
+    clip.z = 0.5 * (clip.w - clip.z);
     output.position = clip;
 
     const float4 transform = draw.texcoord_transform;

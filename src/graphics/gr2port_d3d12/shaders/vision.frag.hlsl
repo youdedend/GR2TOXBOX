@@ -8,7 +8,18 @@ cbuffer CharacterAuxRoot : register(b1) {
 };
 #define scene_draws ArenaMake(scene_draws_words.x, scene_draws_words.y)
 #define scene_characters ArenaMake(scene_characters_words.x, scene_characters_words.y)
-struct CharacterAuxIO { float4 position : SV_Position; float2 texcoord : TEXCOORD3; nointerpolation uint draw_index : TEXCOORD7; };
+// Keep character.vert's full physical signature, including unused attributes.
+struct CharacterAuxIO {
+    float4 position : SV_Position;
+    float3 view_position : TEXCOORD0;
+    float4 normal : TEXCOORD1;
+    float4 tangent : TEXCOORD2;
+    float2 texcoord : TEXCOORD3;
+    float2 decal_texcoord : TEXCOORD4;
+    float2 model_xy : TEXCOORD5;
+    float4 vertex_color : TEXCOORD6;
+    nointerpolation uint draw_index : TEXCOORD7;
+};
 static float2 texcoord;
 static uint draw_index;
 static float4 pixel_position;

@@ -14,11 +14,8 @@
 //     Here `Casters` is an ArenaRef and the rest is a cbuffer (b0).
 //   * The depth conversion differs from the GLSL's. Upstream writes
 //     `clip.z = 0.5 * (clip.z + clip.w)`, the GL to Vulkan [0, w] conversion.
-//     The D3D target is reverse-Z, 1 at the near plane and 0 at the far one, so
-//     the same GL clip space maps as `0.5 * (clip.w - clip.z)`. The pancaking
-//     above it has to stay in the game's own depth, so the conversion is applied
-//     after it rather than folded into the matrix (which is what the world
-//     shaders do, since they have no pancaking).
+//     Shadows keep the GLSL's forward-Z conversion and comparison convention.
+//     Only the main scene uses reverse Z. Cascade execution is a 5B module.
 
 #include "common/scene.hlsli"
 
@@ -52,7 +49,7 @@ float4 main(uint instance : SV_InstanceID, uint vertex_index : SV_VertexID) : SV
     if (clip.w > 0.5) {
         clip.z = max(-clip.w, clip.z);
     }
-    // GL clip depth (-w..w) to D3D reverse-Z (1..0), as in the file header.
-    clip.z = 0.5 * (clip.w - clip.z);
+    // Shadow maps use forward depth, exactly as shadow.glsl (world uses reverse Z).
+    clip.z = 0.5 * (clip.z + clip.w);
     return clip;
 }

@@ -314,6 +314,25 @@ bool UiRenderer::Record(CommandList& list, const Scene::Header& h, const u8* pac
     close();
     return true;
 }
+UiRenderer::Extent UiRenderer::WorldExtent(const Scene::Header& h)const{
+    const auto i=h.ui.world;
+    return !h.ui.only&&i<h.ui.targets&&i<targets_.size()&&targets_[i].image?
+        Extent{targets_[i].width,targets_[i].height}:Extent{};
+}
+UiRenderer::Extent UiRenderer::BeginWorld(CommandList& list,const Scene::Header& h){
+    const auto extent=WorldExtent(h);if(!extent.width)return {};
+    open_world_=h.ui.world;auto& target=targets_[open_world_];
+    list.Transition(target.image.Get(),Rest,D3D12_RESOURCE_STATE_RENDER_TARGET);
+    const auto rtv=Rtv(open_world_);list.list->OMSetRenderTargets(1,&rtv,FALSE,nullptr);
+    // Preserve existing contents, exactly like Vulkan BeginTarget's load-op.
+    return extent;
+}
+void UiRenderer::EndWorld(CommandList& list){
+    if(open_world_==Scene::MaxUiTargets)return;
+    list.list->OMSetRenderTargets(0,nullptr,FALSE,nullptr);
+    list.Transition(targets_[open_world_].image.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,Rest);
+    open_world_=Scene::MaxUiTargets;
+}
 bool UiRenderer::HasPicture(const Scene::Header& h) const {
     return h.ui.picture < h.ui.targets && h.ui.picture < targets_.size() &&
            bool(targets_[h.ui.picture].image);

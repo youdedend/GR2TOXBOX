@@ -121,7 +121,8 @@ ByteAddressBuffer ArenaBuffer(ArenaRef ref, ArenaTable table) {
 }
 
 RWByteAddressBuffer ArenaBufferRw(ArenaRef ref, ArenaTable table) {
-    return DescriptorRawRw(ArenaIndex(ref, table));
+    // Writable arenas reserve an adjacent SRV/UAV descriptor pair on the host.
+    return DescriptorRawRw(ArenaIndex(ref, table) + 1u);
 }
 
 uint ArenaLoad(ArenaRef ref, ArenaTable table) {

@@ -13,6 +13,7 @@
 // is round-to-nearest-even in both languages, so the int(round(...)) below keeps
 // the rounding the meter's fixed-point accumulation was tuned against.
 
+#define METER_COMPUTE 1
 #include "common/grade.hlsli"
 #include "common/texel.hlsli"
 
@@ -45,5 +46,5 @@ void main(uint3 id : SV_DispatchThreadID) {
     // it, and a temporary returned by value is not addressable in HLSL.
     RWByteAddressBuffer meter_buffer = ArenaBufferRw(g_meter, g_arena);
     uint original;
-    meter_buffer.InterlockedAdd(METER_LOG_SUM, asuint(fixed_point), original);
+    meter_buffer.InterlockedAdd(g_meter.offset + METER_LOG_SUM, asuint(fixed_point), original);
 }

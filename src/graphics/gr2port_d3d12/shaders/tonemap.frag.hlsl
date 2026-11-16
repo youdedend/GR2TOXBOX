@@ -42,13 +42,13 @@ struct PsInput {
 
 float4 main(PsInput input) : SV_Target {
     const Grade grade = LoadGrade(g_grade, g_arena);
-    const float2 texcoord = 0.5 * input.uv + 0.5;
+    const float2 texcoord = float2(0.5 * input.uv.x + 0.5, 0.5 - 0.5 * input.uv.y);
     const float meter_exposure = MeterLoadExposure(g_meter, g_arena);
-    const float3 x = max(SampleTex(g_scene, texcoord).rgb, float3(0.0, 0.0, 0.0)) * meter_exposure;
+    const float3 x = max(SampleTexWith(g_scene, SMP_LINEAR_CLAMP, texcoord).rgb, float3(0.0, 0.0, 0.0)) * meter_exposure;
     const float3 curve = ((0.22 * x + 0.03) * x + 0.002) / ((0.22 * x + 0.3) * x + 0.06);
     float3 toned = 2.3060 * curve - 0.07687;
     if (grade.bloom_strength.w != 0.0) {
-        toned += grade.bloom_strength.rgb * SampleTex(g_bloom, texcoord).rgb;
+        toned += grade.bloom_strength.rgb * SampleTexWith(g_bloom, SMP_LINEAR_CLAMP, texcoord).rgb;
     }
     return float4(toned, dot(toned, float3(0.299, 0.587, 0.114)));
 }

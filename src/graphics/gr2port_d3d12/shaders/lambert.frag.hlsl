@@ -18,7 +18,7 @@
 #include "common/texel.hlsli"
 
 // As in lambert.vert.hlsl, and must stay in step with it.
-#define LAMBERT_CONSTANTS_BYTES 224u
+#define LAMBERT_CONSTANTS_BYTES 656u
 
 struct LambertConstants {
     float4 light_direction;
