@@ -1,7 +1,7 @@
 ; SPDX-FileCopyrightText: Copyright 2026 GR2toXBOX contributors
 ; SPDX-License-Identifier: GPL-2.0-or-later
 ;
-; The UWP app manifest activates the runtime class GR2port.App. Export the
-; framework activation entry point from the executable for the app model.
+; C++/WinRT provides WINRT_GetActivationFactory. Export the app-model name as
+; a private alias so GR2port.App activation resolves through the WinRT runtime.
 EXPORTS
-    DllGetActivationFactory
+    DllGetActivationFactory = WINRT_GetActivationFactory PRIVATE
