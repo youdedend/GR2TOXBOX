@@ -4,7 +4,10 @@
 #pragma once
 
 #include "common/types.h"
+#if !defined(GR2_RENDERER_D3D12)
 #include "graphics/gr2port/device.h"
+#endif
+namespace Gr2Port::D3D12 { struct CoreTargets; struct CommandList; }
 
 namespace Gr2Port {
 class Memory;
@@ -44,6 +47,12 @@ Copy Get(VAddr vertex_buffer, VAddr shape, const Meshes::Mesh& mesh, u64 frame,
 
 /// Render thread: creates the deformer pipelines, the buffer the copies share and the effector
 /// grid.
+#if defined(GR2_RENDERER_D3D12)
+bool Start(D3D12::CoreTargets& targets);
+void Update(D3D12::CommandList&, u64 frame, u64 completed, u64 game_frame);
+void Record(D3D12::CommandList&, const Scene::Header&, u64 address);
+void Stop();
+#else
 bool Start(const Device& device, Memory& memory);
 
 /// Render thread, before the frame's draws: records the copies that fill new instances' copies,
@@ -54,6 +63,8 @@ void Update(vk::CommandBuffer cmd, u64 frame, u64 completed, u64 game_frame);
 /// Render thread, outside rendering: runs the packet's effector grid, skin jobs and SoftBody jobs,
 /// in the game's order, and makes the copies visible to vertex shaders. The packet is at address.
 void Record(vk::CommandBuffer cmd, const Scene::Header& header, u64 address);
+
+#endif
 
 /// The device address of the effector grid that Record fills for a packet with cloth or vegetation.
 u64 GridAddress();

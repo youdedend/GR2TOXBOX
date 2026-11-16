@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
+#include <algorithm>
+#include <cmath>
 #include "graphics/gr2port_d3d12/ui_state.h"
 namespace Gr2Port::D3D12::CoreState {
 struct Ref {
     u32 arena, offset;
 };
-constexpr Ref Unpack(u64 a) { return {Residency::Arena(a), Residency::Offset(a)}; }
+constexpr Ref Unpack(u64 a) {
+    return {Residency::Arena(a), Residency::Offset(a)};
+}
 struct WorldRoot {
     Ref draws, materials, layers;
     u32 base, pad = 0;
@@ -67,7 +71,9 @@ static_assert(offsetof(Scene::Sky, cloud_color) == 224 &&
 static_assert(sizeof(Scene::Character) == 656 && sizeof(Scene::Draw) == 224);
 static_assert(offsetof(Scene::Draw, vertices) == 160 && offsetof(Scene::Draw, skin) == 184 &&
               offsetof(Scene::Draw, palette) == 192);
-inline float ReverseZ(float z, float w) { return .5f * (w - z); }
+inline float ReverseZ(float z, float w) {
+    return .5f * (w - z);
+}
 inline bool Header(const Scene::Header& h) {
     u64 total = 0;
     for (auto n : h.draw_commands)
@@ -75,14 +81,50 @@ inline bool Header(const Scene::Header& h) {
     return h.draws <= Scene::g_room.draws && total <= Scene::g_room.draws &&
            h.materials <= Scene::g_room.materials && h.characters <= Scene::MaxCharacters &&
            h.layer_materials <= Scene::g_room.layer_materials &&
-           h.world_decals <= Scene::MaxWorldDecals;
+           h.world_decals <= Scene::MaxWorldDecals && h.casters <= Scene::g_room.casters &&
+           !(h.cascades & ~((1u << Scene::Cascades) - 1u)) &&
+           h.point_lights <= Scene::MaxPointLights && h.skin_jobs <= Scene::MaxSkinJobs &&
+           h.soft_body_jobs <= Scene::MaxSoftBodyJobs;
 }
-// 5A only consumes resident rigid geometry. Deformer/skin output is a 5B pass.
+struct Limits {
+    u64 geometry = 256ull * 1024 * 1024;
+    u64 scene = 5ull * 24 * 1024 * 1024;
+    u64 deformers = 16ull * 1024 * 1024;
+};
+inline bool InArena(u64 ref, u32 arena, u64 bytes, u64 capacity) {
+    const u64 offset = Residency::Offset(ref);
+    return ref && Residency::Arena(ref) == arena && offset <= capacity &&
+           bytes <= capacity - offset;
+}
+inline bool Streams(u64 vertices, u32 stride, u64 skin, u64 palette, u32 bones,
+                    Limits limits = {}) {
+    return stride &&
+           (InArena(vertices, 0, stride, limits.geometry) ||
+            InArena(vertices, 2, stride, limits.deformers)) &&
+           (!bones || (InArena(skin, 0, 16, limits.geometry) &&
+                       InArena(palette, 1, u64(bones) * 48, limits.scene)));
+}
 inline bool Ready(const Scene::Draw& d, const Scene::Command& cmd, u32 draws, u64 indices,
-                  u32 characters, bool forward) {
-    return d.vertices && Residency::Arena(d.vertices) == 0 && !d.bones && d.stride &&
+                  u32 characters, bool forward, Limits limits = {}) {
+    return Streams(d.vertices, d.stride, d.skin, d.palette, d.bones, limits) &&
            cmd.instance_count == 1 && cmd.first_instance < draws && cmd.index_count &&
            cmd.first_index <= indices && cmd.index_count <= indices - cmd.first_index &&
            (!forward || (d.material && d.material <= characters));
+}
+struct ShadowRoot {
+    Ref casters, shadows;
+    u32 cascade, base;
+};
+static_assert(sizeof(ShadowRoot) == 24 && offsetof(ShadowRoot, base) == 20);
+struct ShadowKey {
+    u32 list;
+    s32 constant;
+    float slope;
+    bool operator==(const ShadowKey&) const = default;
+};
+inline ShadowKey Bias(u32 list, float constant, float slope) {
+    return {list,
+            std::isfinite(constant) ? s32(std::round(std::clamp(constant, -16384.f, 16384.f))) : 0,
+            std::isfinite(slope) ? std::clamp(slope / 16.f, -16.f, 16.f) : 0.f};
 }
 } // namespace Gr2Port::D3D12::CoreState

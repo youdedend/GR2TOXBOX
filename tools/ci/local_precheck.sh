@@ -625,6 +625,9 @@ D3D12_UNITS=(
     "src/graphics/gr2port_d3d12/ui_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
     "src/graphics/gr2port_d3d12/ui_state.cpp|"
     "src/graphics/gr2port_d3d12/world_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
+    "src/graphics/gr2port_d3d12/deformers_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
+    "src/graphics/gr2port_d3d12/point_lights_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
+    "src/graphics/gr2port_d3d12/shadows_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
     "src/graphics/gr2port_d3d12/look_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
     "src/graphics/gr2port_d3d12/texture_layout.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/descriptors.cpp|-D_WIN32"
@@ -697,11 +700,11 @@ D3D12_SYMBOLS=(
 # -r also rejects duplicate definitions. A failed object compile MUST fail here.
 if command -v nm >/dev/null 2>&1; then
     objects_ok=1
-    for source in src/graphics/gr2port/capture.cpp src/graphics/gr2port_d3d12/backend_capture.cpp src/graphics/gr2port_d3d12/meshes_d3d12.cpp src/graphics/gr2port_d3d12/textures_d3d12.cpp; do
+    for source in src/graphics/gr2port/capture.cpp src/graphics/gr2port_d3d12/backend_capture.cpp src/graphics/gr2port_d3d12/deformers_d3d12.cpp src/graphics/gr2port_d3d12/meshes_d3d12.cpp src/graphics/gr2port_d3d12/textures_d3d12.cpp; do
         object="$OUT/$(basename "$source" .cpp).o"
         resident_defs=()
         case "$source" in
-            *meshes_d3d12.cpp|*textures_d3d12.cpp) resident_defs=(-D_WIN32) ;;
+            *deformers_d3d12.cpp|*meshes_d3d12.cpp|*textures_d3d12.cpp) resident_defs=(-D_WIN32) ;;
         esac
         if ! "$CXX" "${CXXFLAGS[@]}" -DGR2_RENDERER_D3D12=1 "${resident_defs[@]}" -fpermissive -c -o "$object" -Itools/ci/d3d12_stub \
                 -I"$DEPS_ROOT/ext-boost" -I"$DEPS_ROOT/vulkan-headers/include" "$source" 2>"$OUT/err"; then
@@ -710,7 +713,7 @@ if command -v nm >/dev/null 2>&1; then
         fi
     done
     if [ "$objects_ok" -eq 1 ]; then
-        if ! "$CXX" -r "$OUT/capture.o" "$OUT/backend_capture.o" "$OUT/meshes_d3d12.o" "$OUT/textures_d3d12.o" -o "$OUT/capture-contract.o" 2>"$OUT/err"; then
+        if ! "$CXX" -r "$OUT/capture.o" "$OUT/backend_capture.o" "$OUT/deformers_d3d12.o" "$OUT/meshes_d3d12.o" "$OUT/textures_d3d12.o" -o "$OUT/capture-contract.o" 2>"$OUT/err"; then
             echo "  FAIL duplicate capture definitions"; cat "$OUT/err"
             failures=$((failures + 1))
         else
@@ -844,6 +847,9 @@ if ! python3 tools/shaders/check_hlsl_local.py; then
 fi
 
 # Audit all non-pfx VS/DS and their final GS stages against paired GLSL.
+if ! python3 tools/ci/check_shadow_instance.py; then
+    failures=$((failures + 1))
+fi
 if ! python3 tools/shaders/check_clip_depth.py; then
     failures=$((failures + 1))
 fi

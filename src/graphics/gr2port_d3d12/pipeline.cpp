@@ -297,6 +297,12 @@ u64 PipelineCache::HashGraphics(const GraphicsPipelineDesc& desc) {
     hash = HashScalar(hash, (desc.depth_test ? 1u : 0u) | (desc.depth_write ? 2u : 0u) |
                                 (desc.depth_bias ? 4u : 0u) | (desc.stencil ? 8u : 0u));
     hash = HashScalar(hash, static_cast<u64>(desc.depth_compare));
+    hash = HashScalar(hash, static_cast<u32>(desc.depth_bias_constant));
+    u32 slope_bits=0,clamp_bits=0;
+    static_assert(sizeof(slope_bits)==sizeof(desc.depth_bias_slope));
+    std::memcpy(&slope_bits,&desc.depth_bias_slope,sizeof(slope_bits));
+    std::memcpy(&clamp_bits,&desc.depth_bias_clamp,sizeof(clamp_bits));
+    hash = HashScalar(hash,slope_bits);hash = HashScalar(hash,clamp_bits);
     hash = HashScalar(hash, (desc.stencil_replace ? 1u : 0u) | (desc.stencil_equal ? 2u : 0u));
     hash = HashScalar(hash, (desc.alpha_blend ? 1u : 0u) | (desc.keep_target_alpha ? 2u : 0u) |
                                 (desc.premultiplied_blend ? 4u : 0u) |

@@ -165,7 +165,7 @@ void Update(D3D12::CommandList& cmd, u64 fence, u64 completed) {
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - g_start)
             .count());
     g_seconds = seconds;
-    if (fence % ScanFrames == 0 && Textures::Squeezed()) {
+    if (fence % ScanFrames == 0 && Gr2Port::Textures::Squeezed()) {
         u32 count = 0;
         for (u32 h = 0; h < g_unused && count < EvictsPerScan; ++h) {
             auto& m = g_meshes[h];

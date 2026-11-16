@@ -23,6 +23,7 @@ cbuffer ShadowConstants : register(b1) {
     uint2 g_casters_words;
     uint2 g_shadows_words;
     uint g_cascade;
+    uint g_base_instance;
 };
 #define g_casters ArenaMake(g_casters_words.x, g_casters_words.y)
 #define g_shadows ArenaMake(g_shadows_words.x, g_shadows_words.y)
@@ -33,7 +34,7 @@ cbuffer ArenaConstants : register(b0) {
 
 float4 main(uint instance : SV_InstanceID, uint vertex_index : SV_VertexID) : SV_Position {
     // gl_BaseInstance: one caster per instance.
-    const Caster caster = LoadCasterAt(ArenaAdd(g_casters, instance * CASTER_BYTES), g_arena);
+    const Caster caster = LoadCasterAt(ArenaAdd(g_casters, (g_base_instance + instance) * CASTER_BYTES), g_arena);
 
     float3 model = LoadPosition(caster.vertices, caster.stride, caster.position, vertex_index, g_arena);
     if (caster.bones != 0u) {

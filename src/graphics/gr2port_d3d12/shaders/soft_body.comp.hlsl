@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 GR2port
 // SPDX-License-Identifier: GPL-2.0-or-later
+#define DEFORMER_COMPUTE 1
 #include "common/batch3.hlsli"
 cbuffer ArenaConstants : register(b0) { ArenaTable g_arena; };
 cbuffer SoftBodyRoot : register(b1) {

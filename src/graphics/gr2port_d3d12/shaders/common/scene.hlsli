@@ -237,15 +237,15 @@ Caster LoadCasterAt(ArenaRef ref, ArenaTable table) {
     ByteAddressBuffer buffer = ArenaBuffer(ref, table);
     Caster caster;
     caster.world = ArenaLoadMatrix(ref, table);
-    caster.vertices = ArenaMake(ARENA_GEOMETRY, buffer.Load(ref.offset + 64));
+    caster.vertices = ArenaMake(buffer.Load(ref.offset + 68), buffer.Load(ref.offset + 64));
     caster.stride = buffer.Load(ref.offset + 72);
     caster.position = buffer.Load(ref.offset + 76);
     caster.table = buffer.Load(ref.offset + 80);
     caster.texture = buffer.Load(ref.offset + 84);
     caster.texcoord = buffer.Load(ref.offset + 88);
     caster.alpha_reference = asfloat(buffer.Load(ref.offset + 92));
-    caster.skin = ArenaMake(ARENA_SKINNING, buffer.Load(ref.offset + 96));
-    caster.palette = ArenaMake(ARENA_SKINNING, buffer.Load(ref.offset + 104));
+    caster.skin = ArenaMake(buffer.Load(ref.offset + 100), buffer.Load(ref.offset + 96));
+    caster.palette = ArenaMake(buffer.Load(ref.offset + 108), buffer.Load(ref.offset + 104));
     caster.bones = buffer.Load(ref.offset + 112);
     return caster;
 }

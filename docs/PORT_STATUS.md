@@ -24,7 +24,7 @@ file is right.
 | Direct3D 12 device / allocator / descriptors / arena | **Done** |
 | HLSL SM 6.4 shader pipeline (`dxc`, fail-loud) | **Done** |
 | D3D12 command ring, root signature, PSO cache | **Done** |
-| Direct3D 12 frame graph (passes, submits, presenter) | **Core 3D + UI implemented; runtime unverified; 5B/5C remain** |
+| Direct3D 12 frame graph (passes, submits, presenter) | **5A + 5B core passes implemented; runtime unverified; 5C remains** |
 | HLSL shader port | **In progress — 96 of 184 engine stages + 1/1 detile; 97 DXC/Slang-verified** |
 | UWP shell (`IFrameworkView`, launcher, gamepad) | **In progress** |
 | **UWP package builds at all** | **Yes — SDL3 replaced by an in-tree shim** |
@@ -308,17 +308,20 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
    Depth is R32 typeless / D32 DSV / R32 SRV, cleared to zero; scene pipelines use
    GREATER_EQUAL reverse depth, positive viewports and counter-clockwise fronts.
    G-buffers match Vulkan's sRGB albedo, RG16F normal and RGBA8 material; the HDR
-   scene is RGBA16F. Four world surface lists, world decals, and rigid Lambert,
-   Vision, Character and Interior lists feed deferred lighting and depth-tested
-   sky. Missing/deformed/skinned streams are skipped once per attempted command,
-   counted in render-thread telemetry, and never dereferenced by this slice.
+   scene is RGBA16F. Four world surface lists, world decals, Lambert, Vision,
+   Character and Interior lists feed deferred lighting and depth-tested sky.
+   Slice 5B extends readiness to in-bounds skinned streams and deformer-arena
+   vertices; invalid streams and index ranges remain skipped and counted.
 
-   Neutral initialized 2D/array shadow SRVs and RGBA-zero AO/line/self
-   translucency/bloom inputs keep absent passes bound (AO is an occluded
-   fraction, so its disabled value is zero). A fence-safe per-frame
-   copy of Light explicitly disables point lights and traced shadows and supplies
-   a zero fallback grid. The comparison sampler always passes pending 5B cascades.
-   Captured Light/Scene packets are not rewritten in place.
+   Cascaded shadows now use forward-Z R16 typeless depth resources (two layers
+   for cascades zero and one, one 2D map for cascade two), D16 DSVs, a
+   LESS_EQUAL comparison sampler, positive viewports and depth-one clears. A
+   bounded PSO cache bakes each list's integer/slope depth bias for FL 12_0; the
+   shadow VS roots carry and apply each draw's base instance. The persistent
+   point-light grid dispatches only when the packet has point lights and feeds
+   deferred and character roots. Captured Light/Scene packets are not rewritten
+   in place. AO/line/self-translucency/bloom and traced-shadow inputs still use
+   neutral fallbacks where their separate passes are not implemented.
 
    Luminance -> exposure -> tonemap -> antialias-off -> composite now execute.
    Persistent 16-byte meter state starts at `{0,1,1,0}` in GPU-only Scratch,
@@ -349,11 +352,30 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
    Passing compilation/tests is **not** proof of observed geometry, boot progress,
    visual parity, or physical Xbox execution.
 
-   **5B:** deformers/skinning/cloth, cascaded shadows, point-light grids and their
-   actual execution remain separate. **5C:** fog, bloom, AO, particles and other
-   advanced/transparent/vegetation passes remain separate. Full texture-quality
-   convergence, `Photo::Read`, FSR and physical Xbox runtime verification also
-   remain outstanding. This build is still **not claimed playable**.
+   **Slice 5B — deformation, point lights and cascaded shadow recording
+   implemented, device execution unverified.** The capture-facing `Deformers::Get`
+   now shares a 16 MiB GPU-writable allocation with 256-byte-aligned instances;
+   copies are initialized before the frame's compute work and retired after their
+   graphics fence. The D3D12 update/record path runs effectors, skinning,
+   soft-body simulation and soft-body vertex writes in the game order, with UAV
+   barriers and explicit arena transitions. Vertex-skinned draws require an
+   in-bounds geometry skin stream and scene palette; valid deformer-arena vertex
+   addresses are also accepted. Point lights build the 60 x 36 x 8 grid into a
+   persistent writable scratch range and pass its address through the deferred
+   and character roots. Shadows render the packet's three cascades, validate
+   command/index/caster bounds, and use a 48-entry fence-aware PSO cache keyed by
+   list and baked depth bias. The two shadow vertex shaders add the per-draw base
+   instance before indexing casters.
+
+   `local_precheck.sh` checks the new units against the SDK stub, the capture
+   symbol contract, SM 6.4 HLSL with Microsoft DXC `-WX` and Slang, host bounds
+   tests and ASan/UBSan. These checks and Windows/UWP CI prove compilation and
+   packaging only—not D3D12 execution, visual parity, or hardware behavior.
+   **Slice 5C remains separate:** fog, bloom, world lines, AO, glass, water,
+   particles and other advanced transparent passes are not part of this slice.
+   Leaf/grass/branch draw and shadow passes remain incomplete as well. Full
+   texture-quality convergence, `Photo::Read`, FSR and physical Xbox runtime
+   verification remain outstanding. This build is still **not claimed playable**.
 
 4. **ImGuiRelay.** ~~Resolved~~ — `backend_surface.cpp` and `imgui_relay.cpp`
    supply the frontend-facing entry points without naming a graphics API, so the

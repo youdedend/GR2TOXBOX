@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "graphics/gr2port_d3d12/world_d3d12.h"
 #include "character_frag.h"
 #include "character_vert.h"
 #include "deferred_frag.h"
 #include "fullscreen_vert.h"
+#include "graphics/gr2port/deformers.h"
 #include "graphics/gr2port/meshes.h"
+#include "graphics/gr2port_d3d12/world_d3d12.h"
 #include "interior_frag.h"
 #include "lambert_frag.h"
 #include "lambert_vert.h"
@@ -44,8 +45,8 @@ bool CoreTargets::Start(ResidencyContext& c) {
         return false;
     meter = c.arenas->Allocate(ArenaKind::Scratch, 16);
     zero = c.arenas->Allocate(ArenaKind::Scratch, 16);
-    // Comparison always passes until real cascade maps arrive in 5B. Valid
-    // typed 2D/array depth SRVs are still bound; there are no unbound resources.
+    // Bind safe comparison and point samplers before the per-scene shadow pass
+    // replaces the comparison state with its forward-Z LESS_EQUAL sampler.
     D3D12_SAMPLER_DESC sampler{};
     sampler.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
     sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
@@ -209,7 +210,7 @@ bool WorldRenderer::Start(CoreTargets& targets) {
         if (!CreateGraphicsPipeline(c.device->device.Get(), *c.root, d, pipelines_[i]))
             return false;
     }
-    return true;
+    return point_lights_.Start(targets) && shadows_.Start(targets) && Deformers::Start(targets);
 }
 bool WorldRenderer::Record(CommandList& list, const Scene::Header& h, const u8* data, u64 address,
                            u32 slot) {
@@ -224,7 +225,7 @@ bool WorldRenderer::Record(CommandList& list, const Scene::Header& h, const u8* 
     std::memcpy(upload.cpu, initial, 16);
     Scene::Light light{};
     std::memcpy(&light, data + Scene::LightOffset, sizeof(light));
-    light.point_lights = 0;
+    light.point_lights = h.point_lights;
     light.shadow_trace = 0;
     std::memcpy(upload.cpu + 32, &light, sizeof(light));
     const auto record = CoreState::DeferredImages(
@@ -247,6 +248,9 @@ bool WorldRenderer::Record(CommandList& list, const Scene::Header& h, const u8* 
         list.list->ClearRenderTargetView(t.Rtv(image), clear, 0, nullptr);
         t.To(list, image, Rest);
     }
+    Deformers::Record(list, h, address);
+    point_lights_.Record(list, h, address);
+    shadows_.Record(list, h, data, address);
     RecordSurfaces(list, h, data, address, slot);
     RecordLight(list, h, slot);
     RecordForward(list, h, data, address, slot);
@@ -256,7 +260,6 @@ void WorldRenderer::DrawList(CommandList& list, const Scene::Header& h, const u8
                              u32 slot, u32 list_index, u32 pipeline) {
     auto& t = *t_;
     const CoreState::Ref light_ref{frame_[slot].ref.arena, frame_[slot].ref.offset};
-    const CoreState::Ref zero{t.zero.ref.arena, t.zero.ref.offset};
     const auto draws = CoreState::Unpack(address + Scene::DrawsOffset),
                characters = CoreState::Unpack(address + Scene::CharactersOffset);
     auto* index = Meshes::IndexBuffer();
@@ -276,8 +279,10 @@ void WorldRenderer::DrawList(CommandList& list, const Scene::Header& h, const u8
         Scene::Draw draw{};
         std::memcpy(&draw, data + Scene::DrawsOffset + u64(cmd.first_instance) * sizeof(draw),
                     sizeof(draw));
-        if (!CoreState::Ready(draw, cmd, h.draws, ib.SizeInBytes / 2, h.characters,
-                              pipeline >= 5) ||
+        if (!CoreState::Ready(draw, cmd, h.draws, ib.SizeInBytes / 2, h.characters, pipeline >= 5,
+                              {t.context->arenas->Capacity(ArenaKind::Geometry),
+                               t.context->arenas->Capacity(ArenaKind::Scene),
+                               t.context->arenas->Capacity(ArenaKind::Skinning)}) ||
             (pipeline < 4 && draw.material > h.materials)) {
             ++skipped_;
             continue;
@@ -291,15 +296,16 @@ void WorldRenderer::DrawList(CommandList& list, const Scene::Header& h, const u8
             const CoreState::LambertRoot root{draws, characters, cmd.first_instance};
             list.SetDrawConstants(&root, sizeof(root));
         } else {
-            const CoreState::CharacterRoot root{draws,
-                                                characters,
-                                                CoreState::Unpack(address + Scene::DecalsOffset),
-                                                light_ref,
-                                                {1.f / t.width, 1.f / t.height},
-                                                zero,
-                                                zero,
-                                                0,
-                                                cmd.first_instance};
+            const CoreState::CharacterRoot root{
+                draws,
+                characters,
+                CoreState::Unpack(address + Scene::DecalsOffset),
+                light_ref,
+                {1.f / t.width, 1.f / t.height},
+                CoreState::Unpack(current_scene_address_ + Scene::PointLightsOffset),
+                point_lights_.Grid(),
+                0,
+                cmd.first_instance};
             list.SetDrawConstants(&root, sizeof(root));
         }
         list.list->DrawIndexedInstanced(cmd.index_count, 1, cmd.first_index, cmd.vertex_offset, 0);
@@ -341,7 +347,6 @@ void WorldRenderer::RecordSurfaces(CommandList& list, const Scene::Header& h, co
 void WorldRenderer::RecordLight(CommandList& list, const Scene::Header& h, u32 slot) {
     auto& t = *t_;
     const CoreState::Ref light_ref{frame_[slot].ref.arena, frame_[slot].ref.offset};
-    const CoreState::Ref zero{t.zero.ref.arena, t.zero.ref.offset};
     t.To(list, CoreTargets::Hdr, D3D12_RESOURCE_STATE_RENDER_TARGET);
     const auto hdr = t.Rtv(CoreTargets::Hdr);
     const float background[]{h.background[0], h.background[1], h.background[2], 0};
@@ -349,11 +354,12 @@ void WorldRenderer::RecordLight(CommandList& list, const Scene::Header& h, u32 s
     list.list->OMSetRenderTargets(1, &hdr, FALSE, nullptr);
     list.SetPipeline(pipelines_[9]);
     const CoreState::DeferredRoot deferred{
-        light_ref, zero, zero, {light_ref.arena, light_ref.offset + u32(sizeof(Scene::Light))}};
+        light_ref,
+        CoreState::Unpack(current_scene_address_ + Scene::PointLightsOffset),
+        point_lights_.Grid(),
+        {light_ref.arena, light_ref.offset + u32(sizeof(Scene::Light))}};
     list.SetDrawConstants(&deferred, sizeof(deferred));
-    const CoreState::TextureRoot textures{
-        t.Srv(CoreTargets::ShadowArray), t.Srv(CoreTargets::White), t.Srv(CoreTargets::ShadowArray),
-        t.Srv(CoreTargets::White)};
+    const CoreState::TextureRoot textures = shadows_.Textures();
     list.SetPassConstants(&textures, sizeof(textures));
     list.DrawFullscreen();
 }
@@ -364,14 +370,15 @@ void WorldRenderer::RecordForward(CommandList& list, const Scene::Header& h, con
     t.To(list, CoreTargets::Depth, D3D12_RESOURCE_STATE_DEPTH_WRITE);
     list.list->OMSetRenderTargets(1, &hdr, FALSE, &depth);
     for (auto pair : {std::pair{6u, 7u}, std::pair{7u, 8u}, std::pair{4u, 5u}, std::pair{5u, 6u}}) {
-        const CoreState::TextureRoot forward{t.Srv(CoreTargets::ShadowArray),
-                                             t.Srv(CoreTargets::White), t.Srv(CoreTargets::Black),
-                                             t.Srv(CoreTargets::Black)};
+        const CoreState::TextureRoot forward = shadows_.Textures();
         list.SetPassConstants(&forward, sizeof(forward));
         DrawList(list, h, data, address, slot, pair.first, pair.second);
     }
 }
 void WorldRenderer::Stop() {
+    Deformers::Stop();
+    shadows_.Stop();
+    point_lights_.Stop();
     for (auto& upload : uploads_) {
         upload.Unmap();
         upload.resource.Reset();

@@ -22,6 +22,7 @@
 #include "core/game_check/game_patches.h"
 #include "graphics/gr2port_d3d12/ui_d3d12.h"
 #include "graphics/gr2port_d3d12/look_d3d12.h"
+#include "graphics/gr2port/deformers.h"
 #include "graphics/gr2port/movies.h"
 #include "graphics/gr2port/backend.h"
 #include "graphics/gr2port/frame_stats.h"
@@ -87,10 +88,11 @@ struct Surface {
             {D3D12::ArenaKind::Geometry,256_MB,false,false},
             {D3D12::ArenaKind::Scratch,16_MB,true,false},
             {D3D12::ArenaKind::Scene,SceneRing::Slots*SceneRing::SlotBytes(),false,true},
+            {D3D12::ArenaKind::Skinning,16_MB,true,false},
         };
         if (!allocator.Create(device) || !arenas.Create(device,allocator,heap,descriptions))return false;
         residency={&device,&allocator,&arenas,&heap,&root,0};
-        if(!Meshes::Start(residency)||!Textures::Start(residency)||
+        if(!Meshes::Start(residency)||!Gr2Port::Textures::Start(residency)||
            !ui.Start(residency,device.swapchain_format,GamePatches::AspectRatio())||
            !core.Start(residency)||!world.Start(core)||!look.Start(core))return false;
         const auto storage=arenas.Allocate(D3D12::ArenaKind::Scene,SceneRing::Slots*SceneRing::SlotBytes());
@@ -120,7 +122,7 @@ struct Surface {
         // Shutdown must follow game/capture producer quiescence, as on Vulkan.
         retained.DrainAfterIdle([](u32 slot){SceneRing::Release(slot);});
         if (attached) SceneRing::Attach(nullptr, 0);
-        look.Stop(); world.Stop(); core.Stop(); ui.Stop(); Textures::Stop(); Meshes::Stop();
+        look.Stop(); world.Stop(); core.Stop(); ui.Stop(); Gr2Port::Textures::Stop(); Meshes::Stop();
         imgui.Destroy(); arenas.Destroy(); allocator.Destroy();
         ring.Destroy(); heap.Destroy();
         if(device.timeline_event) CloseHandle(device.timeline_event);
@@ -181,7 +183,7 @@ bool Tick() {
     s.residency.completed=completed;
     s.allocator.BeginFrame(completed);
     Meshes::Update(list,submission,completed);
-    Textures::Update(list,submission,completed);
+    Gr2Port::Textures::Update(list,submission,completed);
     // Retire before taking: the producer may need these slots immediately.
     s.retained.Collect(completed,[](u32 slot){SceneRing::Release(slot);});
     SceneRing::Packet packet{};
@@ -196,14 +198,17 @@ bool Tick() {
                 SceneRing::Release(packet.slot);ui_ok=false;
             }else{
                 ui_ok=s.ui.Prepare(list,header,packet.data,submission);
-                Textures::Refresh(list,submission,std::span{header.dynamic}.first(
+                Gr2Port::Textures::Refresh(list,submission,std::span{header.dynamic}.first(
                     std::min(header.dynamic_textures,Scene::MaxDynamicTextures)));
                 Movies::Collect();
                 if(ui_ok&&!header.ui.only){
                     const auto extent=s.ui.WorldExtent(header);
                     if(extent.width){
-                        ui_ok=s.core.Resize(extent.width,extent.height)&&
-                            s.world.Record(list,header,packet.data,packet.address,s.ring.CurrentFrameIndex());
+                        ui_ok=s.core.Resize(extent.width,extent.height);
+                        if(ui_ok){
+                            Deformers::Update(list,submission,completed,header.frame);
+                            ui_ok=s.world.Record(list,header,packet.data,packet.address,s.ring.CurrentFrameIndex());
+                        }
                         if(ui_ok){
                             s.look.RecordSky(list,header,packet.address);
                             s.look.RecordPost(list,packet.address);

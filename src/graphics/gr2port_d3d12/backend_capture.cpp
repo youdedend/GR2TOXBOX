@@ -36,9 +36,6 @@ namespace Upscaler {
 Extent RenderSize(u32 width, u32 height) { return {width, height}; }
 } // namespace Upscaler
 
-namespace Deformers {
-Copy Get(VAddr, VAddr, const Meshes::Mesh&, u64, u64) { return {}; }
-} // namespace Deformers
 
 // ---------------------------------------------------------------------------
 // Particle curves

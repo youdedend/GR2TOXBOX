@@ -3,7 +3,7 @@
 #ifndef GR2_BATCH3_HLSLI
 #define GR2_BATCH3_HLSLI
 #include "common/batch2_scene.hlsli"
-ArenaRef ArenaLoadRef(ArenaRef r,ArenaTable t) {uint2 w=ArenaLoad2(r,t);return ArenaMake(w.x,w.y);}
+ArenaRef ArenaLoadRef(ArenaRef r,ArenaTable t) {uint2 w=ArenaLoad2(r,t);return ArenaMake(w.y,w.x);}
 uint PackHalf2x16(float2 v) {return f32tof16(v.x)|(f32tof16(v.y)<<16u);}
 struct B3Leaf {
 
@@ -309,7 +309,14 @@ B3SoftBodyJob LoadB3SoftBodyJob(ArenaRef base,uint index,ArenaTable table) {
     v.write[4]=buffer.Load4(ref.offset+368u);
     return v;
 }
-uint B3Word(ArenaRef r,uint i,ArenaTable table) { return ArenaLoad(ArenaAdd(r,i*4u),table); }
+uint B3Word(ArenaRef r,uint i,ArenaTable table) {
+#ifdef DEFORMER_COMPUTE
+    // Copies/state and the effector grid are in UAV state during simulation.
+    if (r.arena == ARENA_SKINNING || r.arena == ARENA_SCRATCH)
+        return ArenaBufferRw(r,table).Load(r.offset+i*4u);
+#endif
+    return ArenaLoad(ArenaAdd(r,i*4u),table);
+}
 float B3Float(ArenaRef r,uint i,ArenaTable table) { return asfloat(B3Word(r,i,table)); }
 void B3Store(ArenaRef r,uint i,uint v,ArenaTable table) { ArenaStore(ArenaAdd(r,i*4u),table,v); }
 float4 B3State(ArenaRef r,uint i,ArenaTable table) {return asfloat(ArenaBufferRw(r,table).Load4(r.offset+32u+i*16u));}
