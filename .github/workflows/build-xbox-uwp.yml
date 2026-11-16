@@ -435,17 +435,20 @@ jobs:
 
           $exports = & $dumpbin /nologo /exports $exe.FullName 2>&1 | Out-String
           if ($LASTEXITCODE -ne 0) { throw "dumpbin /exports failed:`n$exports" }
-          if ($exports -notmatch '(?im)\bDllGetActivationFactory\b') {
-            throw "GR2port.App activation export DllGetActivationFactory is missing:`n$exports"
-          }
-          Write-Host 'Verified exported DllGetActivationFactory for GR2port.App.'
+          $hasActivationExport = $exports -match '(?im)\bDllGetActivationFactory\b'
+          $exportEvidence = (($exports -split "`r?`n" | Where-Object { $_ -match 'DllGetActivationFactory' }) -join '; ')
+          Write-Host "::notice title=UWP activation export::$exportEvidence"
 
           $headers = & $dumpbin /nologo /headers $exe.FullName 2>&1 | Out-String
           if ($LASTEXITCODE -ne 0) { throw "dumpbin /headers failed:`n$headers" }
-          if ($headers -notmatch '(?im)^\s*2\s+subsystem\s+\(Windows GUI\)\s*$') {
-            throw "GR2port.exe must use the WINDOWS (GUI) subsystem:`n$headers"
+          $hasWindowsSubsystem = $headers -match '(?im)^\s*2\s+subsystem\b.*\(Windows GUI\)'
+          $subsystemEvidence = (($headers -split "`r?`n" | Where-Object { $_ -match 'subsystem' }) -join '; ')
+          Write-Host "::notice title=UWP PE subsystem::$subsystemEvidence"
+
+          if (-not $hasActivationExport -or -not $hasWindowsSubsystem) {
+            throw "UWP PE startup contract failed. ExportPresent=$hasActivationExport; WindowsSubsystem=$hasWindowsSubsystem; exports=$exportEvidence; subsystem=$subsystemEvidence"
           }
-          Write-Host 'Verified GR2port.exe uses the WINDOWS (GUI) subsystem.'
+          Write-Host 'Verified DllGetActivationFactory export and WINDOWS (GUI) subsystem.'
 
       - name: Upload UWP build log
         if: always()
