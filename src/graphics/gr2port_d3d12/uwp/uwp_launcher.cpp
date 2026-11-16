@@ -49,14 +49,18 @@ bool ConsoleSession() {
     });
     const auto state=std::filesystem::path{ApplicationData::Current().LocalFolder().Path().c_str()};
     InitializeConsoleSettings(state);
-    if(!Renderer::Initialize(CoreWindowHandle())) return false;
-    Blackbox::Milestone("blocking CoreWindow launcher entered");
+    Blackbox::Milestone("file logging initialized; console settings loaded from LocalState");
+    if(!Renderer::Initialize(CoreWindowHandle())) {
+        Blackbox::Milestone("CoreWindow renderer initialization failed before first present");
+        return false;
+    }
+    Blackbox::Milestone("ConsoleSession ready; CoreWindow swapchain initialized");
     auto access=AccessCache::StorageApplicationPermissions::FutureAccessList();
     FolderOperation pending{nullptr};
     bool restoring=false;
     std::optional<GameCheck::Game> game;
     std::filesystem::path selected;
-    std::string status="Connect the USB drive containing your decrypted Gravity Rush 2 v1.11 dump.";
+    std::string status="UWP activated. Local diagnostics and logging are open. ConsoleSession is ready; connect the USB drive containing your decrypted Gravity Rush 2 v1.11 dump.";
     auto validate=[&](const std::filesystem::path& candidate) {
         std::string error;
         auto checked=GameCheck::ValidateFolder(candidate,error);
@@ -87,7 +91,6 @@ bool ConsoleSession() {
         io.BackendFlags|=ImGuiBackendFlags_RendererHasVtxOffset|ImGuiBackendFlags_RendererHasTextures;
         io.FontGlobalScale=2.f;
         while(SessionRunning()) {
-            if(!PumpConsoleEvents()) break;
             if(pending && pending.Status()!=AsyncStatus::Started) {
                 try {
                     if(pending.Status()==AsyncStatus::Completed) {
@@ -112,7 +115,6 @@ bool ConsoleSession() {
                 scan_candidates=false;
                 for(const wchar_t* drive:{L"D:\\",L"E:\\",L"F:\\"}) {
                     for(const wchar_t* suffix:{L"Gravity Rush 2",L"GR2",L""}) {
-                        if(!PumpConsoleEvents()) break;
                         std::error_code ec; const auto path=std::filesystem::path(drive)/suffix;
                         if(std::filesystem::is_directory(path,ec) && GameCheck::HoldsGame(path) && validate(path)) break;
                     }
@@ -151,6 +153,10 @@ bool ConsoleSession() {
             ImGui::TextWrapped("A: choose folder / launch     X: choose another folder     Menu: launch");
             ImGui::TextWrapped("Development renderer: game scene capture/frame graph is not complete. A successful boot is not playable-rendering proof.");
             ImGui::End(); ImGui::Render(); ImGuiRelay::Capture(*ImGui::GetDrawData());
+            // Capture before Tick so the very first swapchain present carries the
+            // startup state instead of an empty/black frame. Pumping still occurs
+            // every iteration, and its one-frame input latency is bounded at 60 Hz.
+            if(!PumpConsoleEvents()) break;
         }
         if(pending && pending.Status()==AsyncStatus::Started) pending.Cancel();
     }

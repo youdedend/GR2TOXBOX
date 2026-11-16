@@ -100,6 +100,7 @@ public:
 private:
     void OnActivated(const winrt::Windows::ApplicationModel::Core::CoreApplicationView&,
                      const winrt::Windows::ApplicationModel::Activation::IActivatedEventArgs&) {
+        Gr2Port::Blackbox::Milestone("UWP activation callback received; activating CoreWindow");
         window_.Activate();
     }
 
@@ -160,6 +161,7 @@ int __stdcall wWinMain(void* /*hInstance*/, void* /*hPrevInstance*/,
     const bool reserved = Core::Xbox::ReserveEarlyGuestArena();
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     Gr2Port::Blackbox::Initialize();
+    Gr2Port::Blackbox::Milestone("UWP application entry reached; opening local diagnostics");
     Gr2Port::Blackbox::RecordGuestArena(reinterpret_cast<void*>(Core::Xbox::EarlyGuestBase),
                                       Core::Xbox::EarlyGuestBytes, reserved);
     if (!reserved) return 1;

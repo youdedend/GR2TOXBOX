@@ -18,6 +18,7 @@
 #include "common/logging/log.h"
 #include "core/uwp_memory.h"
 #include "graphics/gr2port_d3d12/presenter.h"
+#include "uwp/blackbox_log.h"
 #include <atomic>
 
 #if defined(GR2_XBOX_UWP)
@@ -63,6 +64,7 @@ bool RunGame(void* core_window) {
         return true;
     }
     g_core_window = core_window;
+    Blackbox::Milestone("CoreWindow session accepted; preparing console session");
 
     // The budget report comes first, before anything large is allocated: the
     // clamp in ClampGuestMemoryRegions only helps if the guest regions are sized

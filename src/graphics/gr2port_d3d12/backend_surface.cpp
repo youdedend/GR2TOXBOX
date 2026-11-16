@@ -246,6 +246,9 @@ bool Tick() {
     Blackbox::Pass(0xffff0001u);
     const bool presented=D3D12::Present(d,true);
     if(!presented||!drawn||!ui_ok) {s.ready=false;Blackbox::Milestone("UI/present/overlay failed; session stopped");return false;}
+#if defined(GR2_XBOX_UWP)
+    if(s.frames==1) Blackbox::Milestone("first CoreWindow swapchain present succeeded");
+#endif
     return true;
 }
 void RequestResize() { resize_requested=true; }
