@@ -12,6 +12,11 @@ bool PointLights::Start(CoreTargets& t) {
     return grid_.size && CreateComputePipeline(c.device->device.Get(), *c.root,
                                                Shaders::light_grid_comp_span, pipeline_);
 }
+void PointLights::Stop() {
+    pipeline_ = {};
+    t_ = nullptr;
+    grid_ = {};
+}
 void PointLights::Record(CommandList& list, const Scene::Header& h, u64 address) {
     if (!h.point_lights || h.point_lights > Scene::MaxPointLights)
         return;
