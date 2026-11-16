@@ -1192,6 +1192,8 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/uwp_wx.h
          src/core/uwp_memory.cpp
          src/core/uwp_memory.h
+         src/core/uwp_guest_arena.cpp
+         src/core/uwp_guest_arena.h
          src/core/uwp_guest_memory.cpp
          src/core/uwp_guest_memory.h
          src/core/uwp_win_compat.h
