@@ -5,17 +5,15 @@
 #
 # Two build jobs and one release job:
 #
-#   windows-d3d12  Desktop Win64, GR2_RENDERER=D3D12. Proves the D3D12 backend
-#                  and every HLSL SM 6.4 shader compile, and produces a runnable
-#                  PC build for people who want to test the renderer before
-#                  sideloading onto a console.
+#   windows-d3d12  Non-blocking desktop Win64 diagnostic build. Its failure can
+#                  never block or mask the Xbox package result.
 #
 #   xbox-uwp-msix  WindowsStore/UWP, GR2_XBOX_UWP=ON, GR2_RENDERER=D3D12.
 #                  Produces GR2port-XboxSeriesXS-UWP.zip: the signed .msix, the
 #                  .cer that signs it, and QUICKSTART-XBOX.txt.
 #
-#   release        Attaches both to a Pre-Release on main and a full Release on
-#                  a v* tag.
+#   release        Publishes Xbox-only releases, one per green Xbox build; keep
+#                  only the newest rolling Xbox pre-release and tag.
 #
 # The workflow never depends on the upstream repository: gr2port's own
 # build.yml hardcoded `github.repository == 'junminlee2004/GR2port'`, which
@@ -150,6 +148,7 @@ jobs:
   # Job 1: Desktop Win64 Direct3D 12
   # ---------------------------------------------------------------------------
   windows-d3d12:
+    continue-on-error: true
     timeout-minutes: 60
     runs-on: windows-2022
     needs: get-info
@@ -622,10 +621,10 @@ jobs:
   # ---------------------------------------------------------------------------
   release:
     runs-on: ubuntu-latest
-    needs: [get-info, windows-d3d12, xbox-uwp-msix]
+    needs: [get-info, xbox-uwp-msix]
     if: |
       always() &&
-      needs.windows-d3d12.result == 'success' &&
+      needs.xbox-uwp-msix.result == 'success' &&
       (github.event_name == 'push' || github.event_name == 'release' || github.event_name == 'workflow_dispatch')
     permissions:
       contents: write
@@ -646,14 +645,12 @@ jobs:
         run: |
           ls -R ./artifacts
           mkdir -p dist
-          cp ./artifacts/gr2port-win64-d3d12-*/*.zip dist/ 2>/dev/null || true
           cp ./artifacts/gr2port-xbox-uwp-*/GR2port-XboxSeriesXS-UWP.zip dist/ 2>/dev/null || true
           ls -la dist
 
       - name: Publish the release
         run: |
           assets=()
-          [ -f dist/GR2port-Win64-D3D12.zip ] && assets+=("dist/GR2port-Win64-D3D12.zip#GR2port Win64 Direct3D 12 build")
           [ -f dist/GR2port-XboxSeriesXS-UWP.zip ] && assets+=("dist/GR2port-XboxSeriesXS-UWP.zip#GR2port Xbox Series X|S UWP (.msix + .cer)")
 
           if [ ${#assets[@]} -eq 0 ]; then
@@ -662,15 +659,13 @@ jobs:
           fi
 
           notes=$(cat <<EOF
-          ### GR2toXBOX — Direct3D 12 + Xbox Series X|S Dev Mode
+          ### GR2toXBOX — Xbox Series X|S Dev Mode
 
           Built from commit [\`${FULLHASH}\`](https://github.com/${GH_REPO}/commit/${FULLHASH}).
 
           **Xbox Series X|S** — sideload \`.msix\` with the included \`.cer\` through
           Xbox Device Portal, then set the app's type to **Game** (not App) or it
           will run out of memory at boot. See \`docs/XBOX_DEV_MODE_GUIDE.md\`.
-
-          **Windows PC** — unzip and run \`GR2port.exe\` (Direct3D 12 build).
 
           This release contains no game data. You must supply your own legally
           dumped Gravity Rush 2 (PS4) v1.11 files.
@@ -685,6 +680,21 @@ jobs:
               "${assets[@]}"
           else
             tag="Xbox-Pre-release-${DATE}-${SHORTHASH}"
+            # This is a rolling channel: prune every prior Xbox pre-release
+            # release and git tag before publishing the newest green Xbox build.
+            old_refs=$(gh api --paginate --jq '.[].ref' \
+              "repos/${GH_REPO}/git/matching-refs/tags/Xbox-Pre-release-")
+            while IFS= read -r old_ref; do
+              [ -n "$old_ref" ] || continue
+              old_tag=${old_ref#refs/tags/}
+              if gh release view "$old_tag" >/dev/null 2>&1; then
+                gh release delete "$old_tag" --yes --cleanup-tag
+              fi
+              if gh api "repos/${GH_REPO}/git/ref/tags/${old_tag}" >/dev/null 2>&1; then
+                gh api --method DELETE "repos/${GH_REPO}/git/refs/tags/${old_tag}"
+              fi
+            done <<< "$old_refs"
+
             gh release create "$tag" \
               --target "${FULLHASH}" \
               --prerelease \
