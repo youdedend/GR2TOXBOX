@@ -594,7 +594,7 @@ done
 # Windows build and then want <process.h>, which this host does not have. The two
 # files that do include d3d12.h need it.
 # Only generated shader bytecode is stubbed, never the host dispatch module.
-cat >"$OUT/detile_comp.h" <<'DETILE_HEADER'
+cat >"$OUT/dxil_template.h" <<'DETILE_HEADER'
 #pragma once
 #include <cstdint>
 #include <span>
@@ -603,9 +603,11 @@ inline constexpr std::uint8_t detile_comp[] = {0};
 inline constexpr std::span<const std::uint8_t> detile_comp_span = detile_comp;
 }
 DETILE_HEADER
-for shader in imgui_relay_vert imgui_relay_frag fullscreen_vert ui_present_frag ui_text_geom ui_text_flat_geom \
-    $(find src/graphics/gr2port_d3d12/shaders/pfx -name 'ui_*.hlsl' -printf '%f\n' | sed 's/\./_/;s/\.hlsl$//'); do
-    sed "s/detile_comp/$shader/g" "$OUT/detile_comp.h" >"$OUT/$shader.h"
+# Use actual CMake symbols, including subdirectory prefixes (pfx_ui_*).
+# Inventing basename-only headers here masks real Windows include/link errors.
+for shader in $(sed -n 's/^gr2port_add_hlsl_shader([^ ]* \([^)]*\)).*/\1/p' \
+        src/graphics/gr2port_d3d12/shaders_manifest.cmake); do
+    sed "s/detile_comp/$shader/g" "$OUT/dxil_template.h" >"$OUT/$shader.h"
 done
 CXXFLAGS+=(-I"$OUT")
 D3D12_UNITS=(

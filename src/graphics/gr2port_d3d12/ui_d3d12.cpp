@@ -2,34 +2,34 @@
 #include "graphics/gr2port_d3d12/ui_d3d12.h"
 #include "fullscreen_vert.h"
 #include "graphics/gr2port/textures.h"
-#include "ui_blur_frag.h"
-#include "ui_blur_history_frag.h"
-#include "ui_color_control_frag.h"
-#include "ui_color_frag.h"
-#include "ui_copy_frag.h"
-#include "ui_frame_frag.h"
-#include "ui_gamma_frag.h"
-#include "ui_mask_frag.h"
-#include "ui_mask_sprite_frag.h"
-#include "ui_masked_frag.h"
-#include "ui_master_vert.h"
-#include "ui_movie_frag.h"
-#include "ui_pass_flat_vert.h"
-#include "ui_pass_vert.h"
-#include "ui_photo_frag.h"
-#include "ui_photo_vert.h"
+#include "pfx_ui_blur_frag.h"
+#include "pfx_ui_blur_history_frag.h"
+#include "pfx_ui_color_control_frag.h"
+#include "pfx_ui_color_frag.h"
+#include "pfx_ui_copy_frag.h"
+#include "pfx_ui_frame_frag.h"
+#include "pfx_ui_gamma_frag.h"
+#include "pfx_ui_mask_frag.h"
+#include "pfx_ui_mask_sprite_frag.h"
+#include "pfx_ui_masked_frag.h"
+#include "pfx_ui_master_vert.h"
+#include "pfx_ui_movie_frag.h"
+#include "pfx_ui_pass_flat_vert.h"
+#include "pfx_ui_pass_vert.h"
+#include "pfx_ui_photo_frag.h"
+#include "pfx_ui_photo_vert.h"
 #include "ui_present_frag.h"
-#include "ui_skinned_b_vert.h"
-#include "ui_skinned_vert.h"
-#include "ui_sprite_frag.h"
-#include "ui_stroke_frag.h"
-#include "ui_stroke_geom.h"
-#include "ui_stroke_vert.h"
+#include "pfx_ui_skinned_b_vert.h"
+#include "pfx_ui_skinned_vert.h"
+#include "pfx_ui_sprite_frag.h"
+#include "pfx_ui_stroke_frag.h"
+#include "pfx_ui_stroke_geom.h"
+#include "pfx_ui_stroke_vert.h"
 #include "ui_text_flat_geom.h"
 #include "ui_text_geom.h"
-#include "ui_threshold_frag.h"
-#include "ui_transform_b_vert.h"
-#include "ui_transform_vert.h"
+#include "pfx_ui_threshold_frag.h"
+#include "pfx_ui_transform_b_vert.h"
+#include "pfx_ui_transform_vert.h"
 
 namespace Gr2Port::D3D12 {
 namespace {
@@ -41,23 +41,23 @@ static_assert(Scene::UiTargetHandles + Scene::MaxUiTargets <= Textures::Capacity
 std::span<const u8> Vertex(u32 n) {
     switch (n) {
     case 0:
-        return Shaders::ui_pass_vert_span;
+        return Shaders::pfx_ui_pass_vert_span;
     case 1:
-        return Shaders::ui_pass_flat_vert_span;
+        return Shaders::pfx_ui_pass_flat_vert_span;
     case 2:
-        return Shaders::ui_master_vert_span;
+        return Shaders::pfx_ui_master_vert_span;
     case 3:
-        return Shaders::ui_transform_b_vert_span;
+        return Shaders::pfx_ui_transform_b_vert_span;
     case 4:
-        return Shaders::ui_transform_vert_span;
+        return Shaders::pfx_ui_transform_vert_span;
     case 5:
-        return Shaders::ui_skinned_vert_span;
+        return Shaders::pfx_ui_skinned_vert_span;
     case 6:
-        return Shaders::ui_skinned_b_vert_span;
+        return Shaders::pfx_ui_skinned_b_vert_span;
     case 7:
-        return Shaders::ui_photo_vert_span;
+        return Shaders::pfx_ui_photo_vert_span;
     case 8:
-        return Shaders::ui_stroke_vert_span;
+        return Shaders::pfx_ui_stroke_vert_span;
     default:
         return {};
     }
@@ -65,35 +65,35 @@ std::span<const u8> Vertex(u32 n) {
 std::span<const u8> Pixel(u32 n) {
     switch (n) {
     case 0:
-        return Shaders::ui_color_frag_span;
+        return Shaders::pfx_ui_color_frag_span;
     case 1:
-        return Shaders::ui_copy_frag_span;
+        return Shaders::pfx_ui_copy_frag_span;
     case 2:
-        return Shaders::ui_gamma_frag_span;
+        return Shaders::pfx_ui_gamma_frag_span;
     case 3:
-        return Shaders::ui_threshold_frag_span;
+        return Shaders::pfx_ui_threshold_frag_span;
     case 4:
-        return Shaders::ui_movie_frag_span;
+        return Shaders::pfx_ui_movie_frag_span;
     case 5:
-        return Shaders::ui_sprite_frag_span;
+        return Shaders::pfx_ui_sprite_frag_span;
     case 6:
-        return Shaders::ui_frame_frag_span;
+        return Shaders::pfx_ui_frame_frag_span;
     case 7:
-        return Shaders::ui_masked_frag_span;
+        return Shaders::pfx_ui_masked_frag_span;
     case 8:
-        return Shaders::ui_blur_frag_span;
+        return Shaders::pfx_ui_blur_frag_span;
     case 9:
-        return Shaders::ui_blur_history_frag_span;
+        return Shaders::pfx_ui_blur_history_frag_span;
     case 10:
-        return Shaders::ui_color_control_frag_span;
+        return Shaders::pfx_ui_color_control_frag_span;
     case 11:
-        return Shaders::ui_photo_frag_span;
+        return Shaders::pfx_ui_photo_frag_span;
     case 12:
-        return Shaders::ui_mask_frag_span;
+        return Shaders::pfx_ui_mask_frag_span;
     case 13:
-        return Shaders::ui_mask_sprite_frag_span;
+        return Shaders::pfx_ui_mask_sprite_frag_span;
     case 14:
-        return Shaders::ui_stroke_frag_span;
+        return Shaders::pfx_ui_stroke_frag_span;
     default:
         return {};
     }
@@ -101,7 +101,7 @@ std::span<const u8> Pixel(u32 n) {
 std::span<const u8> Geometry(u32 v, bool narrow) {
     switch (UiState::SelectGeometry(v, narrow)) {
     case UiState::Geometry::Stroke:
-        return Shaders::ui_stroke_geom_span;
+        return Shaders::pfx_ui_stroke_geom_span;
     case UiState::Geometry::Text:
         return Shaders::ui_text_geom_span;
     case UiState::Geometry::TextFlat:
