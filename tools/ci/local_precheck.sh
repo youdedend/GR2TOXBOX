@@ -603,7 +603,8 @@ inline constexpr std::uint8_t detile_comp[] = {0};
 inline constexpr std::span<const std::uint8_t> detile_comp_span = detile_comp;
 }
 DETILE_HEADER
-for shader in imgui_relay_vert imgui_relay_frag; do
+for shader in imgui_relay_vert imgui_relay_frag fullscreen_vert ui_present_frag ui_text_geom ui_text_flat_geom \
+    $(find src/graphics/gr2port_d3d12/shaders/pfx -name 'ui_*.hlsl' -printf '%f\n' | sed 's/\./_/;s/\.hlsl$//'); do
     sed "s/detile_comp/$shader/g" "$OUT/detile_comp.h" >"$OUT/$shader.h"
 done
 CXXFLAGS+=(-I"$OUT")
@@ -619,6 +620,8 @@ D3D12_UNITS=(
     "src/graphics/gr2port_d3d12/arena.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/meshes_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
     "src/graphics/gr2port_d3d12/textures_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
+    "src/graphics/gr2port_d3d12/ui_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
+    "src/graphics/gr2port_d3d12/ui_state.cpp|"
     "src/graphics/gr2port_d3d12/texture_layout.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/descriptors.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/imgui_relay.cpp|"
@@ -834,6 +837,25 @@ fi
 # Explicit skip if not installed; local shader work must run this with --require.
 if ! python3 tools/shaders/check_hlsl_local.py; then
     failures=$((failures + 1))
+fi
+
+# Production UI state helpers: no copied renderer logic in the tests.
+if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
+    for mode in host asan-ubsan; do
+        sanitize=()
+        if [ "$mode" = asan-ubsan ]; then
+            sanitize=(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fno-pie -no-pie)
+        fi
+        if "$CXX" "${CXXFLAGS[@]}" -O1 -g "${sanitize[@]}" -Itools/ci/d3d12_stub \
+                src/tests/ui_state_test.cpp src/graphics/gr2port_d3d12/ui_state.cpp \
+                -o "$OUT/ui-state-$mode" 2>"$OUT/err" && \
+                ASAN_OPTIONS=detect_leaks=1 "$OUT/ui-state-$mode"; then
+            echo "  ok   UI $mode blend/pairs/geometry/rect/root/bounds/fence tests"
+        else
+            echo "  FAIL UI $mode tests";cat "$OUT/err"
+            failures=$((failures + 1))
+        fi
+    done
 fi
 
 # GCC alone rejects the vendored D3D12MA AllocHandle member/type spelling;

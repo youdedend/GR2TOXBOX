@@ -164,6 +164,10 @@ D3D12_BLEND_DESC BlendFor(const GraphicsPipelineDesc& desc) {
         target.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
     }
 
+    if (desc.custom_blend) {
+        blend.RenderTarget[0] = desc.blend_target;
+        return blend;
+    }
     if (!desc.alpha_blend && !desc.premultiplied_blend) {
         return blend;
     }
@@ -297,6 +301,15 @@ u64 PipelineCache::HashGraphics(const GraphicsPipelineDesc& desc) {
     hash = HashScalar(hash, (desc.alpha_blend ? 1u : 0u) | (desc.keep_target_alpha ? 2u : 0u) |
                                 (desc.premultiplied_blend ? 4u : 0u) |
                                 (desc.clear_target_alpha ? 8u : 0u));
+    hash = HashScalar(hash, desc.custom_blend ? 1u : 0u);
+    if (desc.custom_blend) {
+        const auto &b = desc.blend_target;
+        for (u64 field :
+             {u64(b.BlendEnable), u64(b.LogicOpEnable), u64(b.SrcBlend), u64(b.DestBlend),
+              u64(b.BlendOp), u64(b.SrcBlendAlpha), u64(b.DestBlendAlpha), u64(b.BlendOpAlpha),
+              u64(b.LogicOp), u64(b.RenderTargetWriteMask)})
+            hash = HashScalar(hash, field);
+    }
     return hash;
 }
 

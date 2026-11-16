@@ -167,6 +167,8 @@ struct GraphicsPipelineDesc {
     bool keep_target_alpha = false;
     bool premultiplied_blend = false;
     bool clear_target_alpha = false;
+    bool custom_blend = false;
+    D3D12_RENDER_TARGET_BLEND_DESC blend_target{};
 
     /// A compute pipeline: `cs` is set and everything render-target-related is
     /// ignored.

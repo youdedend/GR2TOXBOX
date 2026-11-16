@@ -259,12 +259,45 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
    `-fpermissive` only for the native symbol audit; real Windows/UWP compilers and
    the shader `-WX` gate do not use that exception.
 
-   **Slice 4B-2 is still separate:** no `ui_d3d12.cpp`, Prepare/Record/Present or
-   game UI draw execution is added here. Scene packets are still counted and
-   released without GPU reads; the UI consumer must pin slots/resources through
-   submission completion when introduced. `Photo::Read` remains false. No eboot
-   progress, physical Xbox execution or visual/GPU parity is claimed. 3D world,
-   character, deferred, fog and particle pass execution remains later work.
+   **Slice 4B-2 — UI recording/presentation implemented (device output unverified).**
+   `ui_d3d12.{cpp,h}` records captured screen draws into up to 32 RGBA8
+   targets, publishes their external SRVs, lazily builds compatible UI PSOs
+   (arbitrary GCN blend control, list/strip topology, stroke/text geometry), and
+   aspect-fits the latest valid picture before ImGui on **every** display tick.
+   Game samplers occupy 16..19; sampler 3 is linear clamp for present; dynamic
+   sampler allocation starts at 20. Targets rest in pixel/non-pixel SRV state;
+   new/fresh targets clear to black with alpha 1. Resource/descriptor replacement
+   waits for prior graphics submissions, preserving shared reserved handles.
+   The existing UI range is **above** `FirstReserved`, below `Capacity` (not a
+   range available to the texture cache).
+
+   b0 remains the five-DWORD arena table. b1 is the 20-byte `UiRoot`, with arena
+   **before** offset, text scale and `base_draw`. Bounded CPU command reads set
+   `base_draw=first_instance`, then call `DrawInstanced` with start-instance zero;
+   vertex shaders include `SV_InstanceID`. Signed Vulkan viewport heights are
+   normalized into positive D3D12 heights with equivalent clip Y supplied through
+   the existing b2 block. Flat text retains the full physical shader interface,
+   initializing unused attr1 to zero. The root signature stays **37 DWORDs**.
+
+   Surface retires completed packet slots **before** `TryTake`, pins every
+   recorded packet through its submission fence (including partial failure), and
+   remembers the latest valid picture independently of slot ownership. Shutdown
+   waits for GPU idle, releases all retained slots before detaching SceneRing,
+   and stops UI before textures/arenas. Resize rebuilds the present PSO if the
+   swapchain format changes, after GPU idle.
+
+   Local production-helper tests cover blend factors/operations (including
+   constant colour/alpha and legal alpha factors), Pairs/geometry selection,
+   text scale, present fitting, viewport equivalence, root order, command/header
+   bounds and fence-slot retirement, both normally and under ASan/UBSan. Full
+   precheck also retains **97/97 Microsoft DXC** (HLSL 2021, SM6.4, `-WX`) and
+   **97/97 Slang**, residency and SceneRing tests, Vulkan syntax checks and the
+   capture link audit. Windows/UWP CI validates compilation/packaging, **not**
+   GPU output. Boot logos, movies, title/menu/comic/HUD now have a recording and
+   presentation path; none has been observed on a device in this workspace.
+   `Photo::Read` remains false. No eboot progress, physical Xbox execution or
+   visual/GPU parity is claimed. 3D world, character, deferred, fog and particle
+   execution and full texture-quality convergence remain separate work.
 
 4. **ImGuiRelay.** ~~Resolved~~ — `backend_surface.cpp` and `imgui_relay.cpp`
    supply the frontend-facing entry points without naming a graphics API, so the

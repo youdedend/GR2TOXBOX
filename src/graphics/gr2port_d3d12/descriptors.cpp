@@ -100,7 +100,8 @@ void BindlessHeap::Destroy() {
     device_ = nullptr;
     recycled_srv_.clear();
     srv_used_ = NullSlot + 1;
-    sampler_used_ = NullSlot + 1;
+    // Fixed renderer samplers: ImGui 1, present 3, game UI 16..19.
+    sampler_used_ = 20;
 }
 
 bool BindlessHeap::ReserveTextureRange() {

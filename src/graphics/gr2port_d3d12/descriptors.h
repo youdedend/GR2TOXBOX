@@ -173,7 +173,8 @@ private:
     u32 srv_increment_ = 0;
     u32 sampler_increment_ = 0;
     u32 srv_used_ = NullSlot + 1;
-    u32 sampler_used_ = NullSlot + 1;
+    // ImGui 1, present 3 and UI 16..19 are fixed, not dynamically allocated.
+    u32 sampler_used_ = 20;
     std::vector<u32> recycled_srv_;
     std::mutex mutex_;
 };

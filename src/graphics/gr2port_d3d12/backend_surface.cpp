@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <mutex>
 #include <thread>
@@ -18,6 +19,8 @@
 #include <vector>
 
 #include "common/logging/log.h"
+#include "core/game_check/game_patches.h"
+#include "graphics/gr2port_d3d12/ui_d3d12.h"
 #include "graphics/gr2port/backend.h"
 #include "graphics/gr2port/frame_stats.h"
 #include "graphics/gr2port/window.h"
@@ -67,6 +70,10 @@ struct Surface {
     D3D12::Allocator allocator;
     D3D12::ArenaSet arenas;
     D3D12::ResidencyContext residency;
+    D3D12::UiRenderer ui;
+    D3D12::UiState::Slots retained;
+    Scene::Header latest{};
+    bool has_picture=false;
     bool attached = false;
     u64 seen = 0;
     u64 captured_packets = 0;
@@ -78,7 +85,8 @@ struct Surface {
         };
         if (!allocator.Create(device) || !arenas.Create(device,allocator,heap,descriptions))return false;
         residency={&device,&allocator,&arenas,&heap,&root,0};
-        if(!Meshes::Start(residency)||!Textures::Start(residency))return false;
+        if(!Meshes::Start(residency)||!Textures::Start(residency)||
+           !ui.Start(residency,device.swapchain_format,GamePatches::AspectRatio()))return false;
         const auto storage=arenas.Allocate(D3D12::ArenaKind::Scene,SceneRing::Slots*SceneRing::SlotBytes());
         if (!storage.cpu || storage.size != SceneRing::Slots*SceneRing::SlotBytes()) return false;
         // Serialized scene addresses are offset-low / arena-high, not GPU VAs.
@@ -104,8 +112,9 @@ struct Surface {
         if(device.graphics_queue && device.timeline_fence)
             D3D12::WaitForFence(device,D3D12::SignalFence(device));
         // Shutdown must follow game/capture producer quiescence, as on Vulkan.
+        retained.DrainAfterIdle([](u32 slot){SceneRing::Release(slot);});
         if (attached) SceneRing::Attach(nullptr, 0);
-        Textures::Stop(); Meshes::Stop();
+        ui.Stop(); Textures::Stop(); Meshes::Stop();
         imgui.Destroy(); arenas.Destroy(); allocator.Destroy();
         ring.Destroy(); heap.Destroy();
         if(device.timeline_event) CloseHandle(device.timeline_event);
@@ -157,6 +166,7 @@ bool Tick() {
 #else
         if(!D3D12::ResizeSwapchain(d,size.width,size.height)||!s.Targets()) {s.ready=false;return false;}
 #endif
+        if(!s.ui.Resize(d.swapchain_format)){s.ready=false;return false;}
         Blackbox::Milestone("swapchain resize completed after GPU idle");
     }
     auto list=s.ring.BeginFrame(); if(!list.IsValid()) {s.ready=false;return false;}
@@ -166,20 +176,30 @@ bool Tick() {
     s.allocator.BeginFrame(completed);
     Meshes::Update(list,submission,completed);
     Textures::Update(list,submission,completed);
+    // Retire before taking: the producer may need these slots immediately.
+    s.retained.Collect(completed,[](u32 slot){SceneRing::Release(slot);});
     SceneRing::Packet packet{};
+    bool ui_ok=true;
     if (SceneRing::TryTake(s.seen, packet)) {
-        s.seen = packet.frame;
+        s.seen=packet.frame;
+        Scene::Header header{};std::memcpy(&header,packet.data,sizeof(header));
+        if(D3D12::UiState::Header(header,Scene::PacketBytes())){
+            // Even partial recording may read packet memory. Keep the slot on
+            // every outcome until EndFrame's actual graphics fence completes.
+            if(!s.retained.Hold(packet.slot,submission)){
+                SceneRing::Release(packet.slot);ui_ok=false;
+            }else{
+                ui_ok=s.ui.Prepare(list,header,packet.data,submission)&&
+                    s.ui.Record(list,header,packet.data,packet.address);
+                if(ui_ok&&s.ui.HasPicture(header)){s.latest=header;s.has_picture=true;}
+            }
+        }else SceneRing::Release(packet.slot);
         ++s.captured_packets;
-        if (s.captured_packets == 1 || s.captured_packets % 600 == 0) {
-            char note[160];
-            std::snprintf(note, sizeof(note), "scene packets captured=%llu latest=%llu (not rendered yet)",
-                          static_cast<unsigned long long>(s.captured_packets),
-                          static_cast<unsigned long long>(s.seen));
+        if(s.captured_packets==1||s.captured_packets%600==0){
+            char note[160];std::snprintf(note,sizeof(note),"UI packets consumed=%llu latest=%llu (device output unverified)",
+                static_cast<unsigned long long>(s.captured_packets),static_cast<unsigned long long>(s.seen));
             Blackbox::Milestone(note);
         }
-        // Slice 4A submits no GPU reads of this packet. It is safe to release now;
-        // Slice 4B must retain the slot until its scene submission fence completes.
-        SceneRing::Release(packet.slot);
     }
     const auto index=d.swapchain->GetCurrentBackBufferIndex();
     auto rtv=s.rtvs->GetCPUDescriptorHandleForHeapStart(); rtv.ptr+=size_t(index)*d.rtv_descriptor_size;
@@ -187,6 +207,8 @@ bool Tick() {
     list.list->OMSetRenderTargets(1,&rtv,FALSE,nullptr); list.SetFullViewport();
     const float clear[4]={0.018f,0.025f,0.045f,1.f};
     list.list->ClearRenderTargetView(rtv,clear,0,nullptr);
+    // Sticky picture is drawn every display tick, including ticks with no packet.
+    if(ui_ok&&s.has_picture)ui_ok=s.ui.RecordPresent(list,s.latest,d.swapchain_width,d.swapchain_height);
     const bool drawn=s.imgui.Record(list,u32(s.frames%D3D12::FramesInFlight),ImGuiRelay::Latest());
     list.list->OMSetRenderTargets(0,nullptr,FALSE,nullptr);
     list.Transition(s.buffers[index].Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PRESENT);
@@ -194,7 +216,7 @@ bool Tick() {
     ++s.frames;
     Blackbox::Pass(0xffff0001u);
     const bool presented=D3D12::Present(d,true);
-    if(!presented||!drawn) {s.ready=false;Blackbox::Milestone("present/overlay failed; session stopped");return false;}
+    if(!presented||!drawn||!ui_ok) {s.ready=false;Blackbox::Milestone("UI/present/overlay failed; session stopped");return false;}
     return true;
 }
 void RequestResize() { resize_requested=true; }
@@ -275,7 +297,7 @@ bool DeviceLost::LastRunLost(const std::filesystem::path& path) {
 
 bool Photo::Read(std::vector<u8>& pixels, u32& width, u32& height, u32& pitch) {
     // A photo is a copy of the frame's photo target, taken by the screen drawing.
-    // There is no screen drawing yet, so no photo is ever taken -- and the encoder
+    // UI target readback is not implemented yet; the encoder
     // treats a false return as "not this frame", which is what it does while the
     // game has not reached a photo screen. Nothing is fabricated: a blank image
     // returned as success would be saved as the player's photograph.

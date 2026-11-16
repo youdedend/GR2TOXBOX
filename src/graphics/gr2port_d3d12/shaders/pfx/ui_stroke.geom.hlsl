@@ -23,7 +23,7 @@ void GsEmit(inout TriangleStream<UIOut> stream) {
     attr0 = float4(f(gs_ring[4]), f(gs_ring[5]), f(gs_ring[6]), f(gs_ring[7]));
     attr1 = float4(f(gs_ring[2]), f(gs_ring[3]), f(gs_ring[0]), f(gs_ring[1]));
     draw_index = draw_index_in[0];
-    UIOut o;o.position=ui_position;o.position.y=-o.position.y;o.attr0=attr0;o.attr1=attr1;o.draw_index=draw_index;stream.Append(o);
+    UIOut o;o.position=UiClip(ui_position);o.attr0=attr0;o.attr1=attr1;o.draw_index=draw_index;stream.Append(o);
 }
 [maxvertexcount(12)]
 void main(triangle UIOut input[3],uint primitive:SV_PrimitiveID,inout TriangleStream<UIOut> stream) {

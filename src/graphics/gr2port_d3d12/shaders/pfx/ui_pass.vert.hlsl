@@ -67,7 +67,7 @@ void Program() {
     uint v13 = 0u, v14 = 0u, v15 = 0u;
     uint vcc_lo = 0u, vcc_hi = 0u, exec_lo = 1u, scc = 0u, m0 = 0u;
     int pc = 0;
-    draw_index = uint(base_draw);
+    draw_index = g_instance;
     ArenaRef draw_block = ArenaAdd(draws_address,draw_index*160u);
     uint vertex = UiVertex(draw_block);
     ArenaRef vs_constants = UiRef(UiWord(draw_block,2),UiWord(draw_block,3));
@@ -98,4 +98,4 @@ void Program() {
     return;
 }
 
-UIOut main(uint vertex:SV_VertexID,uint instance:SV_InstanceID){g_vertex=vertex;g_instance=base_draw+instance;Program();UIOut o;o.position=ui_position;o.position.y=-o.position.y;o.attr0=attr0;o.attr1=attr1;o.draw_index=draw_index;return o;}
+UIOut main(uint vertex:SV_VertexID,uint instance:SV_InstanceID){g_vertex=vertex;g_instance=base_draw+instance;Program();UIOut o;o.position=UiClip(ui_position);o.attr0=attr0;o.attr1=attr1;o.draw_index=draw_index;return o;}

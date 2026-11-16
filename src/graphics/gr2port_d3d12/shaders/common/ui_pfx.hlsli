@@ -2,6 +2,7 @@
 #ifndef GR2_UI_PFX_HLSLI
 #define GR2_UI_PFX_HLSLI
 #include "common/arena.hlsli"
+#include "common/ui_raster.hlsli"
 cbuffer ArenaConstants:register(b0) {ArenaTable g_arena;};
 cbuffer UiProgramRoot:register(b1) {uint2 draws_words;float2 text_scale;uint base_draw;};
 #define draws_address ArenaMake(draws_words.x,draws_words.y)
