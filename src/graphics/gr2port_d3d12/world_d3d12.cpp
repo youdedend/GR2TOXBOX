@@ -14,6 +14,7 @@
 #include "world_decal_frag.h"
 #include "world_decal_vert.h"
 #include "world_frag.h"
+#include "world_lines_comp.h"
 #include "world_vert.h"
 namespace Gr2Port::D3D12 {
 namespace {
@@ -41,7 +42,9 @@ bool CoreTargets::Start(ResidencyContext& c) {
             return false;
     }
     aa_uav = c.heap->AllocateSrv();
-    if (!aa_uav)
+    world_lines_srv = c.heap->AllocateSrv();
+    world_lines_uav = c.heap->AllocateSrv();
+    if (!aa_uav || !world_lines_srv || !world_lines_uav)
         return false;
     meter = c.arenas->Allocate(ArenaKind::Scratch, 16);
     zero = c.arenas->Allocate(ArenaKind::Scratch, 16);
@@ -151,9 +154,19 @@ bool CoreTargets::Resize(u32 w, u32 h) {
     aa = context->allocator->CreateBuffer(u64(pitch) * h, D3D12_HEAP_TYPE_DEFAULT,
                                           D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
                                           D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    if (!aa)
+    const u64 lines_pitch = Residency::Align(u64(w) * 16, 256);
+    const u64 lines_bytes = lines_pitch * h;
+    world_lines = context->allocator->CreateBuffer(
+        lines_bytes, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    if (!aa || !world_lines)
         return false;
     context->heap->WriteBufferUav(aa_uav, aa.Get(), 0, pitch * h / 4, 0);
+    context->heap->WriteBufferUav(world_lines_uav, world_lines.Get(), 0,
+                                  static_cast<u32>(lines_bytes / 4), 0);
+    context->heap->WriteBuffer(world_lines_srv, world_lines.Get(), 0,
+                               static_cast<u32>(lines_bytes / 4), 0);
+    world_lines_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
     aa_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
     width = w;
     height = h;
@@ -163,6 +176,7 @@ void CoreTargets::Stop() {
     for (auto& t : targets)
         t.image.Reset();
     aa.Reset();
+    world_lines.Reset();
     rtvs.Reset();
     dsvs.Reset();
     context = nullptr;
@@ -210,7 +224,10 @@ bool WorldRenderer::Start(CoreTargets& targets) {
         if (!CreateGraphicsPipeline(c.device->device.Get(), *c.root, d, pipelines_[i]))
             return false;
     }
-    return point_lights_.Start(targets) && shadows_.Start(targets) && Deformers::Start(targets);
+    return point_lights_.Start(targets) && shadows_.Start(targets) &&
+           CreateComputePipeline(c.device->device.Get(), *c.root, Shaders::world_lines_comp_span,
+                                 world_lines_pipeline_) &&
+           Deformers::Start(targets);
 }
 bool WorldRenderer::Record(CommandList& list, const Scene::Header& h, const u8* data, u64 address,
                            u32 slot) {
@@ -231,7 +248,8 @@ bool WorldRenderer::Record(CommandList& list, const Scene::Header& h, const u8* 
     std::memcpy(upload.cpu + 32, &light, sizeof(light));
     const auto record = CoreState::DeferredImages(
         t.Srv(CoreTargets::Depth), t.Srv(CoreTargets::Albedo), t.Srv(CoreTargets::Normal),
-        t.Srv(CoreTargets::Material), t.Srv(CoreTargets::Black), t.Srv(CoreTargets::White));
+        t.Srv(CoreTargets::Material), t.world_lines_srv.index, t.Srv(CoreTargets::Black),
+        t.Srv(CoreTargets::White));
     std::memcpy(upload.cpu + 32 + sizeof(light), record.data(), sizeof(record));
     t.ScratchTo(list, D3D12_RESOURCE_STATE_COPY_DEST);
     if (!t.initialized) {
@@ -253,9 +271,38 @@ bool WorldRenderer::Record(CommandList& list, const Scene::Header& h, const u8* 
     point_lights_.Record(list, h, address);
     shadows_.Record(list, h, data, address);
     RecordSurfaces(list, h, data, address, slot);
+    RecordWorldLines(list, slot);
     RecordLight(list, h, slot);
     RecordForward(list, h, data, address, slot);
     return true;
+}
+void WorldRenderer::RecordWorldLines(CommandList& list, u32 slot) {
+    auto& t = *t_;
+    const CoreState::Ref light_ref{frame_[slot].ref.arena, frame_[slot].ref.offset};
+    struct Root {
+        CoreState::Ref light;
+        u32 size[2];
+        int frame;
+        u32 lines;
+    };
+    static_assert(sizeof(Root) == 24);
+    const Root root{light_ref, {t.width, t.height}, static_cast<int>(world_lines_frame_++),
+                    t.world_lines_uav.index};
+    const u32 textures[]{t.Srv(CoreTargets::Depth), t.Srv(CoreTargets::Normal),
+                         t.Srv(CoreTargets::Black)};
+    t.Bind(list);
+    if (t.world_lines_state != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) {
+        list.Transition(t.world_lines.Get(), t.world_lines_state,
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        t.world_lines_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    }
+    list.SetPipeline(world_lines_pipeline_);
+    list.SetDrawConstants(&root, sizeof(root));
+    list.SetPassConstants(textures, sizeof(textures));
+    list.Dispatch((t.width + 7) / 8, (t.height + 7) / 8, 1);
+    t.Uav(list, t.world_lines.Get());
+    list.Transition(t.world_lines.Get(), t.world_lines_state, Rest);
+    t.world_lines_state = Rest;
 }
 void WorldRenderer::DrawList(CommandList& list, const Scene::Header& h, const u8* data, u64 address,
                              u32 slot, u32 list_index, u32 pipeline) {
@@ -387,6 +434,8 @@ void WorldRenderer::Stop() {
     }
     for (auto& p : pipelines_)
         p = {};
+    world_lines_pipeline_ = {};
+    world_lines_frame_ = 0;
     t_ = nullptr;
 }
 } // namespace Gr2Port::D3D12

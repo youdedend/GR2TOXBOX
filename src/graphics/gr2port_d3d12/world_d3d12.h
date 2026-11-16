@@ -31,6 +31,9 @@ struct CoreTargets {
     u32 width = 0, height = 0, pitch = 0;
     ResourcePtr aa;
     DescriptorSlot aa_uav;
+    ResourcePtr world_lines;
+    DescriptorSlot world_lines_srv, world_lines_uav;
+    D3D12_RESOURCE_STATES world_lines_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
     D3D12_RESOURCE_STATES aa_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
     D3D12_RESOURCE_STATES scratch_state = D3D12_RESOURCE_STATE_COMMON;
     ArenaAllocation meter, zero;
@@ -51,6 +54,7 @@ struct CoreTargets {
 class WorldRenderer {
     CoreTargets* t_ = nullptr;
     std::array<Pipeline, 10> pipelines_;
+    Pipeline world_lines_pipeline_;
     std::array<UploadBuffer, FramesInFlight> uploads_;
     std::array<ArenaAllocation, FramesInFlight> frame_;
     u64 skipped_ = 0;
@@ -58,8 +62,10 @@ class WorldRenderer {
     u64 current_scene_address_ = 0;
     PointLights point_lights_;
     Shadows shadows_;
+    u32 world_lines_frame_ = 0;
     void DrawList(CommandList&, const Scene::Header&, const u8*, u64, u32, u32, u32);
     void RecordSurfaces(CommandList&, const Scene::Header&, const u8*, u64, u32);
+    void RecordWorldLines(CommandList&, u32);
     void RecordLight(CommandList&, const Scene::Header&, u32);
     void RecordForward(CommandList&, const Scene::Header&, const u8*, u64, u32);
 

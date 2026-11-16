@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "common/lighting_batch.hlsli"
+#include "common/batch2_scene.hlsli"
 cbuffer ArenaConstants : register(b0) { ArenaTable g_arena; };
 cbuffer DeferredRoot : register(b1) {
     uint2 g_light_words; uint2 g_lights_words; uint2 g_grid_words; uint2 g_texture_record_words;
@@ -306,7 +307,9 @@ float4 main(float4 position_in : SV_Position) : SV_Target0 {
     const float hatching =
         light.hatching_intensity * key_occluded * key_occluded * (1.0 - albedo_hatching.a);
     const float line_value =
-        clamp(max(FetchTexel(g_world_lines, pixel, 0).r, hatching), 0.0, 1.0) * line_share;
+        clamp(max(Batch2FetchRaw(g_world_lines, uint2(BatchSize(g_scene_depth)), pixel).r,
+                  hatching),
+              0.0, 1.0) * line_share;
     color = float4(shaded * (1.0 + (2.0 * light.contour_color.rgb - 1.0) * line_value), 1.0);
     return color;
 }

@@ -35,9 +35,9 @@ int main() {
     const auto bias = Bias(3, 2.2f, 16.0f);
     assert(bias.list == 3 && bias.constant == 2 && bias.slope == 1.0f);
     assert(Bias(3, std::numeric_limits<float>::infinity(), 0.f).constant == 0);
-    constexpr auto images = DeferredImages(11, 12, 13, 14, 15, 16);
+    constexpr auto images = DeferredImages(11, 12, 13, 14, 15, 16, 17);
     static_assert(sizeof(images) == 28 && images[0] == 11 && images[1] == 12 && images[2] == 13 &&
-                  images[3] == 14 && images[4] == 15 && images[5] == 15 && images[6] == 16);
+                  images[3] == 14 && images[4] == 15 && images[5] == 16 && images[6] == 17);
     Scene::Header h{};
     h.draws = 1;
     h.draw_commands[0] = 1;
