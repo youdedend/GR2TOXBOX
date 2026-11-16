@@ -61,6 +61,8 @@ int main() {
     assert(std::abs(scale[1] - .75f) < .0001f && scale[0] == 1);
     scale = TextScale(1024, 768, 512, 512, true);
     assert(scale[0] == 1 && scale[1] == 1);
+    scale = TextScale(0, 0, 1024, 768, true);
+    assert(scale[0] == 1 && scale[1] == 1);
     auto rect = Fit(1920, 1080, 1024, 768);
     assert(rect.x == 0 && rect.y == 96 && rect.width == 1024 && rect.height == 576);
     rect = Fit(4, 3, 1920, 1080);

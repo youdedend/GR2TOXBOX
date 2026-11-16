@@ -250,7 +250,11 @@ bool UiRenderer::Record(CommandList& list, const Scene::Header& h, const u8* pac
     if (!UiState::Header(h, Scene::PacketBytes()))
         return false;
     Bind(list);
-    const auto& screen = targets_[h.ui.picture < targets_.size() ? h.ui.picture : 0];
+    // A kept/offscreen-only packet may have no picture. Do not borrow an
+    // unrelated cached target's aspect ratio for its text, matching Vulkan.
+    const bool picture = HasPicture(h);
+    const u32 screen_width = picture ? targets_[h.ui.picture].width : 0;
+    const u32 screen_height = picture ? targets_[h.ui.picture].height : 0;
     u32 open = Scene::MaxUiTargets;
     auto close = [&] {
         if (open != Scene::MaxUiTargets) {
@@ -292,7 +296,7 @@ bool UiRenderer::Record(CommandList& list, const Scene::Header& h, const u8* pac
         const D3D12_RECT scissor{0, 0, LONG(target.width), LONG(target.height)};
         list.SetScissor(scissor);
         const auto scale =
-            UiState::TextScale(screen.width, screen.height, target.width, target.height, narrow_);
+            UiState::TextScale(screen_width, screen_height, target.width, target.height, narrow_);
         const float raster[4]{view.y_sign, 0, 0, 0};
         list.SetPassConstants(raster, sizeof(raster));
         for (u32 j = 0; j < run.count; ++j) {
