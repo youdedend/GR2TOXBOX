@@ -66,11 +66,8 @@ bool RunGame(void* core_window) {
     g_core_window = core_window;
     Blackbox::Milestone("CoreWindow session accepted; preparing console session");
 
-    // The budget report comes first, before anything large is allocated: the
-    // clamp in ClampGuestMemoryRegions only helps if the guest regions are sized
-    // after it has been applied, and the App-mode warning explains an
-    // ERROR_COMMITMENT_LIMIT that would otherwise look like an emulator bug.
-    Core::Xbox::LogStartupReport();
+    // Guest memory is not sized yet. MemoryManager::SetupMemoryRegions applies
+    // the console clamp first, then logs the exact post-clamp budget it receives.
 
 #if defined(GR2_XBOX_UWP)
     if (core_window == nullptr) {

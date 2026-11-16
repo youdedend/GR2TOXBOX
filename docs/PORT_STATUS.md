@@ -19,7 +19,7 @@ file is right.
 | --- | --- |
 | Xbox toolchain, packaging and CI | **Done and passing** |
 | Strict W^X guest execution | **Done, unit-tested** |
-| 5,120 MiB memory budget | **Done, unit-tested** |
+| 5,120 MiB memory budget | **Done, unit-tested; startup report now records post-clamp committed/direct/flexible bytes actually supplied to region sizing** |
 | AppContainer Win32 shims | **Done** |
 | Direct3D 12 device / allocator / descriptors / arena | **Done** |
 | HLSL SM 6.4 shader pipeline (`dxc`, fail-loud) | **Done** |

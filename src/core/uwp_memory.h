@@ -110,6 +110,6 @@ void ClampGuestMemoryRegions(u64& total_size, u64& flexible_size, u64 flexible_b
 /// adequate.
 [[nodiscard]] bool IsAppModeMemoryPool() noexcept;
 
-void LogStartupReport();
+void LogStartupReport(u64 guest_commit_bytes, u64 direct_bytes, u64 flexible_bytes);
 
 } // namespace Core::Xbox

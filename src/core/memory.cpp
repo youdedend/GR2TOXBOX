@@ -97,6 +97,13 @@ void MemoryManager::SetupMemoryRegions(u64 flexible_size, bool use_extended_mem1
     // physical maps, the backing file and the direct-memory view all agree.
     Core::Xbox::ClampGuestMemoryRegions(total_size, flexible_size,
                                         ORBIS_KERNEL_FLEXIBLE_MEMORY_BASE);
+    ASSERT_MSG(total_size >= flexible_size &&
+                   flexible_size >= ORBIS_KERNEL_FLEXIBLE_MEMORY_BASE,
+               "Invalid guest memory budget after console clamp");
+    Core::Xbox::LogStartupReport(
+        total_size - ORBIS_KERNEL_FLEXIBLE_MEMORY_BASE,
+        total_size - flexible_size,
+        flexible_size - ORBIS_KERNEL_FLEXIBLE_MEMORY_BASE);
 
     // Update stored totals
     total_flexible_size = flexible_size - ORBIS_KERNEL_FLEXIBLE_MEMORY_BASE;

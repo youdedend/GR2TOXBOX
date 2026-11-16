@@ -253,9 +253,13 @@ struct AddressSpace::Impl {
         user_size = supported_user_max - USER_MIN - 1;
 
 
-        // Increase BackingSize to account for config options.
+        // Desktop backing may grow with config options. On Xbox the backing is
+        // already the fixed console ceiling; SetupMemoryRegions clamps those
+        // options before publishing guest regions, so do not enlarge it here.
+#if !defined(GR2_XBOX_UWP)
         BackingSize += EmulatorSettings.GetExtraDmemInMBytes() * 1_MB +
                        EmulatorSettings.GetExtraFmemInMBytes() * 1_MB;
+#endif
 
         // Allocate backing file that represents the total physical memory.
         //

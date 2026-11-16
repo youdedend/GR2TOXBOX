@@ -233,14 +233,16 @@ void ClampGuestMemoryRegions(u64& total_size, u64& flexible_size, u64 flexible_b
                 IsAppModeMemoryPool() ? "yes" : "no");
 }
 
-void LogStartupReport() {
+void LogStartupReport(u64 guest_commit_bytes, u64 direct_bytes, u64 flexible_bytes) {
     const u64 limit = AppMemoryUsageLimit();
     const u64 usage = AppMemoryUsage();
     if (IsXboxUwpBuild()) {
         LOG_INFO(Core,
-                 "Xbox memory: pool limit {} MiB, usage {} MiB, guest ceiling {} MiB, "
-                 "D3D12 heap budget {} MiB, process commit target {} MiB",
-                 limit / 1_MB, usage / 1_MB, GuestMemoryCeilingBytes / 1_MB,
+                 "Xbox memory: pool limit {} MiB, usage {} MiB, configured guest commit {} MiB "
+                 "(direct {} MiB, flexible {} MiB), guest ceiling {} MiB, D3D12 heap budget {} MiB, "
+                 "process commit target {} MiB",
+                 limit / 1_MB, usage / 1_MB, guest_commit_bytes / 1_MB,
+                 direct_bytes / 1_MB, flexible_bytes / 1_MB, GuestMemoryCeilingBytes / 1_MB,
                  D3d12HeapBudgetBytes / 1_MB, ProcessCommitTargetBytes / 1_MB);
         if (IsAppModeMemoryPool()) {
             LOG_CRITICAL(Core,
@@ -252,10 +254,12 @@ void LogStartupReport() {
         }
     } else {
         LOG_INFO(Core,
-                 "Host memory: limit {} MiB, usage {} MiB, guest ceiling {} MiB (PS4 Pro "
-                 "devkit), D3D12 heap budget {} MiB (desktop; unbounded)",
-                 limit / 1_MB, usage / 1_MB, DesktopGuestCeilingBytes / 1_MB,
-                 DesktopD3d12HeapBudgetBytes / 1_MB);
+                 "Host memory: limit {} MiB, usage {} MiB, configured guest commit {} MiB "
+                 "(direct {} MiB, flexible {} MiB), guest ceiling {} MiB (PS4 Pro devkit), "
+                 "D3D12 heap budget {} MiB (desktop; unbounded)",
+                 limit / 1_MB, usage / 1_MB, guest_commit_bytes / 1_MB,
+                 direct_bytes / 1_MB, flexible_bytes / 1_MB,
+                 DesktopGuestCeilingBytes / 1_MB, DesktopD3d12HeapBudgetBytes / 1_MB);
     }
 }
 
