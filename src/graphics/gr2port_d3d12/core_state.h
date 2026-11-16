@@ -74,6 +74,15 @@ static_assert(offsetof(Scene::Draw, vertices) == 160 && offsetof(Scene::Draw, sk
 inline float ReverseZ(float z, float w) {
     return .5f * (w - z);
 }
+// Raw D3D12 buffer descriptors are limited to 2^27 four-byte elements. The
+// contour UAV stores float4 per pixel with a 256-byte aligned row pitch.
+constexpr u64 WorldLinesBufferBytes(u32 width, u32 height) {
+    if (!width || !height)
+        return 0;
+    const u64 pitch = (u64(width) * 16 + 255) & ~u64(255);
+    const u64 bytes = pitch * height;
+    return bytes / 4 <= (1ull << 27) ? bytes : 0;
+}
 inline bool Header(const Scene::Header& h) {
     u64 total = 0;
     for (auto n : h.draw_commands)

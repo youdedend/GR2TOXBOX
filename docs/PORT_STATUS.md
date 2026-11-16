@@ -374,11 +374,12 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
    **Slice 5C is in progress.** The D3D12 path now runs the four-sample
    world-contour estimate after the G-buffer and supplies its raw-buffer output
    to deferred shading. Ping-pong history reprojects camera motion and rejects
-   large depth changes before temporal averaging. AO, fog, bloom,
-   glass, water, particles and other advanced transparent passes are not
-   implemented. Leaf/grass/branch draw and shadow passes remain incomplete as well. Full texture-quality
-   convergence, `Photo::Read`, FSR and physical Xbox runtime verification remain
-   outstanding. This build is still **not claimed playable**.
+   large depth changes before temporal averaging; resize rejects dimensions
+   beyond the D3D12 raw-buffer descriptor limit. AO, fog, bloom, glass, water,
+   particles and other advanced transparent passes are not implemented.
+   Leaf/grass/branch draw and shadow passes remain incomplete as well. Full
+   texture-quality convergence, `Photo::Read`, FSR and physical Xbox runtime
+   verification remain outstanding. This build is still **not claimed playable**.
 
 4. **ImGuiRelay.** ~~Resolved~~ — `backend_surface.cpp` and `imgui_relay.cpp`
    supply the frontend-facing entry points without naming a graphics API, so the

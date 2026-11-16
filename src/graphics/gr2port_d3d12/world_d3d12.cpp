@@ -104,6 +104,9 @@ void CoreTargets::Uav(CommandList& list, ID3D12Resource* resource) const {
 bool CoreTargets::Resize(u32 w, u32 h) {
     if (!w || !h || w > 8192 || h > 8192)
         return false;
+    const u64 lines_bytes = CoreState::WorldLinesBufferBytes(w, h);
+    if (!lines_bytes)
+        return false;
     if (width == w && height == h)
         return true;
     WaitForFence(*context->device, context->device->timeline_value);
@@ -158,8 +161,6 @@ bool CoreTargets::Resize(u32 w, u32 h) {
     aa = context->allocator->CreateBuffer(u64(pitch) * h, D3D12_HEAP_TYPE_DEFAULT,
                                           D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
                                           D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    const u64 lines_pitch = Residency::Align(u64(w) * 16, 256);
-    const u64 lines_bytes = lines_pitch * h;
     for (u32 i = 0; i < world_lines.size(); ++i) {
         world_lines[i] = context->allocator->CreateBuffer(
             lines_bytes, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,

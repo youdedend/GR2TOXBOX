@@ -35,6 +35,9 @@ int main() {
     const auto bias = Bias(3, 2.2f, 16.0f);
     assert(bias.list == 3 && bias.constant == 2 && bias.slope == 1.0f);
     assert(Bias(3, std::numeric_limits<float>::infinity(), 0.f).constant == 0);
+    static_assert(WorldLinesBufferBytes(3840, 2160) == 132710400);
+    static_assert(WorldLinesBufferBytes(4096, 8192) == 536870912);
+    static_assert(WorldLinesBufferBytes(4097, 8192) == 0 && WorldLinesBufferBytes(0, 2160) == 0);
     constexpr auto images = DeferredImages(11, 12, 13, 14, 15, 16, 17);
     static_assert(sizeof(images) == 28 && images[0] == 11 && images[1] == 12 && images[2] == 13 &&
                   images[3] == 14 && images[4] == 15 && images[5] == 16 && images[6] == 17);
