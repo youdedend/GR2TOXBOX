@@ -299,7 +299,7 @@ if ($LASTEXITCODE -ne 0) { throw "signtool sign failed ($LASTEXITCODE)" }
 # PowerShell maps CERT_E_UNTRUSTEDROOT to UnknownError on some runner images;
 # accepting that generic status would also accept genuinely broken signatures.
 # Instead, install ONLY the pinned public certificate in this ephemeral runner's
-# CurrentUser Root store, verify with signtool and Authenticode, then remove it.
+# LocalMachine Root store (the hosted CI runner is elevated), verify with signtool and Authenticode, then remove it.
 $pfxCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
     (Resolve-Path $pfx).Path, $password, 'EphemeralKeySet')
 $expectedThumb = $pfxCert.Thumbprint
@@ -311,7 +311,7 @@ if ($cerCert.Thumbprint -ne $expectedThumb) {
     $cerCert.Dispose()
     throw "The shipped .cer does not match the signing PFX ($expectedThumb)."
 }
-$store = [System.Security.Cryptography.X509Certificates.X509Store]::new('Root', 'CurrentUser')
+$store = [System.Security.Cryptography.X509Certificates.X509Store]::new('Root', 'LocalMachine')
 $addedTrust = $false
 try {
     $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
@@ -319,9 +319,14 @@ try {
         [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
         $expectedThumb, $false)
     if ($existing.Count -eq 0) {
+        # CurrentUser root writes can open a Windows security-consent dialog.
+        # The elevated hosted runner's machine store has no interactive consent.
+        Write-Host "::notice title=Signing verification progress::Adding pinned temporary machine trust anchor"
         $store.Add($cerCert)
         $addedTrust = $true
+        Write-Host "::notice title=Signing verification progress::Temporary trust anchor added"
     }
+    Write-Host "::notice title=Signing verification progress::Checking package digest and signer with signtool"
     $verifyOutput = (& $signtool verify /pa /v $msixPath 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 0) { throw "signtool signature verification failed: $verifyOutput" }
     $packageCert = Get-AuthenticodeSignature -FilePath $msixPath

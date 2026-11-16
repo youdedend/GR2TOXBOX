@@ -353,7 +353,7 @@ jobs:
 
       - name: Cache UWP software codecs
         id: ffmpeg-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/gr2-ffmpeg-uwp
           key: ffmpeg-uwp-x64-mt-7.1.1-${{ hashFiles('scripts/ci/build_ffmpeg_uwp.sh') }}
@@ -376,6 +376,13 @@ jobs:
             pwsh.exe -NoProfile -File scripts/ci/annotate_failure.ps1 -LogFile ffmpeg-uwp.log
             exit 1
           fi
+
+      - name: Save successfully built UWP software codecs
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/gr2-ffmpeg-uwp
+          key: ${{ steps.ffmpeg-cache.outputs.cache-primary-key }}
 
       - name: Select UWP codec prefix
         shell: pwsh
