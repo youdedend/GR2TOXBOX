@@ -437,6 +437,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "dumpbin /exports failed:`n$exports" }
           $hasActivationExport = $exports -match '(?im)\bDllGetActivationFactory\b'
           $exportEvidence = (($exports -split "`r?`n" | Where-Object { $_ -match 'DllGetActivationFactory' }) -join '; ')
+          if (-not $exportEvidence) { $exportEvidence = '<DllGetActivationFactory not listed>' }
           Write-Host "::notice title=UWP activation export::$exportEvidence"
 
           $headers = & $dumpbin /nologo /headers $exe.FullName 2>&1 | Out-String

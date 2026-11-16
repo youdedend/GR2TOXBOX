@@ -114,6 +114,11 @@ if (GR2_XBOX_UWP)
     target_link_directories(gr2port BEFORE PRIVATE "${GR2_ONECORE_CRT_DIR}")
     message(STATUS "UWP static CRT: ${GR2_ONECORE_CRT_DIR}")
     target_link_libraries(gr2port PRIVATE WindowsApp)
+    # The Ninja/clang-cl Store generator does not reliably infer /DEF from a
+    # .def listed as a source; pass the module-definition file to the linker
+    # explicitly so the app-model activation export is present in GR2port.exe.
+    target_link_options(gr2port PRIVATE
+        "/DEF:${PROJECT_SOURCE_DIR}/src/graphics/gr2port_d3d12/uwp/gr2port.def")
     target_compile_definitions(gr2port PRIVATE
         GR2_XBOX_UWP=1
         WINAPI_FAMILY=WINAPI_FAMILY_APP
