@@ -99,7 +99,11 @@ static std::optional<std::filesystem::path> GetBundleDirectory() {
 #endif
 
 fs::path GetExecutableFile() {
-#ifdef _WIN32
+#if defined(GR2_XBOX_UWP)
+    // A packaged console title has no supported executable-path discovery flow;
+    // never probe the package's WindowsApps location for game data or settings.
+    return {};
+#elif defined(_WIN32)
     std::wstring path(MAX_PATH, L'\0');
     for (;;) {
         const DWORD length =
@@ -127,7 +131,10 @@ fs::path GetExecutableFile() {
 }
 
 fs::path GetExecutableDirectory() {
-#ifdef __APPLE__
+#if defined(GR2_XBOX_UWP)
+    // Return the AppContainer's writable data root, never the package install path.
+    return GetGlobalUserFolder();
+#elif defined(__APPLE__)
     if (const auto bundle = GetBundleDirectory()) {
         return bundle->extension() == ".app" ? bundle->parent_path() : *bundle;
     }
@@ -257,12 +264,19 @@ static auto UserPaths = [] {
         SetEnvironment(RESTART_PROCESS, "");
     }
 #endif
+#if defined(GR2_XBOX_UWP)
+    // The console has no executable-adjacent writable folder. Start in LocalState;
+    // ConsoleSession will bind the same paths to its ApplicationData LocalFolder.
+    g_global_user_folder = true;
+    const fs::path user_dir = GetGlobalUserFolder() / PORTABLE_DIR;
+#else
     // GR2port keeps every file of its own in one user folder, made if missing: userdata beside
     // the executable or, in the global mode, GR2port in the account's application data.
     const fs::path portable = GetExecutableDirectory() / PORTABLE_DIR;
     const fs::path global = GetGlobalUserFolder();
     g_global_user_folder = UseGlobalFolder(portable, global);
     const auto user_dir = g_global_user_folder ? global : portable;
+#endif
 
     std::unordered_map<PathType, fs::path> paths;
 

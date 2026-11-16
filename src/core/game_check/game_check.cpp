@@ -427,6 +427,11 @@ std::optional<Game> ValidateFolder(const std::filesystem::path& folder,std::stri
 }
 
 std::optional<Game> Find() {
+#if defined(GR2_XBOX_UWP)
+    LOG_CRITICAL(Loader,
+                 "Console game discovery refused: Xbox must use an explicitly selected USB dump folder.");
+    return std::nullopt;
+#else
     const std::filesystem::path beside = Common::FS::GetExecutableDirectory();
     std::filesystem::path chosen = EmulatorSettings.GetGameDirectory();
     std::optional<Game> game;
@@ -450,6 +455,7 @@ std::optional<Game> Find() {
         chosen = *folder;
     }
     return game;
+#endif
 }
 
 bool HoldsGame(const std::filesystem::path& folder) {

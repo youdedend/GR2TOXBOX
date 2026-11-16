@@ -104,7 +104,7 @@ bool ConsoleSession() {
     bool pad_disconnected_reported=false;
     int focus=0;
     bool scan_candidates=true;
-    std::optional<std::filesystem::path> launch;
+    std::optional<GameCheck::Game> launch;
     {
         LauncherContext gui;
         auto& io=ImGui::GetIO(); io.IniFilename=nullptr; io.LogFilename=nullptr;
@@ -213,7 +213,7 @@ bool ConsoleSession() {
             } else if(!pending && launch_game) {
                 if(GameCheck::HoldUserFolder()) {
                     Blackbox::Milestone("user data folder lock acquired; handing selected dump to emulator boot");
-                    launch=game->root; break;
+                    launch=*game; break;
                 }
                 status="Another instance holds the user folder.";
                 Blackbox::Milestone("launch refused because another process holds the user data folder");
@@ -253,7 +253,8 @@ bool ConsoleSession() {
     ImGuiRelay::ResetSnapshots();
     if(launch && SessionRunning()) {
         Blackbox::Milestone("validated dump handed to Core::Emulator::Run (in process)");
-        BootConsoleGame(*launch);
+        if(!BootConsoleGame(*launch))
+            Blackbox::Milestone("console emulator refused the selected dump before guest startup");
     }
     return true;
 }

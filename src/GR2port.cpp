@@ -21,7 +21,9 @@
 #include "GR2port.h"
 #if defined(GR2_XBOX_UWP)
 #include "core/uwp_memory.h"
+#include "core/game_check/game_check.h"
 #include "graphics/gr2port_d3d12/uwp/uwp_main.h"
+#include "uwp/blackbox_log.h"
 #include "graphics/gr2port_d3d12/uwp/console_boot.h"
 #include "core/prompt_packs/prompt_packs.h"
 #include "graphics/gr2port_d3d12/presenter.h"
@@ -878,12 +880,20 @@ void InitializeConsoleSettings(const std::filesystem::path& local_state) {
     Common::Log::Setup(Common::FS::LOG_FILE);
     EmulatorSettings.Load(); UserSettings.Load();
 }
-void BootConsoleGame(const std::filesystem::path& root) {
+bool BootConsoleGame(const GameCheck::Game& validated_game) {
+    if(validated_game.root.empty()) {
+        Blackbox::Milestone("console boot refused: validated dump root is empty");
+        LOG_CRITICAL(Loader,"Console boot refused: validated dump root is empty.");
+        return false;
+    }
     PromptPacks::InstallBundled();
     auto* emulator=Common::Singleton<Core::Emulator>::Instance();
     emulator->executableName="GR2port.exe";
     EmulatorState::GetInstance()->SetGameRunning(true);
-    emulator->Run(root);
+    Blackbox::SetGameRoot(validated_game.root.wstring().c_str());
+    Blackbox::Milestone("validated console dump root passed directly to Core::Emulator::Run");
+    emulator->Run(validated_game.root);
+    return true;
 }
 }
 #endif
