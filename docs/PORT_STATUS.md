@@ -313,8 +313,9 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
    sky. Missing/deformed/skinned streams are skipped once per attempted command,
    counted in render-thread telemetry, and never dereferenced by this slice.
 
-   Neutral initialized 2D/array shadow/occlusion SRVs and RGBA-zero line/self
-   translucency/bloom inputs keep absent passes bound. A fence-safe per-frame
+   Neutral initialized 2D/array shadow SRVs and RGBA-zero AO/line/self
+   translucency/bloom inputs keep absent passes bound (AO is an occluded
+   fraction, so its disabled value is zero). A fence-safe per-frame
    copy of Light explicitly disables point lights and traced shadows and supplies
    a zero fallback grid. The comparison sampler always passes pending 5B cascades.
    Captured Light/Scene packets are not rewritten in place.

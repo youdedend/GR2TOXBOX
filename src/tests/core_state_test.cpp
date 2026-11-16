@@ -29,6 +29,9 @@ int main() {
     assert(words[2] == 4 && words[3] == 16 && words[4] == 123);
     assert(sizeof(world) <= 64 && sizeof(character) <= 64 && sizeof(composite) <= 64 &&
            sizeof(TextureRoot) <= 16);
+    constexpr auto images = DeferredImages(11, 12, 13, 14, 15, 16);
+    static_assert(sizeof(images) == 28 && images[0] == 11 && images[1] == 12 && images[2] == 13 &&
+                  images[3] == 14 && images[4] == 15 && images[5] == 15 && images[6] == 16);
     Scene::Header h{};
     h.draws = 1;
     h.draw_commands[0] = 1;

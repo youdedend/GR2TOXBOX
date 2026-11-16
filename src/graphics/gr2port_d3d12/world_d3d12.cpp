@@ -227,11 +227,10 @@ bool WorldRenderer::Record(CommandList& list, const Scene::Header& h, const u8* 
     light.point_lights = 0;
     light.shadow_trace = 0;
     std::memcpy(upload.cpu + 32, &light, sizeof(light));
-    const u32 record[]{t.Srv(CoreTargets::Depth),  t.Srv(CoreTargets::Albedo),
-                       t.Srv(CoreTargets::Normal), t.Srv(CoreTargets::Material),
-                       t.Srv(CoreTargets::Black),  t.Srv(CoreTargets::White),
-                       t.Srv(CoreTargets::White)};
-    std::memcpy(upload.cpu + 32 + sizeof(light), record, sizeof(record));
+    const auto record = CoreState::DeferredImages(
+        t.Srv(CoreTargets::Depth), t.Srv(CoreTargets::Albedo), t.Srv(CoreTargets::Normal),
+        t.Srv(CoreTargets::Material), t.Srv(CoreTargets::Black), t.Srv(CoreTargets::White));
+    std::memcpy(upload.cpu + 32 + sizeof(light), record.data(), sizeof(record));
     t.ScratchTo(list, D3D12_RESOURCE_STATE_COPY_DEST);
     if (!t.initialized) {
         list.list->CopyBufferRegion(scratch, t.meter.ref.offset, upload.resource.Get(), 0, 32);

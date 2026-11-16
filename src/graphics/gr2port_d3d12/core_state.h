@@ -42,6 +42,11 @@ struct ExposureRoot {
 struct ToneRoot {
     Ref grade, meter;
 };
+// Deferred shader order; AO stores occluded fraction, so disabled AO is black.
+constexpr std::array<u32, 7> DeferredImages(u32 depth, u32 albedo, u32 normal, u32 material,
+                                            u32 black, u32 white) {
+    return {depth, albedo, normal, material, black, black, white};
+}
 struct TextureRoot {
     u32 near_shadow, far_shadow, color, depth;
 };
