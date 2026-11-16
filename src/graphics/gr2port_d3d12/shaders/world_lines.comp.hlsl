@@ -20,6 +20,19 @@ float Facing(float2 packed_normal) {
     return 1.0 - 2.0 * dot(packed_normal, packed_normal);
 }
 
+float3 SampleHistory(float2 pixel, int2 size) {
+    const float2 coordinate = clamp(pixel - 0.5, 0.0, float2(size - 1));
+    const int2 first = int2(floor(coordinate));
+    const int2 second = min(first + 1, size - 1);
+    const float2 blend = frac(coordinate);
+    const float3 upper = lerp(Batch2FetchRaw(history, uint2(size), first).rgb,
+                              Batch2FetchRaw(history, uint2(size), int2(second.x, first.y)).rgb,
+                              blend.x);
+    const float3 lower = lerp(Batch2FetchRaw(history, uint2(size), int2(first.x, second.y)).rgb,
+                              Batch2FetchRaw(history, uint2(size), second).rgb, blend.x);
+    return lerp(upper, lower, blend.y);
+}
+
 // The game's contour estimate with camera reprojection and bounded temporal averaging. The Xbox
 // backend keeps two raw history buffers and resets history on depth discontinuities.
 [numthreads(8,8,1)]
@@ -49,7 +62,7 @@ void main(uint3 dispatch_id:SV_DispatchThreadID) {
     const float scaled_distance = distance_to_eye / light.depth_range;
     float3 past = float3(0.0, scaled_distance, 0.0);
     if (history_valid != 0u && all(history_pixel >= 0.0) && all(history_pixel < float2(size))) {
-        past = Batch2FetchRaw(history, uint2(size), int2(history_pixel)).rgb;
+        past = SampleHistory(history_pixel, size);
         if (abs(1.0 - scaled_distance / max(past.g, 1e-6)) >= DepthThreshold) {
             past = float3(0.0, scaled_distance, 0.0);
         }
