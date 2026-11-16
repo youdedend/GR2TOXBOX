@@ -18,6 +18,7 @@
 #include "core/memory.h"
 #include "core/uwp_wx.h"
 #include "core/uwp_memory.h"
+#include "core/uwp_guest_memory.h"
 #if defined(GR2_XBOX_UWP)
 #include "core/uwp_guest_arena.h"
 #endif
@@ -924,6 +925,11 @@ AddressSpace::AddressSpace() : impl{std::make_unique<Impl>()} {
 AddressSpace::~AddressSpace() = default;
 
 void* AddressSpace::Map(VAddr virtual_addr, u64 size, PAddr phys_addr, bool is_exec) {
+#if defined(GR2_XBOX_UWP)
+    ASSERT_MSG(Core::Xbox::IsValidGuestRange(virtual_addr, size),
+               "Guest address {:#x} with size {:#x} is outside the 40-bit address space",
+               virtual_addr, size);
+#endif
     const VAddr end_addr = virtual_addr + size - 1;
     if (phys_addr != -1 && std::bit_width(end_addr) <= Traits::ADDRESS_SPACE_BITS) {
         const u64 base_page = virtual_addr >> Traits::PAGE_BITS;
@@ -943,6 +949,11 @@ void* AddressSpace::Map(VAddr virtual_addr, u64 size, PAddr phys_addr, bool is_e
 }
 
 void* AddressSpace::MapFile(VAddr virtual_addr, u64 size, u64 offset, u32 prot, uintptr_t fd) {
+#if defined(GR2_XBOX_UWP)
+    ASSERT_MSG(Core::Xbox::IsValidGuestRange(virtual_addr, size),
+               "Guest file-map address {:#x} with size {:#x} is outside the 40-bit address space",
+               virtual_addr, size);
+#endif
 #ifdef _WIN32
     return impl->Map(virtual_addr, offset, size,
                      ToWindowsProt(std::bit_cast<Core::MemoryProt>(prot)), fd);
@@ -953,6 +964,12 @@ void* AddressSpace::MapFile(VAddr virtual_addr, u64 size, u64 offset, u32 prot, 
 }
 
 VAddr AddressSpace::Unmap(VAddr virtual_addr, u64* size) {
+#if defined(GR2_XBOX_UWP)
+    ASSERT_MSG(size != nullptr && Core::Xbox::IsValidGuestRange(virtual_addr, size ? *size : 0),
+               "Guest unmap address {:#x} with size {:#x} is outside the 40-bit address space",
+               virtual_addr, size ? *size : 0);
+#endif
+    ASSERT_MSG(size != nullptr && *size != 0, "Guest unmap at {:#x} has an empty range", virtual_addr);
     const VAddr end_addr = virtual_addr + *size - 1;
     if (std::bit_width(end_addr) <= Traits::ADDRESS_SPACE_BITS) {
         const u64 base_page = virtual_addr >> Traits::PAGE_BITS;
@@ -988,6 +1005,11 @@ TrackerProtectScope::~TrackerProtectScope() {
 }
 
 void AddressSpace::Protect(VAddr virtual_addr, u64 size, MemoryPermission perms) {
+#if defined(GR2_XBOX_UWP)
+    ASSERT_MSG(Core::Xbox::IsValidGuestRange(virtual_addr, size),
+               "Guest protection address {:#x} with size {:#x} is outside the 40-bit address space",
+               virtual_addr, size);
+#endif
     const bool read = True(perms & MemoryPermission::Read);
     const bool write = True(perms & MemoryPermission::Write);
     const bool execute = True(perms & MemoryPermission::Execute);

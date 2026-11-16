@@ -38,7 +38,13 @@ namespace Core::Xbox {
 // ---------------------------------------------------------------------------
 
 /// Total guest physical memory (direct + flexible) the emulator may commit.
-inline constexpr u64 GuestMemoryCeilingBytes = 3200_MB;
+/// UWP packages can lower this with -DGR2_XBOX_GUEST_MEMORY_CEILING_MIB=N;
+/// CMake rejects values at or above the platform's 5,120 MiB hard pool.
+#ifndef GR2_XBOX_GUEST_MEMORY_CEILING_MIB
+#define GR2_XBOX_GUEST_MEMORY_CEILING_MIB 3200
+#endif
+inline constexpr u64 GuestMemoryCeilingBytes =
+    static_cast<u64>(GR2_XBOX_GUEST_MEMORY_CEILING_MIB) * 1_MB;
 /// Guest direct memory, derived from the ceiling minus the flexible pool that
 /// SetupMemoryRegions() keeps for the GPU-side flexible mappings.
 inline constexpr u64 GuestDirectCeilingBytes = GuestMemoryCeilingBytes - 512_MB;

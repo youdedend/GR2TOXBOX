@@ -54,6 +54,13 @@ set_property(CACHE GR2_RENDERER PROPERTY STRINGS VULKAN D3D12)
 # D3D12 (Xbox has no Vulkan driver), the WindowsStore system name, and the strict
 # W^X / 5,120 MiB memory rules in src/core/uwp_*.cpp.
 option(GR2_XBOX_UWP "Build the Xbox Series X|S UWP package" OFF)
+set(GR2_XBOX_GUEST_MEMORY_CEILING_MIB "3200" CACHE STRING
+    "Xbox UWP guest-memory commit ceiling in MiB (must be below the 5120 MiB pool)")
+if (NOT GR2_XBOX_GUEST_MEMORY_CEILING_MIB MATCHES "^[0-9]+$"
+        OR GR2_XBOX_GUEST_MEMORY_CEILING_MIB LESS 640
+        OR GR2_XBOX_GUEST_MEMORY_CEILING_MIB GREATER_EQUAL 5120)
+    message(FATAL_ERROR "GR2_XBOX_GUEST_MEMORY_CEILING_MIB must be an integer from 640 through 5119 MiB")
+endif()
 
 # LibreSSL picks the architecture whose crypto_arch.h goes on the include path
 # from CMAKE_SYSTEM_PROCESSOR. CMake does not set that variable when the target
@@ -98,6 +105,7 @@ if (GR2_XBOX_UWP)
     # and music_player_service.cpp calls that directly on this build. trophy_ui
     # already decoded from memory, so nothing else is affected.
     add_compile_definitions(GR2_XBOX_UWP=1 WINAPI_FAMILY=WINAPI_FAMILY_APP
+                            GR2_XBOX_GUEST_MEMORY_CEILING_MIB=${GR2_XBOX_GUEST_MEMORY_CEILING_MIB}
                             MINIMP3_NO_STDIO=1)
 
     # Link the static CRT.
@@ -1184,6 +1192,8 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/uwp_wx.h
          src/core/uwp_memory.cpp
          src/core/uwp_memory.h
+         src/core/uwp_guest_memory.cpp
+         src/core/uwp_guest_memory.h
          src/core/uwp_win_compat.h
          src/uwp/uwp_shell_compat.h
          src/core/emulator_state.cpp
@@ -1667,6 +1677,14 @@ if (GR2_XBOX_UWP)
     target_compile_definitions(xbox_memory_budget_selftest PRIVATE GR2_XBOX_UWP)
 endif()
 
+add_executable(xbox_uwp_guest_memory_selftest
+    src/tests/uwp_guest_memory_test.cpp
+    src/core/uwp_guest_memory.cpp
+)
+target_include_directories(xbox_uwp_guest_memory_selftest PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
 add_executable(xbox_chords_selftest
     src/tests/xbox_chords_test.cpp
     src/tests/selftest_log.cpp
@@ -1683,5 +1701,6 @@ endif()
 include(CTest)
 if (BUILD_TESTING)
     add_test(NAME xbox_memory_budget COMMAND xbox_memory_budget_selftest)
+    add_test(NAME xbox_uwp_guest_memory COMMAND xbox_uwp_guest_memory_selftest)
     add_test(NAME xbox_chords COMMAND xbox_chords_selftest)
 endif()
