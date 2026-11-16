@@ -215,7 +215,9 @@ bool UiRenderer::Prepare(CommandList& list, const Scene::Header& h, const u8* pa
             srv.Texture2D.MipLevels = 1;
             Textures::SetExternal(Scene::UiTargetHandles + i, t.image.Get(), srv);
         }
-        if (replace || (h.ui.fresh_targets & (1u << i))) {
+        // fresh_targets requests reliable packet delivery, not a discard. As
+        // in Vulkan, existing target contents survive kept/accumulation draws.
+        if (replace) {
             list.Transition(t.image.Get(), Rest, D3D12_RESOURCE_STATE_RENDER_TARGET);
             const float black[4]{0, 0, 0, 1};
             list.list->ClearRenderTargetView(Rtv(i), black, 0, nullptr);

@@ -266,7 +266,8 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
    aspect-fits the latest valid picture before ImGui on **every** display tick.
    Game samplers occupy 16..19; sampler 3 is linear clamp for present; dynamic
    sampler allocation starts at 20. Targets rest in pixel/non-pixel SRV state;
-   new/fresh targets clear to black with alpha 1. Resource/descriptor replacement
+   new/replaced targets clear to black with alpha 1; existing target contents
+   survive kept/accumulation draws. Resource/descriptor replacement
    waits for prior graphics submissions, preserving shared reserved handles.
    The existing UI range is **above** `FirstReserved`, below `Capacity` (not a
    range available to the texture cache).
