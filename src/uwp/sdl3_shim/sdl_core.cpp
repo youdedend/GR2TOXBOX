@@ -307,22 +307,26 @@ extern "C" bool SDLCALL SDL_PushEvent(SDL_Event* event) {
     return true;
 }
 
-extern "C" bool SDLCALL SDL_WaitEvent(SDL_Event* event) {
-    if (event == nullptr) {
-        return false;
-    }
+extern "C" bool SDLCALL SDL_WaitEventTimeout(SDL_Event* event, Sint32 timeout_ms) {
     std::unique_lock lock{g_event_mutex};
-    // A timeout rather than an unbounded wait: the app has to be able to leave
-    // its loop when the shell suspends it, and UWP's suspension arrives as a
-    // WinRT callback on another thread rather than as an event.
-    g_event_signal.wait_for(lock, std::chrono::milliseconds{100},
-                            [] { return !g_events.empty(); });
-    if (g_events.empty()) {
+    const auto available=[] { return !g_events.empty(); };
+    if(timeout_ms<0) {
+        g_event_signal.wait(lock,available);
+    } else if(!g_event_signal.wait_for(lock,std::chrono::milliseconds{timeout_ms},available)) {
         return false;
     }
-    *event = g_events.front();
-    g_events.erase(g_events.begin());
+    // SDL permits a null destination as an availability check without removal.
+    if(event) {
+        *event=g_events.front();
+        g_events.erase(g_events.begin());
+    }
     return true;
+}
+
+extern "C" bool SDLCALL SDL_WaitEvent(SDL_Event* event) {
+    // Preserve the shim's bounded suspension-friendly wait. The UI-thread game
+    // session uses the explicit 1 ms timeout so presentation never waits 100 ms.
+    return SDL_WaitEventTimeout(event,100);
 }
 
 extern "C" bool SDLCALL SDL_RunOnMainThread(SDL_MainThreadCallback callback, void* userdata,

@@ -121,7 +121,8 @@ and path. Blackbox attaches to the validated game root's `gr2_logs` mirror.
 LocalState userdata paths and normal EmulatorSettings/UserSettings are initialized.
 Boot installs prompt packs, marks EmulatorState and calls the existing
 Core::Emulator::Run in process, which owns mounts, HLE/linker, eboot loading and
-the normal event loop. The UWP WaitEvent path continues pumping/presenting.
+the normal event loop. The UWP WaitEvent path continues pumping/presenting using a linked, tested
+SDL_WaitEventTimeout shim (1 ms session wait, FIFO queue and producer wakeups).
 Memory::Instance still adopts the early 5 GiB reservation at 0x100000000 rather
 than making a second arena. No game dump was available for executing this bridge;
 no Xbox hardware was used. Actual game progress is still blocked by unimplemented
@@ -132,7 +133,8 @@ scene capture/rendering and potentially other runtime work.
 Before push: full local_precheck (including narrow WinRT picker/access-cache/
 dispatcher contract stubs and real SDL/ImGui headers), 72/72 Microsoft DXC,
 72/72 Slang, manifest/coverage/root checks, host-tool regression tests, chord 25,
-memory 16, display 64, and the immutable snapshot ownership/concurrency test.
+memory 16, display 64, the immutable snapshot ownership/concurrency test, and a linked timed-event-queue
+test (zero/finite/infinite waits, null peek, FIFO and producer wakeups).
 The Windows/UWP Actions jobs remain the authority for SDK compilation, linkage,
 DLL/symbol imports and signed MSIX packaging. CI evidence is reported separately
 from unperformed console boot/rendering tests.

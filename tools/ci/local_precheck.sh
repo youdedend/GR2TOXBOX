@@ -825,6 +825,18 @@ if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
     fi
 fi
 
+if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
+    if "$CXX" -std=c++23 -pthread -ffunction-sections -fdata-sections -Wl,--gc-sections \
+        -Isrc -Itools/ci/stubs -I"$DEPS_ROOT/sdl3/include" \
+        src/tests/sdl_event_wait_test.cpp src/uwp/sdl3_shim/sdl_core.cpp \
+        -o "$OUT/event-wait" 2>"$OUT/err" && "$OUT/event-wait"; then
+        echo "  ok   SDL timed event wait linked test (timeout, FIFO, peek, producer wake)"
+    else
+        echo "  FAIL SDL timed event wait test"; cat "$OUT/err"
+        failures=$((failures + 1))
+    fi
+fi
+
 if [ "$failures" -ne 0 ]; then
     echo "local_precheck: $failures check(s) failed -- do not push yet." >&2
     exit 1
