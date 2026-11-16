@@ -64,24 +64,45 @@ bool ConsoleSession() {
     auto validate=[&](const std::filesystem::path& candidate) {
         std::string error;
         auto checked=GameCheck::ValidateFolder(candidate,error);
-        if(!checked) {game.reset();status=error;return false;}
+        if(!checked) {
+            game.reset(); status=error;
+            Blackbox::Milestone("selected folder refused: no valid Gravity Rush 2 v1.11 game and update pair");
+            return false;
+        }
         game=std::move(checked); selected=candidate;
         Blackbox::SetGameRoot(game->root.wstring().c_str());
-        status="Gravity Rush 2 v1.11 validated. Press A or Menu to launch. Press X to choose another folder.";
+        Blackbox::Milestone("selected dump passed console-only validation");
+        status="Gravity Rush 2 v1.11 validated. D-pad selects Launch or Choose another folder.";
         return true;
     };
     try {
         if(access.ContainsItem(Token)) {
             pending=access.GetFolderAsync(Token); restoring=true;
+            status="Restoring the saved USB folder permission.";
+            Blackbox::Milestone("restoring the saved folder permission from the FutureAccessList");
+        } else {
+            Blackbox::Milestone("no saved folder permission exists; checking explicit USB roots");
         }
-    } catch(const winrt::hresult_error& e) {status="Saved USB permission unavailable: "+winrt::to_string(e.message());}
+    } catch(const winrt::hresult_error&) {
+        status="Saved USB permission unavailable: choose the folder again.";
+        Blackbox::Milestone("saved folder permission could not be restored; choose a folder again");
+    }
     // A saved path alone does not grant permission; restore its capability first.
-    // Only probe accessible paths. Never assume a removable drive letter exists.
+    // Only probe explicit removable-drive roots. Never scan the package install path.
     if(!pending) {
         std::ifstream file(state/"gr2-dump-path.txt"); std::string path;
-        if(std::getline(file,path)&&!path.empty()) validate(std::filesystem::u8path(path));
+        if(std::getline(file,path)&&!path.empty()) {
+            if(!validate(std::filesystem::u8path(path)))
+                Blackbox::Milestone("saved folder path is no longer a valid dump; checking explicit USB roots");
+        } else {
+            Blackbox::Milestone("no saved folder path is available; checking explicit USB roots");
+        }
     }
-    bool previous_a=false,previous_x=false,previous_start=false;
+    bool previous_a=false,previous_b=false,previous_x=false,previous_start=false;
+    bool previous_up=false,previous_down=false;
+    bool picker_cancel_requested=false;
+    bool pad_disconnected_reported=false;
+    int focus=0;
     bool scan_candidates=true;
     std::optional<std::filesystem::path> launch;
     {
@@ -102,44 +123,103 @@ bool ConsoleSession() {
                                 access.AddOrReplace(Token,folder);
                                 std::ofstream file(state/"gr2-dump-path.txt",std::ios::trunc);
                                 const auto utf8=selected.u8string(); file.write(reinterpret_cast<const char*>(utf8.data()),std::streamsize(utf8.size()));
+                                if(!file) Blackbox::Milestone("could not save the selected folder path; FutureAccessList permission remains active");
+                            } else if(restoring) {
+                                access.Remove(Token);
+                                Blackbox::Milestone("saved folder token no longer identifies a valid dump; token removed");
                             }
-                        } else status="Folder selection canceled. Press A to try again.";
-                    } else status="USB permission/picker failed. Press A to choose the folder again.";
-                } catch(const winrt::hresult_error& e) {
-                    status="USB folder unavailable: "+winrt::to_string(e.message());
+                        } else {
+                            status="Folder selection returned no folder. Press A to try again.";
+                            Blackbox::Milestone("system folder picker returned no folder");
+                        }
+                    } else if(pending.Status()==AsyncStatus::Canceled) {
+                        status="Folder picker canceled. Press A to choose again.";
+                        if(restoring) {
+                            access.Remove(Token);
+                            Blackbox::Milestone("saved folder permission restore was canceled or expired; select the folder again");
+                        } else if(!picker_cancel_requested) {
+                            Blackbox::Milestone("system folder picker canceled without a folder selection");
+                        }
+                    } else {
+                        status="USB permission or folder picker failed. Press A to choose again.";
+                        Blackbox::Milestone("USB folder permission or picker operation failed");
+                        if(restoring) access.Remove(Token);
+                    }
+                } catch(const winrt::hresult_error&) {
+                    status="USB folder unavailable: choose the folder again.";
+                    Blackbox::Milestone("saved USB folder capability is no longer available; select the folder again");
                     if(restoring) access.Remove(Token);
                 }
-                pending=nullptr; restoring=false;
+                pending=nullptr; restoring=false; picker_cancel_requested=false;
             }
             if(scan_candidates && !pending && !game) {
                 scan_candidates=false;
-                for(const wchar_t* drive:{L"D:\\",L"E:\\",L"F:\\"}) {
-                    for(const wchar_t* suffix:{L"Gravity Rush 2",L"GR2",L""}) {
-                        std::error_code ec; const auto path=std::filesystem::path(drive)/suffix;
-                        if(std::filesystem::is_directory(path,ec) && GameCheck::HoldsGame(path) && validate(path)) break;
+                bool found_candidate=false;
+                for(const wchar_t* drive:{L"E:\\",L"D:\\",L"F:\\"}) {
+                    std::error_code root_error;
+                    if(!std::filesystem::is_directory(drive,root_error)) {
+                        Blackbox::Milestone(drive[0]==L'E' ? "E:\\ is not mounted; skipping that USB root" :
+                            drive[0]==L'D' ? "D:\\ is not mounted; skipping that USB root" :
+                                             "F:\\ is not mounted; skipping that USB root");
+                        continue;
+                    }
+                    for(const wchar_t* suffix:{L"GR2",L"Gravity Rush 2",L""}) {
+                        std::error_code ec;
+                        const auto path=std::filesystem::path(drive)/suffix;
+                        if(std::filesystem::is_directory(path,ec) && GameCheck::HoldsGame(path)) {
+                            found_candidate=true;
+                            if(validate(path)) break;
+                        }
                     }
                     if(game) break;
                 }
+                if(!game && !found_candidate)
+                    Blackbox::Milestone("no valid dump was found under E:\\, D:\\, or F:\\; use Choose folder");
             }
             const auto pad=Gr2Sdl::Pad::Read();
+            if(!pad.connected && !pad_disconnected_reported) {
+                Blackbox::Milestone("no Xbox controller is connected; launcher button input is unavailable");
+                pad_disconnected_reported=true;
+            }
             const bool a=pad.buttons[int(Gr2Sdl::Pad::Button::South)];
+            const bool b=pad.buttons[int(Gr2Sdl::Pad::Button::East)];
             const bool x=pad.buttons[int(Gr2Sdl::Pad::Button::West)];
             const bool start=pad.buttons[int(Gr2Sdl::Pad::Button::Start)];
-            const bool choose=(!game && a&&!previous_a)||(x&&!previous_x);
-            if(!pending && choose) {
+            const bool up=pad.buttons[int(Gr2Sdl::Pad::Button::DpadUp)];
+            const bool down=pad.buttons[int(Gr2Sdl::Pad::Button::DpadDown)];
+            const bool a_pressed=a&&!previous_a, b_pressed=b&&!previous_b;
+            const bool x_pressed=x&&!previous_x, start_pressed=start&&!previous_start;
+            if(game && ((up&&!previous_up)||(down&&!previous_down))) focus=1-focus;
+            if(pending && pending.Status()==AsyncStatus::Started && b_pressed) {
+                pending.Cancel(); picker_cancel_requested=true;
+                status="Folder picker canceled. Press A to choose again.";
+                Blackbox::Milestone("player canceled the system folder picker with B");
+            }
+            const bool choose_folder=x_pressed || (a_pressed && (!game || focus==1));
+            const bool launch_game=game && (start_pressed || (a_pressed && focus==0));
+            if(!pending && choose_folder) {
                 try {
                     Pickers::FolderPicker picker;
                     picker.SuggestedStartLocation(Pickers::PickerLocationId::ComputerFolder);
                     picker.FileTypeFilter().Append(L"*");
-                    // Called on the CoreWindow UI thread. Never block it with .get().
                     pending=picker.PickSingleFolderAsync();
+                    restoring=false;
                     status="Choose the folder holding the game and update. Press B to cancel the system picker.";
-                } catch(const winrt::hresult_error& e) {status="Folder picker failed: "+winrt::to_string(e.message());}
-            } else if(!pending && game && ((a&&!previous_a)||(start&&!previous_start))) {
-                if(GameCheck::HoldUserFolder()) {launch=game->root;break;}
+                    Blackbox::Milestone("system folder picker opened for an explicit user selection");
+                } catch(const winrt::hresult_error&) {
+                    status="Folder picker unavailable. Check the package's file-system capabilities.";
+                    Blackbox::Milestone("system folder picker refused to open; package access capability may be missing");
+                }
+            } else if(!pending && launch_game) {
+                if(GameCheck::HoldUserFolder()) {
+                    Blackbox::Milestone("user data folder lock acquired; handing selected dump to emulator boot");
+                    launch=game->root; break;
+                }
                 status="Another instance holds the user folder.";
+                Blackbox::Milestone("launch refused because another process holds the user data folder");
             }
-            previous_a=a;previous_x=x;previous_start=start;
+            previous_a=a;previous_b=b;previous_x=x;previous_start=start;
+            previous_up=up;previous_down=down;
             // A fixed logical launcher canvas is scaled to the actual RTV by the relay.
             io.DisplaySize=ImVec2(1920.f,1080.f);
             io.DeltaTime=1.f/60.f;
@@ -150,7 +230,17 @@ bool ConsoleSession() {
             ImGui::TextWrapped("%s",status.c_str());
             if(!selected.empty()) ImGui::TextWrapped("Folder: %s",selected.string().c_str());
             ImGui::Separator();
-            ImGui::TextWrapped("A: choose folder / launch     X: choose another folder     Menu: launch");
+            ImGui::Separator();
+            ImGui::Text("D-pad focus:");
+            if(game) {
+                ImGui::TextColored(focus==0?ImVec4(1.0f,0.85f,0.25f,1.0f):ImVec4(0.8f,0.8f,0.8f,1.0f),
+                                   "%s Launch",focus==0?">":" ");
+                ImGui::TextColored(focus==1?ImVec4(1.0f,0.85f,0.25f,1.0f):ImVec4(0.8f,0.8f,0.8f,1.0f),
+                                   "%s Choose another folder",focus==1?">":" ");
+            } else {
+                ImGui::TextColored(ImVec4(1.0f,0.85f,0.25f,1.0f),"> Choose folder");
+            }
+            ImGui::TextWrapped("Up/Down: move focus   A: activate   X: choose another folder   Menu: launch   B: cancel picker");
             ImGui::TextWrapped("Development renderer: game scene capture/frame graph is not complete. A successful boot is not playable-rendering proof.");
             ImGui::End(); ImGui::Render(); ImGuiRelay::Capture(*ImGui::GetDrawData());
             // Capture before Tick so the very first swapchain present carries the
