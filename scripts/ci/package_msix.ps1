@@ -295,81 +295,48 @@ if (-not $password) { throw "GR2_PFX_PASSWORD is not set" }
 # for 87 minutes with no output before it was killed.
 & $signtool sign /fd SHA256 /f $pfx /p $password $msixPath
 if ($LASTEXITCODE -ne 0) { throw "signtool sign failed ($LASTEXITCODE)" }
-# How to verify a package signed by a self-signed Dev Mode certificate.
-#
-# `/pa /v` alone always fails here, and not because the signature is wrong: the
-# certificate chains to itself, so Authenticode reports "the certificate chain
-# processed but terminated in a root certificate which is not trusted by the
-# trust anchor" -- which is the correct answer to "is this signed by a publicly
-# trusted authority" and the wrong question to ask of a Dev Mode package. The
-# console does not consult a public anchor either: it trusts the certificate the
-# user sideloaded alongside the package, which is exactly the .cer in this bundle.
-#
-# So verify what actually matters:
-#
-#   1. the file carries a signature at all (`/pa` without certificate-chain
-#      revocation, which cannot succeed for a self-signed cert);
-#   2. it was signed by *this* certificate -- comparing the signer thumbprint with
-#      the exported .cer is what catches a stale PFX, which would install nowhere;
-#   3. the bundle ships the .cer that matches, since that is what gets trusted.
-#
-# A failure in (2) is a real packaging bug. A failure in (1) means the package is
-# unsigned. Neither is "the chain is untrusted".
-# Run it once and keep the output: the reason it failed belongs in the message if
-# the checks below reject the package, and running it a second time just prints the
-# same failure twice.
-$verifyOutput = (& $signtool verify /pa $msixPath 2>&1 | Out-String)
-if ($LASTEXITCODE -ne 0) {
-    Write-Warning "signtool verify /pa reported a problem; checking the signer directly."
-}
-
-# The signer's thumbprint is what has to match the certificate the bundle ships.
-#
-# Load the .pfx through X509Certificate2 with the password, NEVER through
-# Get-PfxCertificate. A .pfx with a password is a *protected* format, and
-# Get-PfxCertificate has no -Password parameter: on a protected file it prompts on
-# stdin ("Enter password for the private-key file:") and waits. In a headless CI
-# step nothing ever types, so the step sits there until the job times out -- no
-# output, no error, nothing in the log. That is what hung this job for 80 minutes.
-# X509Certificate2 takes the password as an argument and never prompts.
+# Pin the signer to the PFX and shipped CER before temporarily trusting it.
+# PowerShell maps CERT_E_UNTRUSTEDROOT to UnknownError on some runner images;
+# accepting that generic status would also accept genuinely broken signatures.
+# Instead, install ONLY the pinned public certificate in this ephemeral runner's
+# CurrentUser Root store, verify with signtool and Authenticode, then remove it.
 $pfxCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
     (Resolve-Path $pfx).Path, $password, 'EphemeralKeySet')
 $expectedThumb = $pfxCert.Thumbprint
 $pfxCert.Dispose()
-$packageCert = Get-AuthenticodeSignature -FilePath $msixPath
-if ($packageCert.Status -eq 'NotSigned' -or -not $packageCert.SignerCertificate) {
-    throw "The package is not signed. signtool reported: $verifyOutput"
-}
-# 'UntrustedRoot' is expected and fine. Anything else is not: HashMismatch means
-# the file changed after it was signed, NotTrusted/NotSignatureValid means the
-# signature itself is bad. Rejecting those by name is the point of checking Status
-# at all -- accepting "any status with a signer certificate attached" would let a
-# tampered package through, which is the one thing a verify step exists to stop.
-if ($packageCert.Status -notin @('Valid', 'UntrustedRoot')) {
-    throw ("The package's signature is not sound: Status=$($packageCert.Status) " +
-           "$($packageCert.StatusMessage)")
-}
-if ($packageCert.SignerCertificate.Thumbprint -ne $expectedThumb) {
-    throw ("The package is signed by a different certificate than the one being " +
-           "shipped: package $($packageCert.SignerCertificate.Thumbprint), " +
-           "expected $expectedThumb $($packageCert.SignerCertificate.Subject)")
-}
-# The .cer next to the .msix is what the user installs into Trusted People; if it
-# is not the signer's certificate the package will refuse to install with
-# 0x800B0109 and look like a corrupt download.
 $cerPath = Join-Path $SigningDir "GR2port-XboxDevMode.cer"
-# Same reasoning: X509Certificate2, not Get-PfxCertificate. A .cer holds no private
-# key so it is not password-protected in practice, but the rule is the rule -- and
-# the one place it is violated is the one place that hangs.
 $cerCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
     (Resolve-Path $cerPath).Path)
-$shipped = $cerCert.Thumbprint
-$cerCert.Dispose()
-if ($shipped -ne $expectedThumb) {
-    throw "The .cer in the bundle ($shipped) is not the signing certificate ($expectedThumb)."
+if ($cerCert.Thumbprint -ne $expectedThumb) {
+    $cerCert.Dispose()
+    throw "The shipped .cer does not match the signing PFX ($expectedThumb)."
 }
-Write-Host "Signed by $($packageCert.SignerCertificate.Subject) ($expectedThumb), and the bundle ships the matching .cer."
-Write-Host "Note: the chain terminates in an untrusted self-signed root by design; the console trusts the shipped .cer." 
+$store = [System.Security.Cryptography.X509Certificates.X509Store]::new('Root', 'CurrentUser')
+$addedTrust = $false
+try {
+    $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+    $existing = $store.Certificates.Find(
+        [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+        $expectedThumb, $false)
+    if ($existing.Count -eq 0) {
+        $store.Add($cerCert)
+        $addedTrust = $true
+    }
+    $verifyOutput = (& $signtool verify /pa /v $msixPath 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) { throw "signtool signature verification failed: $verifyOutput" }
+    $packageCert = Get-AuthenticodeSignature -FilePath $msixPath
+    if ($packageCert.Status -ne 'Valid' -or -not $packageCert.SignerCertificate) {
+        throw "Authenticode verification failed: $($packageCert.Status) $($packageCert.StatusMessage)"
+    }
+    if ($packageCert.SignerCertificate.Thumbprint -ne $expectedThumb) {
+        throw "Package signer does not match the pinned PFX/CER ($expectedThumb)."
+    }
+    Write-Host "::notice title=Signed MSIX verified::signtool /pa /v passed; Authenticode Valid; PFX/CER/signer thumbprints match $expectedThumb"
+} finally {
+    if ($addedTrust) { $store.Remove($cerCert) }
+    $store.Close()
+    $cerCert.Dispose()
+}
 
 # ---------------------------------------------------------------------------
 # 6. Bundle
