@@ -6,7 +6,14 @@
 #include <cstddef>
 #include <span>
 
+#include "common/types.h"
+#if !defined(GR2_RENDERER_D3D12)
 #include "graphics/gr2port/device.h"
+#endif
+
+namespace Gr2Port::D3D12 { struct ResidencyContext; struct CommandList; }
+struct ID3D12Resource;
+struct D3D12_SHADER_RESOURCE_VIEW_DESC;
 
 namespace Xbyak {
 class CodeGenerator;
@@ -54,6 +61,7 @@ void PrefetchRecords(const VAddr* objects, u32 count);
 /// Refresh. Never waits.
 u32 GetBySharp(const u32* sharp, bool& dynamic);
 
+#if !defined(GR2_RENDERER_D3D12)
 /// Render thread, after Update: copies the guest memory of the textures of these descriptors into
 /// their images again.
 void Refresh(vk::CommandBuffer cmd, u64 frame, std::span<const u32> descriptors);
@@ -75,6 +83,14 @@ void Update(vk::CommandBuffer cmd, u64 frame, u64 completed);
 /// at binding 2, for fragment shaders.
 vk::DescriptorSetLayout SetLayout();
 vk::DescriptorSet Set();
+
+#else
+bool Start(D3D12::ResidencyContext& context);
+void Update(D3D12::CommandList& cmd, u64 submission_fence, u64 completed_fence);
+void Refresh(D3D12::CommandList& cmd, u64 submission_fence, std::span<const u32> descriptors);
+void SetExternal(u32 handle, ID3D12Resource* resource, const D3D12_SHADER_RESOURCE_VIEW_DESC& desc);
+void Stop();
+#endif
 
 struct Stats {
     u32 textures;

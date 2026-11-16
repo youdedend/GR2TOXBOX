@@ -22,6 +22,9 @@
 #include "graphics/gr2port/frame_stats.h"
 #include "graphics/gr2port/window.h"
 #include "graphics/gr2port/scene_ring.h"
+#include "graphics/gr2port/meshes.h"
+#include "graphics/gr2port/textures.h"
+#include "graphics/gr2port_d3d12/residency_context.h"
 #include "graphics/gr2port_d3d12/arena.h"
 #include "graphics/gr2port_d3d12/presenter.h"
 #include "graphics/gr2port_d3d12/uwp/uwp_main.h"
@@ -63,16 +66,21 @@ struct Surface {
     // Destroy resources before their allocator (members destruct in reverse order).
     D3D12::Allocator allocator;
     D3D12::ArenaSet arenas;
+    D3D12::ResidencyContext residency;
     bool attached = false;
     u64 seen = 0;
     u64 captured_packets = 0;
     bool AttachScene() {
-        const D3D12::ArenaDesc desc{D3D12::ArenaKind::Scene,
-            SceneRing::Slots * SceneRing::SlotBytes(), false, true};
-        if (!allocator.Create(device) || !arenas.Create(device, allocator, heap, {&desc, 1}))
-            return false;
-        const auto storage = arenas.Allocate(desc.kind, desc.capacity);
-        if (!storage.cpu || storage.size != desc.capacity) return false;
+        const D3D12::ArenaDesc descriptions[]{
+            {D3D12::ArenaKind::Geometry,256_MB,false,false},
+            {D3D12::ArenaKind::Scratch,16_MB,false,true},
+            {D3D12::ArenaKind::Scene,SceneRing::Slots*SceneRing::SlotBytes(),false,true},
+        };
+        if (!allocator.Create(device) || !arenas.Create(device,allocator,heap,descriptions))return false;
+        residency={&device,&allocator,&arenas,&heap,&root,0};
+        if(!Meshes::Start(residency)||!Textures::Start(residency))return false;
+        const auto storage=arenas.Allocate(D3D12::ArenaKind::Scene,SceneRing::Slots*SceneRing::SlotBytes());
+        if (!storage.cpu || storage.size != SceneRing::Slots*SceneRing::SlotBytes()) return false;
         // Serialized scene addresses are offset-low / arena-high, not GPU VAs.
         const u64 address = (u64(storage.ref.arena) << 32) | storage.ref.offset;
         SceneRing::Attach(storage.cpu, address);
@@ -97,6 +105,7 @@ struct Surface {
             D3D12::WaitForFence(device,D3D12::SignalFence(device));
         // Shutdown must follow game/capture producer quiescence, as on Vulkan.
         if (attached) SceneRing::Attach(nullptr, 0);
+        Textures::Stop(); Meshes::Stop();
         imgui.Destroy(); arenas.Destroy(); allocator.Destroy();
         ring.Destroy(); heap.Destroy();
         if(device.timeline_event) CloseHandle(device.timeline_event);
@@ -122,7 +131,7 @@ bool Initialize(void* core_window) {
     rtvs.NumDescriptors=next->device.buffer_count;
     if(FAILED(next->device.device->CreateDescriptorHeap(&rtvs,IID_PPV_ARGS(next->rtvs.GetAddressOf()))) ||
        !next->Targets() || !next->ring.Create(next->device) ||
-       !D3D12::CreateRootSignature(next->device,next->root) || !next->heap.Create(next->device) ||
+       !D3D12::CreateRootSignature(next->device,next->root) || !next->heap.Create(next->device) || !next->heap.ReserveTextureRange() ||
        !next->imgui.Create(next->device,next->root,next->heap) || !next->AttachScene()) return false;
     next->ready=true; surface=std::move(next);
     Blackbox::Milestone("swapchain, backbuffer RTVs, command ring and ImGui PSO ready");
@@ -151,6 +160,12 @@ bool Tick() {
         Blackbox::Milestone("swapchain resize completed after GPU idle");
     }
     auto list=s.ring.BeginFrame(); if(!list.IsValid()) {s.ready=false;return false;}
+    const u64 completed=d.timeline_fence->GetCompletedValue();
+    const u64 submission=d.timeline_value+1; // EndFrame's next actual timeline signal.
+    s.residency.completed=completed;
+    s.allocator.BeginFrame(completed);
+    Meshes::Update(list,submission,completed);
+    Textures::Update(list,submission,completed);
     SceneRing::Packet packet{};
     if (SceneRing::TryTake(s.seen, packet)) {
         s.seen = packet.frame;

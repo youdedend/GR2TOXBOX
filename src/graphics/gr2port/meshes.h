@@ -7,7 +7,14 @@
 #include <cstddef>
 #include <limits>
 
+#include "common/types.h"
+#if !defined(GR2_RENDERER_D3D12)
 #include "graphics/gr2port/device.h"
+#endif
+
+namespace Gr2Port::D3D12 { struct ResidencyContext; struct CommandList; }
+struct ID3D12Resource;
+struct D3D12_SHADER_RESOURCE_VIEW_DESC;
 
 namespace Xbyak {
 class CodeGenerator;
@@ -99,6 +106,7 @@ const Mesh* Get(VAddr shape);
 /// handle.
 void Prefetch(VAddr shape);
 
+#if !defined(GR2_RENDERER_D3D12)
 /// Render thread: creates the shared index buffer.
 bool Start(const Device& device, Memory& memory);
 
@@ -113,6 +121,13 @@ vk::Buffer IndexBuffer();
 /// Render thread: records a copy of a ready mesh's vertex data, without the skin stream, to
 /// destination at offset.
 void CopyVertices(vk::CommandBuffer cmd, const Mesh& mesh, vk::Buffer destination, u64 offset);
+
+#else
+bool Start(D3D12::ResidencyContext& context);
+void Update(D3D12::CommandList& cmd, u64 submission_fence, u64 completed_fence);
+ID3D12Resource* IndexBuffer();
+void Stop();
+#endif
 
 struct Stats {
     u32 meshes;

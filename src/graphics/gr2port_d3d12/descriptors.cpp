@@ -4,6 +4,7 @@
 #include "common/logging/log.h"
 #include "uwp/blackbox_log.h"
 #include "graphics/gr2port_d3d12/descriptors.h"
+#include "graphics/gr2port_d3d12/residency_state.h"
 
 namespace Gr2Port::D3D12 {
 
@@ -97,13 +98,26 @@ void BindlessHeap::Destroy() {
     srv_heap_.Reset();
     sampler_heap_.Reset();
     device_ = nullptr;
+    recycled_srv_.clear();
     srv_used_ = NullSlot + 1;
     sampler_used_ = NullSlot + 1;
 }
 
+bool BindlessHeap::ReserveTextureRange() {
+    std::scoped_lock lock{mutex_};
+    if(srv_used_!=1)return false;
+    srv_used_=Residency::TextureDescriptorEnd;return true;
+}
+void BindlessHeap::RecycleSrv(DescriptorSlot slot) {
+    std::scoped_lock lock{mutex_};
+    if(slot && !slot.sampler && slot.index>=Residency::TextureDescriptorEnd && slot.index<srv_used_)
+        recycled_srv_.push_back(slot.index);
+}
+
 DescriptorSlot BindlessHeap::AllocateSrv(u32 count) {
     std::scoped_lock lock{mutex_};
-    if (srv_used_ + count > SrvCapacity) {
+    if(count==1 && !recycled_srv_.empty()){const auto index=recycled_srv_.back();recycled_srv_.pop_back();return {index,false};}
+    if (count > SrvCapacity - srv_used_) {
         LOG_CRITICAL(Graphics, "D3D12: the bindless SRV heap is exhausted ({}/{})", srv_used_,
                      SrvCapacity);
         return DescriptorSlot{DescriptorSlot::kInvalid, false};
@@ -150,13 +164,13 @@ void BindlessHeap::WriteBuffer(DescriptorSlot slot, ID3D12Resource* resource, u6
         return;
     }
     D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
-    desc.Format = DXGI_FORMAT_UNKNOWN;
+    desc.Format = stride ? DXGI_FORMAT_UNKNOWN : DXGI_FORMAT_R32_TYPELESS;
     desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
     desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     desc.Buffer.FirstElement = first_element;
     desc.Buffer.NumElements = num_elements;
     desc.Buffer.StructureByteStride = stride;
-    desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+    desc.Buffer.Flags = stride ? D3D12_BUFFER_SRV_FLAG_NONE : D3D12_BUFFER_SRV_FLAG_RAW;
     device_->CreateShaderResourceView(resource, &desc,
                                       AdvanceCpu(srv_cpu_base_, srv_increment_, slot.index));
 }
@@ -167,13 +181,13 @@ void BindlessHeap::WriteBufferUav(DescriptorSlot slot, ID3D12Resource* resource,
         return;
     }
     D3D12_UNORDERED_ACCESS_VIEW_DESC desc{};
-    desc.Format = DXGI_FORMAT_UNKNOWN;
+    desc.Format = stride ? DXGI_FORMAT_UNKNOWN : DXGI_FORMAT_R32_TYPELESS;
     desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
     desc.Buffer.FirstElement = first_element;
     desc.Buffer.NumElements = num_elements;
     desc.Buffer.StructureByteStride = stride;
     desc.Buffer.CounterOffsetInBytes = 0;
-    desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+    desc.Buffer.Flags = stride ? D3D12_BUFFER_UAV_FLAG_NONE : D3D12_BUFFER_UAV_FLAG_RAW;
     device_->CreateUnorderedAccessView(resource, nullptr, &desc,
                                        AdvanceCpu(srv_cpu_base_, srv_increment_, slot.index));
 }

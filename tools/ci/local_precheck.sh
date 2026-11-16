@@ -611,12 +611,16 @@ D3D12_UNITS=(
     "src/graphics/gr2port_d3d12/detile.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/pipeline.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/command.cpp|-D_WIN32"
-    "src/graphics/gr2port_d3d12/backend_surface.cpp|-D_WIN32"
+    "src/graphics/gr2port_d3d12/backend_surface.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
     "src/graphics/gr2port_d3d12/imgui_gpu.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/backend_capture.cpp|-DGR2_RENDERER_D3D12=1"
     "src/graphics/gr2port/capture.cpp|-DGR2_RENDERER_D3D12=1"
     "src/graphics/gr2port/scene_ring.cpp|"
     "src/graphics/gr2port_d3d12/arena.cpp|-D_WIN32"
+    "src/graphics/gr2port_d3d12/meshes_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
+    "src/graphics/gr2port_d3d12/textures_d3d12.cpp|-D_WIN32 -DGR2_RENDERER_D3D12=1"
+    "src/graphics/gr2port_d3d12/texture_layout.cpp|-D_WIN32"
+    "src/graphics/gr2port_d3d12/descriptors.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/imgui_relay.cpp|"
 )
 for entry in "${D3D12_UNITS[@]}"; do
@@ -686,16 +690,20 @@ D3D12_SYMBOLS=(
 # -r also rejects duplicate definitions. A failed object compile MUST fail here.
 if command -v nm >/dev/null 2>&1; then
     objects_ok=1
-    for source in src/graphics/gr2port/capture.cpp src/graphics/gr2port_d3d12/backend_capture.cpp; do
+    for source in src/graphics/gr2port/capture.cpp src/graphics/gr2port_d3d12/backend_capture.cpp src/graphics/gr2port_d3d12/meshes_d3d12.cpp src/graphics/gr2port_d3d12/textures_d3d12.cpp; do
         object="$OUT/$(basename "$source" .cpp).o"
-        if ! "$CXX" "${CXXFLAGS[@]}" -DGR2_RENDERER_D3D12=1 -c -o "$object" \
+        resident_defs=()
+        case "$source" in
+            *meshes_d3d12.cpp|*textures_d3d12.cpp) resident_defs=(-D_WIN32) ;;
+        esac
+        if ! "$CXX" "${CXXFLAGS[@]}" -DGR2_RENDERER_D3D12=1 "${resident_defs[@]}" -fpermissive -c -o "$object" -Itools/ci/d3d12_stub \
                 -I"$DEPS_ROOT/ext-boost" -I"$DEPS_ROOT/vulkan-headers/include" "$source" 2>"$OUT/err"; then
             echo "  FAIL capture link-contract object $source"; cat "$OUT/err"
             failures=$((failures + 1)); objects_ok=0
         fi
     done
     if [ "$objects_ok" -eq 1 ]; then
-        if ! "$CXX" -r "$OUT/capture.o" "$OUT/backend_capture.o" -o "$OUT/capture-contract.o" 2>"$OUT/err"; then
+        if ! "$CXX" -r "$OUT/capture.o" "$OUT/backend_capture.o" "$OUT/meshes_d3d12.o" "$OUT/textures_d3d12.o" -o "$OUT/capture-contract.o" 2>"$OUT/err"; then
             echo "  FAIL duplicate capture definitions"; cat "$OUT/err"
             failures=$((failures + 1))
         else
@@ -723,6 +731,26 @@ if ! "$CXX" "${CXXFLAGS[@]}" -I"$DEPS_ROOT/ext-boost" -I"$DEPS_ROOT/vulkan-heade
 else
     echo "  ok   Vulkan shared capture syntax (unchanged RenderExtent API)"
 fi
+
+# Only generated SPIR-V headers are stood in for here; Vulkan's real C++ headers
+# and both factored CPU implementations are compiled unchanged.
+mkdir -p "$OUT/graphics/host_shaders"
+for family in micro macro; do
+    for bits in 8 16 32 64 128; do
+        symbol="TILING_${family^^}_${bits}_COMP"
+        printf '#pragma once\ninline constexpr unsigned int %s[] = {0};\n' "$symbol" \
+            >"$OUT/graphics/host_shaders/tiling_${family}_${bits}_comp.h"
+    done
+done
+for source in src/graphics/gr2port/meshes.cpp src/graphics/gr2port/textures.cpp; do
+    if ! "$CXX" "${CXXFLAGS[@]}" -I"$DEPS_ROOT/ext-boost" -I"$DEPS_ROOT/vulkan-headers/include" \
+            -I"$DEPS_ROOT/magic_enum/include" -fsyntax-only "$source" 2>"$OUT/err"; then
+        echo "  FAIL shared Vulkan factoring $source";cat "$OUT/err"
+        failures=$((failures + 1))
+    else
+        echo "  ok   shared Vulkan mesh/texture factoring: $source"
+    fi
+done
 
 # The ported HLSL, structurally. This catches the mistakes that do not need a
 # compiler, e.g. two cbuffers both declaring g_pad, or a stage using ArenaRef
@@ -806,6 +834,30 @@ fi
 # Explicit skip if not installed; local shader work must run this with --require.
 if ! python3 tools/shaders/check_hlsl_local.py; then
     failures=$((failures + 1))
+fi
+
+# GCC alone rejects the vendored D3D12MA AllocHandle member/type spelling;
+# -fpermissive is confined to its native object-symbol audit above. Real Windows
+# builds use clang-cl/MSVC; shader warnings remain fatal, without exceptions.
+if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
+    for mode in host asan-ubsan; do
+        sanitize=()
+        if [ "$mode" = asan-ubsan ]; then
+            sanitize=(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fno-pie -no-pie)
+        fi
+        if "$CXX" "${CXXFLAGS[@]}" -O1 -g "${sanitize[@]}" -DFMT_HEADER_ONLY -DGR2_CHORDS_SELFTEST \
+                -Itools/ci/d3d12_stub -I"$DEPS_ROOT/magic_enum/include" \
+                src/tests/gpu_residency_test.cpp src/tests/selftest_log.cpp \
+                src/graphics/gr2port_d3d12/texture_layout.cpp src/graphics/gr2port_d3d12/detile_layout.cpp \
+                src/graphics/amdgpu/pixel_format.cpp src/graphics/amdgpu/tiling.cpp \
+                -o "$OUT/gpu-residency-$mode" 2>"$OUT/err" && \
+                ASAN_OPTIONS=detect_leaks=1 "$OUT/gpu-residency-$mode"; then
+            echo "  ok   GPU residency $mode layout/range/fence/twin tests"
+        else
+            echo "  FAIL GPU residency $mode tests";cat "$OUT/err"
+            failures=$((failures + 1))
+        fi
+    done
 fi
 
 if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then

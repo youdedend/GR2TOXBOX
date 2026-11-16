@@ -123,6 +123,10 @@ public:
 
     /// Reserves `count` consecutive SRV slots. Returns kInvalid when the heap
     /// is full, which the caller must treat as a fatal out-of-descriptors error.
+    // Must be called immediately after Create, before any arena/ImGui allocation.
+    bool ReserveTextureRange();
+    // Only for transient slots whose last submission fence has completed.
+    void RecycleSrv(DescriptorSlot slot);
     DescriptorSlot AllocateSrv(u32 count = 1);
     DescriptorSlot AllocateSampler(u32 count = 1);
     void Free(DescriptorSlot slot, u32 count = 1);
@@ -170,6 +174,7 @@ private:
     u32 sampler_increment_ = 0;
     u32 srv_used_ = NullSlot + 1;
     u32 sampler_used_ = NullSlot + 1;
+    std::vector<u32> recycled_srv_;
     std::mutex mutex_;
 };
 

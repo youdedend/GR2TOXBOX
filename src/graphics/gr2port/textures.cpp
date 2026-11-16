@@ -47,95 +47,7 @@ namespace Gr2Port::Textures {
 
 namespace {
 
-// InitTextureFromGnf FUN_01618ca0(texture, gnf, srgb) fills a texture object from a GNF blob that
-// it keeps; DestroyTexture FUN_016182a0(texture) frees the blob.
-constexpr Hooks::Entry Init{0x1618ca0, 6, Hooks::FramePrologue};
-constexpr Hooks::Entry Destroy{0x16182a0, 6, Hooks::FramePrologue};
-
-// Texture object: T# at +0x30, the renderer's handle at +0x6c, the GNF blob at +0x70.
-constexpr u64 TextureSharp = 0x30;
-constexpr u64 TextureHandle = 0x6c;
-constexpr u64 TextureBlob = 0x70;
-// GNF blob: a header {magic, contents size}, then the contents, whose stream size is at +4; the
-// texture data stream follows the contents.
-constexpr u64 BlobContentsSize = 0x4;
-constexpr u64 BlobStreamSize = 0xc;
-constexpr u64 BlobContents = 0x8;
-
-// The tilings the detile shaders convert, and the bits per pixel or block of each shader.
-constexpr std::array<AmdGpu::TileMode, 4> TileModes{
-    AmdGpu::TileMode::Display1DThin,
-    AmdGpu::TileMode::Display2DThin,
-    AmdGpu::TileMode::Thin1DThin,
-    AmdGpu::TileMode::Thin2DThin,
-};
-constexpr std::array<u32, 5> BlockBits{8, 16, 32, 64, 128};
-
-// Each handle has two descriptors, its own and a twin Capacity above it. A texture whose levels
-// change gets its new image in the one no frame samples, so frames in flight keep the old image.
-constexpr u32 Twin = Capacity;
-constexpr u32 Descriptors = 2 * Capacity;
-// An extent larger than any image's.
-constexpr u32 LargeExtent = 1u << 16;
-constexpr u32 LoggedTextures = 8;
-// The detile parameters lead each staging buffer; the texture data follows.
-constexpr u64 ParamsBytes = 256;
-
-// Streaming keeps the textures within a budget of device memory. The clock ticks every TickPeriod;
-// a texture a capture read within the last UsedTicks is in use, and one read within the last
-// ShownTicks gets larger levels when the quality allows them.
-constexpr auto TickPeriod = std::chrono::milliseconds{125};
-constexpr u32 UsedTicks = 16;
-constexpr u32 ShownTicks = 2;
-// A texture no draw reads for this long, a minute, is parked even when the budget has room.
-constexpr u32 ParkTicks = 480;
-// The largest levels a texture may keep. Out of use, a texture keeps at most Caps[Parked] while
-// the budget asks for it, and once no draw has read it for ParkTicks.
-constexpr std::array<u32, 8> Caps{LargeExtent, 4096, 2048, 1024, 512, 256, 128, 64};
-constexpr u8 Parked = 6;
-// The qualities, best first: the caps of the textures in use and of the others.
-struct Quality {
-    u8 used;
-    u8 unused;
-};
-// The cap a texture last read age ticks ago takes at a quality.
-constexpr u8 CapOf(const Quality& quality, u32 age) {
-    if (age <= UsedTicks) {
-        return quality.used;
-    }
-    return age > ParkTicks ? std::max(quality.unused, Parked) : quality.unused;
-}
-constexpr std::array<Quality, 9> Qualities{{
-    {0, 0},
-    {0, Parked},
-    {1, Parked},
-    {2, Parked},
-    {3, Parked},
-    {4, Parked},
-    {5, Parked},
-    {6, Parked},
-    {7, 7},
-}};
-// Device memory the textures leave free beside the headroom, for meshes and targets to grow into;
-// the room a better quality must leave besides; the least budget the textures get.
-constexpr u64 SpareBytes = 128_MB;
-constexpr u64 RaiseMargin = 64_MB;
-constexpr u64 LeastBudget = 64_MB;
-// Per frame at most: shrinks recorded, new textures looked at, grows started and bytes of copied
-// uploads recorded. The data the worker holds for uploads not yet recorded stays within
-// InFlightBytes.
-constexpr u32 ShrinksPerFrame = 64;
-constexpr u32 FreshPerFrame = 512;
-constexpr u32 GrowsPerFrame = 64;
-constexpr u64 FinishBytes = 64_MB;
-constexpr u64 InFlightBytes = 64_MB;
-// The worker copies a texture's data in chunks, each under the lock the texture destroy takes.
-constexpr u64 ChunkBytes = 256_KB;
-// Frames from a swap until no frame samples the replaced image: the packets the ring holds and the
-// one the capture is writing.
-constexpr u64 RetireFrames = SceneRing::Slots + 2;
-// Images at least this large get device memory of their own, which a shrink returns at once.
-constexpr u64 DedicatedBytes = 1_MB;
+#include "graphics/gr2port/textures_capture_constants.inc"
 
 // The detile shaders' parameters (host_shaders/tiling.comp). For block-compressed formats the
 // pitch and height count blocks.
@@ -147,69 +59,7 @@ struct TilingParams {
 };
 static_assert(sizeof(TilingParams) <= ParamsBytes);
 
-template <typename T>
-T Load(VAddr address) {
-    T value;
-    std::memcpy(&value, reinterpret_cast<const void*>(address), sizeof(T));
-    return value;
-}
-
-// What a capture reads of a texture at each draw that names it. It is apart from the rest of the
-// texture so that four textures share a cache line.
-struct Sampled {
-    std::atomic<VAddr> object{0};
-    /// The streaming tick of the last capture that read it.
-    std::atomic<u32> used{0};
-    /// The descriptor shaders sample it by: its handle or the handle's twin.
-    std::atomic<u16> slot{0};
-    std::atomic<bool> ready{false};
-    std::atomic<bool> cube{false};
-};
-static_assert(sizeof(Sampled) == 16 && Descriptors - 1 <= 0xffff);
-
-struct Texture {
-    /// The address of its data, and for a texture of a T# alone, that T#'s key and whether it is
-    /// linear.
-    std::atomic<VAddr> address{0};
-    std::atomic<u64> key{0};
-    std::atomic<bool> sharp_only{false};
-    std::atomic<bool> linear{false};
-};
-
-// The handles by the address of their data: open addressing over AddressProbes slots from a home
-// slot, written under g_mutex and read without it.
-constexpr u32 AddressSlots = Capacity * 2;
-constexpr u32 AddressProbes = 16;
-// Textures of a T# alone take handles below the ImGui textures' and the targets', which Start
-// keeps out of use.
-constexpr u32 FirstReserved = Scene::ImGuiHandles;
-static_assert(Scene::UiTargetHandles + Scene::MaxUiTargets == Capacity);
-static_assert(Scene::ImGuiHandles + Scene::MaxImGuiTextures == Scene::UiTargetHandles);
-
-// What a texture object holds when it is built: its T# and the end of its GNF data.
-struct Source {
-    AmdGpu::Image sharp;
-    VAddr end;
-};
-
-std::array<Texture, Capacity> g_textures;
-std::array<Sampled, Capacity> g_sampled;
-std::array<Source, Capacity> g_sources;
-std::array<std::atomic<u32>, AddressSlots + AddressProbes> g_by_address{};
-std::atomic<u32> g_tick{1u << 16};
-
-// Guards the handle lists, the sources and the reads of texture data that destroys free.
-std::mutex g_mutex;
-std::vector<u32> g_free;
-u32 g_unused = 1;
-std::deque<u32> g_pending;
-std::vector<u32> g_destroyed;
-// Each drop raises its handle's generation, which abandons the copies of its data under way.
-std::array<u32, Capacity> g_generations{};
-u32 g_not_2d = 0;
-u32 g_unsupported = 0;
-u32 g_missed_destroys = 0;
-u32 g_logged_skips = 0;
+#include "graphics/gr2port/textures_capture_state.inc"
 
 // The worker copies texture data from the game's memory into staging buffers, so the render
 // thread only records commands. It takes the jobs in order.
@@ -355,27 +205,7 @@ vk::Format SurfaceFormat(const AmdGpu::Image& sharp) {
         sharp.GetDataFmt(), sharp.GetNumberFmt())];
 }
 
-bool ValidSwizzle(AmdGpu::CompSwizzle swizzle) {
-    const u32 raw = static_cast<u32>(swizzle);
-    return raw <= 1 || (raw >= 4 && raw <= 7);
-}
-
-bool Tiled(AmdGpu::TileMode tile_mode) {
-    return tile_mode != AmdGpu::TileMode::DisplayLinearAligned;
-}
-
-bool IsCube(const AmdGpu::Image& sharp) {
-    return sharp.GetType() == AmdGpu::ImageType::Cube;
-}
-
-// The checks on a T# that need no layout: a single 2D image or a single cube, with a tiling and
-// format the renderer converts.
-bool SingleImage(const AmdGpu::Image& sharp) {
-    const bool single =
-        IsCube(sharp) ? sharp.depth == 0
-                      : sharp.GetType() == AmdGpu::ImageType::Color2D && sharp.NumLayers() == 1;
-    return single && sharp.base_level == 0 && sharp.alt_tile_mode == 0 && sharp.Address() != 0;
-}
+#include "graphics/gr2port/textures_capture_checks.inc"
 
 bool Convertible(const AmdGpu::Image& sharp) {
     const AmdGpu::TileMode tile_mode = sharp.GetTileMode();
@@ -420,7 +250,7 @@ Layout ReadLayout(const AmdGpu::Image& sharp, u32 first) {
     Layout layout{};
     layout.format = SurfaceFormat(sharp);
     layout.mapping = LiverpoolToVK::ComponentMapping(sharp.DstSelect());
-    layout.extent = {static_cast<u32>(sharp.width) + 1, static_cast<u32>(sharp.height) + 1};
+    layout.extent = vk::Extent2D{static_cast<u32>(sharp.width) + 1, static_cast<u32>(sharp.height) + 1};
     layout.data_levels = std::max(sharp.NumLevels(), 1u);
     layout.first = std::min(first, layout.data_levels - 1);
     layout.image_extent = ExtentFrom(layout.extent, layout.first);
@@ -467,153 +297,8 @@ void Describe(Residency& r, const Layout& layout, bool streams) {
     }
 }
 
-u32 AddressHome(VAddr address) {
-    return static_cast<u32>(address >> 8) * 0x9e3779b1u >> (32 - std::countr_zero(AddressSlots));
-}
+#include "graphics/gr2port/textures_capture_hooks.inc"
 
-// Under g_mutex.
-void AddAddress(u32 handle, VAddr address) {
-    g_textures[handle].address.store(address, std::memory_order_release);
-    const u32 home = AddressHome(address);
-    for (u32 i = 0; i < AddressProbes; i++) {
-        if (g_by_address[home + i].load(std::memory_order_relaxed) == 0) {
-            g_by_address[home + i].store(handle, std::memory_order_release);
-            return;
-        }
-    }
-    g_by_address[home].store(handle, std::memory_order_release);
-}
-
-// Under g_mutex.
-void RemoveAddress(u32 handle) {
-    const VAddr address = g_textures[handle].address.exchange(0, std::memory_order_relaxed);
-    if (address == 0) {
-        return;
-    }
-    const u32 home = AddressHome(address);
-    for (u32 i = 0; i < AddressProbes; i++) {
-        if (g_by_address[home + i].load(std::memory_order_relaxed) == handle) {
-            g_by_address[home + i].store(0, std::memory_order_relaxed);
-            return;
-        }
-    }
-}
-
-u32 FindAddress(VAddr address) {
-    const u32 home = AddressHome(address);
-    for (u32 i = 0; i < AddressProbes; i++) {
-        const u32 handle = g_by_address[home + i].load(std::memory_order_acquire);
-        if (handle != 0 && g_textures[handle].address.load(std::memory_order_relaxed) == address) {
-            return handle;
-        }
-    }
-    return 0;
-}
-
-// Under g_mutex: the texture is no longer the game's, and its handle is freed once no frame can
-// sample it.
-void Drop(u32 handle) {
-    g_sampled[handle].ready.store(false, std::memory_order_relaxed);
-    g_sampled[handle].object.store(0, std::memory_order_release);
-    g_generations[handle]++;
-    RemoveAddress(handle);
-    g_destroyed.push_back(handle);
-}
-
-// Notes that a capture reads the texture in the current tick.
-void MarkUsed(Sampled& s) {
-    const u32 tick = g_tick.load(std::memory_order_relaxed);
-    if (s.used.load(std::memory_order_relaxed) != tick) {
-        s.used.store(tick, std::memory_order_relaxed);
-    }
-}
-
-// What tells two T#s of one address apart: the format, size, levels, tiling and pitch, not the
-// order of the components.
-u64 SharpKey(const u32* sharp) {
-    return (u64{sharp[2]} << 32 | sharp[1]) ^ (u64{sharp[4]} << 20) ^ (sharp[3] >> 12);
-}
-
-void LogSkip(VAddr texture, const AmdGpu::Image& sharp, const char* reason) {
-    if (g_logged_skips >= LoggedTextures) {
-        return;
-    }
-    g_logged_skips++;
-    LOG_INFO(Render_Vulkan,
-             "GR2port: texture {:#x} not converted ({}): type {}, {}x{}, levels {}, layers {}, "
-             "tile mode {}, data format {}, number format {}",
-             texture, reason, static_cast<u32>(sharp.GetType()), sharp.width + 1, sharp.height + 1,
-             sharp.NumLevels(), sharp.NumLayers(), static_cast<u32>(sharp.GetTileMode()),
-             static_cast<u32>(sharp.GetDataFmt()), static_cast<u32>(sharp.GetNumberFmt()));
-}
-
-void PS4_SYSV_ABI OnInit(u32, const Hooks::Arguments* arguments, u64) {
-    const VAddr texture = arguments->rdi;
-    if (texture == 0) {
-        return;
-    }
-    AmdGpu::Image sharp;
-    std::memcpy(&sharp, reinterpret_cast<const void*>(texture + TextureSharp), sizeof(sharp));
-    const VAddr blob = Load<VAddr>(texture + TextureBlob);
-    std::scoped_lock lock{g_mutex};
-    // The handle field starts as heap contents, which can be the handle of an earlier texture
-    // at this address.
-    const u32 earlier = Load<u32>(texture + TextureHandle);
-    if (earlier != 0 && earlier < Capacity &&
-        g_sampled[earlier].object.load(std::memory_order_relaxed) == texture) {
-        Drop(earlier);
-        g_missed_destroys++;
-    }
-    // A texture of the T# alone at this address is this one's data from now on.
-    const u32 sharp_only = FindAddress(sharp.Address());
-    if (sharp_only != 0 && g_textures[sharp_only].sharp_only.load(std::memory_order_relaxed)) {
-        Drop(sharp_only);
-    }
-    u32 handle = 0;
-    if (!SingleImage(sharp)) {
-        g_not_2d++;
-        LogSkip(texture, sharp, "not a single 2D image or cube");
-    } else if (blob == 0 || !Convertible(sharp)) {
-        g_unsupported++;
-        LogSkip(texture, sharp, "tiling or format");
-    } else if (!g_free.empty()) {
-        handle = g_free.back();
-        g_free.pop_back();
-    } else if (g_unused < FirstReserved) {
-        handle = g_unused++;
-    }
-    std::memcpy(reinterpret_cast<void*>(texture + TextureHandle), &handle, sizeof(handle));
-    if (handle == 0) {
-        return;
-    }
-    const VAddr stream = blob + BlobContents + Load<u32>(blob + BlobContentsSize);
-    g_sources[handle] = {.sharp = sharp, .end = stream + Load<u32>(blob + BlobStreamSize)};
-    g_sampled[handle].ready.store(false, std::memory_order_relaxed);
-    g_sampled[handle].cube.store(IsCube(sharp), std::memory_order_relaxed);
-    g_textures[handle].sharp_only.store(false, std::memory_order_relaxed);
-    g_sampled[handle].object.store(texture, std::memory_order_release);
-    AddAddress(handle, sharp.Address());
-    g_pending.push_back(handle);
-}
-
-void PS4_SYSV_ABI OnDestroy(u32, const Hooks::Registers* registers, u64) {
-    const VAddr texture = registers->rdi;
-    if (texture == 0) {
-        return;
-    }
-    const u32 handle = Load<u32>(texture + TextureHandle);
-    if (handle == 0 || handle >= Capacity ||
-        g_sampled[handle].object.load(std::memory_order_relaxed) != texture) {
-        return;
-    }
-    std::scoped_lock lock{g_mutex};
-    if (g_sampled[handle].object.load(std::memory_order_relaxed) != texture) {
-        return;
-    }
-    Drop(handle);
-}
-
-// The worker's loop: copies each job's data while its texture lives, a chunk per lock.
 void Work() {
     Common::SetCurrentThreadName("GR2port:Textures");
     for (;;) {
@@ -832,7 +517,7 @@ bool CreateDetile(const Device& d) {
             }
             std::array<vk::SpecializationMapEntry, 12> entries{};
             for (u32 i = 0; i < entries.size(); i++) {
-                entries[i] = {i, i * static_cast<u32>(sizeof(u32)), sizeof(u32)};
+                entries[i] = vk::SpecializationMapEntry{i, i * static_cast<u32>(sizeof(u32)), sizeof(u32)};
             }
             const u32 count = macro ? 12 : 4;
             const vk::SpecializationInfo specialization{
@@ -1611,111 +1296,7 @@ void Converge(vk::CommandBuffer cmd, u64 frame) {
 
 } // namespace
 
-bool Install(VAddr module_base, Xbyak::CodeGenerator& c, size_t capacity) {
-    const Hooks::Result init = Hooks::ObserveReturn(module_base, Init, c, capacity, &OnInit, 0);
-    const Hooks::Result destroy =
-        Hooks::ObserveEntry(module_base, Destroy, c, capacity, &OnDestroy, 0);
-    const auto ok = [](Hooks::Result r) {
-        return r == Hooks::Result::Hooked || r == Hooks::Result::Chained;
-    };
-    if (!ok(init) || !ok(destroy)) {
-        LOG_ERROR(Render_Vulkan, "GR2port: the texture init or destroy is not the expected code");
-        return false;
-    }
-    return true;
-}
-
-namespace {
-
-u32 GetOfKind(VAddr texture, bool cube) {
-    const u32 handle = Load<u32>(texture + TextureHandle);
-    if (handle == 0 || handle >= Capacity) {
-        return 0;
-    }
-    Sampled& s = g_sampled[handle];
-    if (s.object.load(std::memory_order_relaxed) != texture ||
-        s.cube.load(std::memory_order_relaxed) != cube) {
-        return 0;
-    }
-    MarkUsed(s);
-    return s.ready.load(std::memory_order_acquire) ? s.slot.load(std::memory_order_acquire) : 0;
-}
-
-} // namespace
-
-u32 Get(VAddr texture) {
-    return GetOfKind(texture, false);
-}
-
-void Prefetch(const VAddr* objects, u32 count) {
-    for (u32 i = 0; i < count; i++) {
-        __builtin_prefetch(reinterpret_cast<const void*>(objects[i] + TextureHandle));
-    }
-}
-
-void PrefetchRecords(const VAddr* objects, u32 count) {
-    for (u32 i = 0; i < count; i++) {
-        const u32 handle = objects[i] != 0 ? Load<u32>(objects[i] + TextureHandle) : 0;
-        if (handle < Capacity) {
-            __builtin_prefetch(&g_sampled[handle]);
-        }
-    }
-}
-
-u32 GetCube(VAddr texture) {
-    return GetOfKind(texture, true);
-}
-
-u32 GetBySharp(const u32* words, bool& dynamic) {
-    AmdGpu::Image sharp;
-    std::memcpy(&sharp, words, sizeof(sharp));
-    const VAddr address = sharp.Address();
-    const u64 key = SharpKey(words);
-    const u32 found = FindAddress(address);
-    if (found != 0) {
-        Texture& t = g_textures[found];
-        const bool sharp_only = t.sharp_only.load(std::memory_order_relaxed);
-        if (!sharp_only || t.key.load(std::memory_order_relaxed) == key) {
-            dynamic = sharp_only && t.linear.load(std::memory_order_relaxed);
-            Sampled& s = g_sampled[found];
-            MarkUsed(s);
-            return s.ready.load(std::memory_order_acquire) &&
-                           !s.cube.load(std::memory_order_relaxed)
-                       ? s.slot.load(std::memory_order_acquire)
-                       : 0;
-        }
-    }
-    // The first draw that reads it, or a T# of another texture at its address.
-    std::unique_lock lock{g_mutex, std::try_to_lock};
-    if (!lock.owns_lock() || sharp.GetType() != AmdGpu::ImageType::Color2D || !SingleImage(sharp) ||
-        !Convertible(sharp)) {
-        return 0;
-    }
-    if (found != 0 && g_textures[found].sharp_only.load(std::memory_order_relaxed)) {
-        Drop(found);
-    }
-    u32 handle = 0;
-    if (!g_free.empty()) {
-        handle = g_free.back();
-        g_free.pop_back();
-    } else if (g_unused < FirstReserved) {
-        handle = g_unused++;
-    } else {
-        return 0;
-    }
-    g_sources[handle] = {.sharp = sharp, .end = ~VAddr{0}};
-    Texture& t = g_textures[handle];
-    Sampled& s = g_sampled[handle];
-    s.ready.store(false, std::memory_order_relaxed);
-    s.cube.store(false, std::memory_order_relaxed);
-    t.sharp_only.store(true, std::memory_order_relaxed);
-    t.linear.store(!Tiled(sharp.GetTileMode()), std::memory_order_relaxed);
-    t.key.store(key, std::memory_order_relaxed);
-    s.object.store(address, std::memory_order_release);
-    AddAddress(handle, address);
-    g_pending.push_back(handle);
-    return 0;
-}
+#include "graphics/gr2port/textures_capture_access.inc"
 
 void Refresh(vk::CommandBuffer cmd, u64 frame, std::span<const u32> read) {
     const auto& dl = g_device->dispatch;

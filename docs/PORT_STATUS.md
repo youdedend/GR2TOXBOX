@@ -191,7 +191,7 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
    in `backend_surface.cpp`: HWND/CoreWindow RTVs, barriers, ring submission,
    Present, resize and shutdown. Immutable owned ImGui snapshots and RGBA8 GPU
    uploads replace raw draw-data pointers. The game's pass order, scene resources,
-   uploads and draw execution remain unimplemented. No hardware rendering or
+   mesh/texture uploads now exist; UI and world draw execution remain unimplemented. No hardware rendering or
    successful eboot progress has been demonstrated.
 3. **The D3D12 capture consumer (Slice 4A).** All of the shared `capture.cpp`
    now builds on D3D12 as well as Vulkan; its six real Capture entry points
@@ -215,12 +215,56 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
    Linux D3D12 syntax checks use SDK stubs; Windows/UWP compilation and packaging
    are checked by Actions, not by those stubs.
 
-   Mesh/texture uploads and `ui_d3d12.cpp` are explicitly **deferred to Slice 4B**.
-   Mesh/texture installs still return false and stop game renderer startup;
-   prefetch is a no-op, cube lookup returns zero, and deformers return an empty
-   copy. `Photo::Read` remains false. No captured game scene/UI, eboot progress or
-   physical Xbox execution is claimed by Slice 4A. 3D world/character, deferred,
-   fog and particle pass execution remains later work.
+   **Slice 4B-1: mesh/texture residency is now implemented.** Shared `.inc`
+   units keep the original Vulkan .gfx shape walk, bounds/weights/chunks, GNF
+   parsing, address lookup, prefetch and hook installation. Both installs now
+   report the actual `Hooked`/`Chained` results instead of unconditional false,
+   allowing startup to proceed to Movies, FrameGraphDraws and Renderer. This
+   control-flow change is compiled and link-audited; game execution is unverified.
+
+   D3D12 adds a 256 MiB GPU-only Geometry Arena, 16 MiB CPU-visible Scratch Arena,
+   and the existing 120 MiB Scene Arena. A D3D12MA R16 index buffer has 48M
+   indices on the 1,200 MiB console budget (64M on larger desktop budgets).
+   Free-range allocation reuses geometry/index regions only after the graphics
+   timeline fence and capture grace period have passed. Mesh uploads are capped
+   at 64 MiB per frame; index/skin bounds are checked before publishing readiness.
+   Geometry and index copies are transitioned back to GPU-readable states first.
+
+   Texture handles below 32480 use descriptors `handle` / `handle + 32768`;
+   reserved external UI/ImGui handles keep their existing low slots. The entire
+   range `[1,65248)` is reserved before arenas/ImGui allocate descriptors, leaving
+   288 ancillary slots; no table grows and the root remains 37 DWORDs. Descriptor
+   zero is a real white RGBA8 image uploaded before draws. Raw SRV/UAV arena and
+   detile views use R32_TYPELESS + RAW, not an invalid UNKNOWN/zero-stride view.
+   Transient detile descriptors are recycled only after their submission fence.
+
+   The format/layout planner supports BC1–BC7 (sRGB where defined), normalized
+   R/RG/RGBA and float formats, BGRA swizzles, 2D/cube resources and padded cube
+   source slices. Four display/thin tile modes dispatch the existing SM6.4
+   detile kernel per mip/slice. Row copies repack its output into SDK-provided
+   `GetCopyableFootprints` layouts (256-byte pitch, 512-byte placement) before
+   `CopyTextureRegion`. Unsupported layouts/formats are rejected and counted.
+   Uploads are bounded; larger chains or budget pressure select smaller initial
+   mip chains. Full Vulkan-style quality convergence is not yet implemented.
+   Static replacements retain both twins until their fence grace ends; dynamic
+   linear/movie refresh keeps a stable descriptor and queue-orders copy barriers
+   after prior reads. Movie refresh uses owned AvPlayer/kept-frame copies.
+
+   New host and ASan/UBSan tests exercise the production range/encoded-address,
+   index-bound, fence-gate, twin-rotation, format/tiling and footprint helpers,
+   including padded cube mip chains. `local_precheck.sh` also compiles both original
+   Vulkan mesh/texture TUs (only generated SPIR-V headers are dummy bytecode), the
+   D3D12 implementation TUs against SDK stubs, and all twenty actual capture/link
+   contract definitions. GCC's vendored D3D12MA member/type spelling needs
+   `-fpermissive` only for the native symbol audit; real Windows/UWP compilers and
+   the shader `-WX` gate do not use that exception.
+
+   **Slice 4B-2 is still separate:** no `ui_d3d12.cpp`, Prepare/Record/Present or
+   game UI draw execution is added here. Scene packets are still counted and
+   released without GPU reads; the UI consumer must pin slots/resources through
+   submission completion when introduced. `Photo::Read` remains false. No eboot
+   progress, physical Xbox execution or visual/GPU parity is claimed. 3D world,
+   character, deferred, fog and particle pass execution remains later work.
 
 4. **ImGuiRelay.** ~~Resolved~~ — `backend_surface.cpp` and `imgui_relay.cpp`
    supply the frontend-facing entry points without naming a graphics API, so the

@@ -21,6 +21,9 @@ target_sources(gr2port PRIVATE
     ${PROJECT_SOURCE_DIR}/src/core/uwp_guest_arena.cpp
     ${GR2_D3D12_DIR}/detile.cpp
     ${GR2_D3D12_DIR}/detile_layout.cpp
+    ${GR2_D3D12_DIR}/meshes_d3d12.cpp
+    ${GR2_D3D12_DIR}/textures_d3d12.cpp
+    ${GR2_D3D12_DIR}/texture_layout.cpp
     ${GR2_D3D12_DIR}/allocator.cpp
     ${GR2_D3D12_DIR}/allocator.h
     ${GR2_D3D12_DIR}/arena.cpp
