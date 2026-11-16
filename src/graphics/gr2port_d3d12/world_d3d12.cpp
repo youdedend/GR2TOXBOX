@@ -214,6 +214,7 @@ bool WorldRenderer::Start(CoreTargets& targets) {
 }
 bool WorldRenderer::Record(CommandList& list, const Scene::Header& h, const u8* data, u64 address,
                            u32 slot) {
+    recorded_draws_ = 0;
     if (!CoreState::Header(h) || slot >= FramesInFlight || !Meshes::IndexBuffer())
         return false;
     auto& t = *t_;
@@ -309,6 +310,7 @@ void WorldRenderer::DrawList(CommandList& list, const Scene::Header& h, const u8
             list.SetDrawConstants(&root, sizeof(root));
         }
         list.list->DrawIndexedInstanced(cmd.index_count, 1, cmd.first_index, cmd.vertex_offset, 0);
+        ++recorded_draws_;
     }
 }
 void WorldRenderer::RecordSurfaces(CommandList& list, const Scene::Header& h, const u8* data,

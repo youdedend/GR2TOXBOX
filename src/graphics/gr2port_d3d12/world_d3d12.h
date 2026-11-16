@@ -54,6 +54,7 @@ class WorldRenderer {
     std::array<UploadBuffer, FramesInFlight> uploads_;
     std::array<ArenaAllocation, FramesInFlight> frame_;
     u64 skipped_ = 0;
+    u64 recorded_draws_ = 0;
     u64 current_scene_address_ = 0;
     PointLights point_lights_;
     Shadows shadows_;
@@ -68,6 +69,9 @@ public:
     void Stop();
     u64 Skipped() const {
         return skipped_;
+    }
+    u64 RecordedDraws() const {
+        return recorded_draws_;
     }
 };
 } // namespace Gr2Port::D3D12

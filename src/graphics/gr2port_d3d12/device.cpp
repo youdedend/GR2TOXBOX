@@ -363,7 +363,14 @@ bool CreateSwapchain(Device& device, const DeviceDesc& desc) {
         mode.width = mode_query.width;
         mode.height = mode_query.height;
         mode.composition_scale = mode_query.composition_scale;
-        plan = Uwp::Display::MakePlan(mode, desc.width, desc.height);
+        // The CoreWindow swapchain is a display surface, not the guest's render
+        // target: size it to the panel (bounded by the tested 4K cap). The guest
+        // scene target follows its own captured extent and is composed into this.
+        plan = Uwp::Display::MakePlan(mode);
+        if (plan.used_fallback)
+            Blackbox::Milestone("panel mode unavailable; using the safe 1920x1080 swapchain fallback");
+        if (plan.clamped_by_cap)
+            Blackbox::Milestone("panel exceeds 4K render cap; CoreWindow swapchain limited to 4K");
     }
     const u32 width = std::max<u32>(plan.width, 64);
     const u32 height = std::max<u32>(plan.height, 64);
@@ -470,6 +477,7 @@ bool CreateSwapchain(Device& device, const DeviceDesc& desc) {
             const HRESULT source_hr = swapchain2->SetSourceSize(width, height);
             if (FAILED(source_hr)) {
                 LOG_WARNING(Graphics, "D3D12: SetSourceSize failed: {}", HresultToString(source_hr));
+                Blackbox::Milestone("CoreWindow source-size hint failed; swapchain presentation continues with the default source");
             }
             const HRESULT t_hr = swapchain2->SetMatrixTransform(&matrix);
             LOG_INFO(Graphics, "CoreWindow scaler [{}, {}; {}, {}; {}, {}] source {}x{}",
@@ -482,11 +490,15 @@ bool CreateSwapchain(Device& device, const DeviceDesc& desc) {
                 LOG_WARNING(Graphics,
                             "D3D12: SetMatrixTransform failed: {}; the compositor will scale",
                             HresultToString(t_hr));
+                Blackbox::Milestone("inverse composition transform refused; compositor scaling fallback is active");
             } else if (plan.transform[0] != 1.0f) {
                 LOG_INFO(Graphics,
                          "D3D12: swapchain scale transform {:.3f} cancels the composition scale",
                          static_cast<double>(plan.transform[0]));
             }
+        } else {
+            LOG_WARNING(Graphics, "D3D12: swapchain does not expose IDXGISwapChain2; keeping compositor scaling");
+            Blackbox::Milestone("CoreWindow transform API unavailable; compositor scaling fallback is active");
         }
     }
 #endif
@@ -506,6 +518,9 @@ bool CreateSwapchain(Device& device, const DeviceDesc& desc) {
              device.swapchain_format == DXGI_FORMAT_R10G10B10A2_UNORM ? "R10G10B10A2" : "R8G8B8A8",
              device.hdr_enabled ? "HDR10" : "SDR",
              device.tearing_enabled ? ", tearing" : "");
+#if defined(GR2_XBOX_UWP)
+    Blackbox::Milestone("CoreWindow swapchain created at the panel-limited render resolution");
+#endif
     return true;
 }
 

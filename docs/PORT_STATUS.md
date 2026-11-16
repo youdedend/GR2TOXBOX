@@ -26,7 +26,7 @@ file is right.
 | D3D12 command ring, root signature, PSO cache | **Done** |
 | Direct3D 12 frame graph (passes, submits, presenter) | **5A + 5B core passes implemented; runtime unverified; 5C remains** |
 | HLSL shader port | **In progress — 96 of 184 engine stages + 1/1 detile; 97 DXC/Slang-verified** |
-| UWP shell (`IFrameworkView`, launcher, gamepad) | **In progress — first-frame launcher, controller focus/actions, explicit USB-root scan, picker-token restore, selected-root validation and in-process boot; hardware unverified** |
+| UWP shell (`IFrameworkView`, launcher, gamepad) | **In progress — controller launcher, explicit USB-root scan, selected-root boot, panel-limited CoreWindow swapchain and guest-geometry present milestone; pixels and hardware unverified** |
 | **UWP package builds at all** | **Yes — SDL3 replaced by an in-tree shim** |
 | Gamepad chord remapping | **Done, unit-tested** |
 | Audio backend for UWP | **Done — XAudio2 behind the shim** |

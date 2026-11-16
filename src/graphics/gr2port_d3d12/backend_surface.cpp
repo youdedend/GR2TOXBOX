@@ -80,6 +80,8 @@ struct Surface {
     D3D12::UiState::Slots retained;
     Scene::Header latest{};
     bool has_picture=false;
+    bool guest_geometry_pending=false;
+    bool guest_geometry_presented=false;
     bool attached = false;
     u64 seen = 0;
     u64 captured_packets = 0;
@@ -219,7 +221,11 @@ bool Tick() {
                     }
                 }
                 if(ui_ok)ui_ok=s.ui.Record(list,header,packet.data,packet.address);
-                if(ui_ok&&s.ui.HasPicture(header)){s.latest=header;s.has_picture=true;}
+                if(ui_ok&&s.ui.HasPicture(header)){
+                    s.latest=header;s.has_picture=true;
+                    if(!header.ui.only && s.world.RecordedDraws()>0)
+                        s.guest_geometry_pending=true;
+                }
             }
         }else SceneRing::Release(packet.slot);
         ++s.captured_packets;
@@ -248,6 +254,11 @@ bool Tick() {
     if(!presented||!drawn||!ui_ok) {s.ready=false;Blackbox::Milestone("UI/present/overlay failed; session stopped");return false;}
 #if defined(GR2_XBOX_UWP)
     if(s.frames==1) Blackbox::Milestone("first CoreWindow swapchain present succeeded");
+    if(s.guest_geometry_pending && !s.guest_geometry_presented) {
+        Blackbox::Milestone("first guest frame with valid indexed geometry reached CoreWindow Present; pixel output remains unverified");
+        s.guest_geometry_presented=true;
+        s.guest_geometry_pending=false;
+    }
 #endif
     return true;
 }
