@@ -24,7 +24,7 @@ struct PsInput {
 float4 main(PsInput input) : SV_Target {
     // The GLSL takes `position` in (-1, 1); fullscreen.vert.hlsl forwards the
     // same value, so the 0.5 * position + 0.5 is the same arithmetic.
-    const float2 texcoord = 0.5 * input.uv + 0.5;
+    const float2 texcoord = float2(0.5*input.uv.x+0.5,0.5-0.5*input.uv.y);
     const float3 picture = SampleTexWith(g_picture, SMP_LINEAR_CLAMP, texcoord).rgb;
     return float4(picture, 1.0);
 }

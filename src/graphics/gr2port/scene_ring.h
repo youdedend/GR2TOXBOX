@@ -44,6 +44,9 @@ struct Packet {
 /// Render thread: waits for a frame newer than seen, then takes the oldest kept frame, or else the
 /// newest, and frees the frames older than the one taken. False when none was left to take.
 bool Take(u64 seen, Packet& packet);
+/// Same ordering as Take, but returns immediately if no frame newer than seen is ready.
+/// One producer and one consumer; Attach requires both to be quiescent.
+bool TryTake(u64 seen, Packet& packet);
 
 /// Render thread: the GPU no longer reads slot.
 void Release(u32 slot);

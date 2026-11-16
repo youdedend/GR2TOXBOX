@@ -121,7 +121,8 @@ class ArenaSet {
 public:
     /// Creates every arena at the sizes the preset asks for. Called once the
     /// device, allocator and bindless heap exist.
-    bool Create(Device& device, Allocator& allocator, BindlessHeap& descriptors);
+    bool Create(Device& device, Allocator& allocator, BindlessHeap& descriptors,
+                std::span<const ArenaDesc> descriptions = {});
 
     void Destroy();
 

@@ -46,7 +46,19 @@ def check_file(path: pathlib.Path) -> list[str]:
     if re.search(r"\b(?:float|uint|int)[234]\(\s*-?\d+(?:\.\d+)?[fu]?\s*\)", text):
         problems.append("GLSL scalar-splat constructor: use explicit HLSL vector components")
 
-    blocks = CBUFFER_RE.findall(text)
+    # Shared root/draw blocks may live in transitive includes. Expand each header
+    # once (include guards), rather than hard-coding particular helper names.
+    seen = set()
+    def expand(source):
+        def include(match):
+            target = SHADER_ROOT / match.group(1)
+            if not target.is_file() or target in seen:
+                return ""
+            seen.add(target)
+            return expand(target.read_text())
+        return INCLUDE_RE.sub(include, source)
+    expanded = expand(text)
+    blocks = CBUFFER_RE.findall(expanded)
     registers: dict[str, str] = {}
     members: dict[str, str] = {}
     for name, register, body in blocks:
@@ -63,8 +75,8 @@ def check_file(path: pathlib.Path) -> list[str]:
                 )
             members[member] = name
 
-    uses_arena = any(word in text for word in ARENA_TYPES)
-    has_table = "cbuffer ArenaConstants" in text
+    uses_arena = any(word in expanded for word in ARENA_TYPES)
+    has_table = "cbuffer ArenaConstants" in expanded
     if uses_arena and not has_table:
         problems.append("reads the arena but declares no ArenaConstants block")
     if has_table and not uses_arena:

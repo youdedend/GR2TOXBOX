@@ -862,8 +862,8 @@ std::array<u32, 16> MeshElements(VAddr vertex_buffer) {
 // The size the scene draws at for the game's target size, which the upscaler makes smaller: the
 // width, the height and their inverses.
 std::array<float, 4> RenderSize(float width, float height) {
-    const vk::Extent2D render = Upscaler::RenderExtent(
-        {static_cast<u32>(std::lround(width)), static_cast<u32>(std::lround(height))});
+    const Upscaler::Extent render = Upscaler::RenderSize(
+        static_cast<u32>(std::lround(width)), static_cast<u32>(std::lround(height)));
     const float render_width = static_cast<float>(render.width);
     const float render_height = static_cast<float>(render.height);
     return {render_width, render_height, 1.0f / render_width, 1.0f / render_height};
@@ -3434,9 +3434,9 @@ void WriteMotionBlur(VAddr frame_graph, VAddr view, u8* packet) {
     const float scale = BlurScale(view);
     const auto game_size = Load<std::array<float, 4>>(targets + TargetsSize);
     const std::array<float, 4> size = RenderSize(game_size[0], game_size[1]);
-    const vk::Extent2D compressed =
-        Upscaler::RenderExtent({Load<u16>(targets + TargetsCompressedWidth),
-                                Load<u16>(targets + TargetsCompressedHeight)});
+    const Upscaler::Extent compressed =
+        Upscaler::RenderSize(Load<u16>(targets + TargetsCompressedWidth),
+                             Load<u16>(targets + TargetsCompressedHeight));
     Scene::MotionBlur blur{
         .velocity_scale = scale,
         .tile_velocity_scale = scale,

@@ -25,7 +25,7 @@ file is right.
 | HLSL SM 6.4 shader pipeline (`dxc`, fail-loud) | **Done** |
 | D3D12 command ring, root signature, PSO cache | **Done** |
 | Direct3D 12 frame graph (passes, submits, presenter) | **In progress** |
-| HLSL shader port | **In progress — 71 of 184 engine stages + 1/1 detile; 72 DXC/Slang-verified** |
+| HLSL shader port | **In progress — 96 of 184 engine stages + 1/1 detile; 97 DXC/Slang-verified** |
 | UWP shell (`IFrameworkView`, launcher, gamepad) | **In progress** |
 | **UWP package builds at all** | **Yes — SDL3 replaced by an in-tree shim** |
 | Gamepad chord remapping | **Done, unit-tested** |
@@ -176,12 +176,16 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
 
 ## What does not work yet
 
-1. **113 of 184 engine shaders remain.** Coverage is 71 engine counterparts
-   plus the separate 1/1 GCN detile kernel (72 stages). Batch 3 adds skinning,
-   soft-body simulation/writeback, light-grid/world-lines and branch/grass/leaf
-   simulation and shading, including leaf hull/domain/geometry and shadow
-   domain/geometry. Both Microsoft DXC and Slang pass all 72 stages locally.
-   Compilation is not GPU/runtime parity proof. See [Batch 3](SHADER_BATCH3.md).
+1. **88 of 184 engine shaders remain.** Coverage is 96 engine counterparts
+   plus the separate 1/1 GCN detile kernel (97 compiled stages). Slice 4A adds
+   all 25 `pfx/ui_*` stages: nine vertex, one stroke geometry, fifteen fragment.
+   The shared `common/ui_pfx.hlsli` keeps the arena/draw roots, encoded-address
+   decoding and non-uniform texture/sampler selection at SM 6.4. Microsoft DXC
+   passes 97/97 with `-T *_6_4 -HV 2021 -WX`; the independent Slang front-end
+   also passes all 97 locally. The global root remains 37 DWORDs: b0 = 20 bytes,
+   b1 <= 64 bytes, b2 = 16 bytes, twelve tables in spaces 100–111. These are
+   compilation/ABI checks, **not GPU/runtime parity proof**. Earlier shader work
+   is described in [Batch 3](SHADER_BATCH3.md).
 
 2. **The scene frame graph.** The real swapchain clear/ImGui presenter now exists
    in `backend_surface.cpp`: HWND/CoreWindow RTVs, barriers, ring submission,
@@ -189,17 +193,34 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
    uploads replace raw draw-data pointers. The game's pass order, scene resources,
    uploads and draw execution remain unimplemented. No hardware rendering or
    successful eboot progress has been demonstrated.
-3. **The D3D12 capture.** The scene capture's API-agnostic half is built and
-   running in the D3D12 job; what is missing is the renderer side of it, and
-   `src/graphics/gr2port_d3d12/backend_capture.cpp` now defines the twelve entry
-   points that were failing at link so the gap is a stated one rather than an
-   unresolved external: `Capture::{OnFrame,OnFrameEnd,OnParticleList,OnParticleSetup,Frames,ToggleCapture}`,
-   `Particles::QueueCurve`, `Meshes::{Install,Get}`, `Textures::{Install,Get,GetBySharp}`,
-   and the pipeline pair `WaitForPipelineBuilds` / `PipelineBuildProgress`.
-   `Meshes::Install` and `Textures::Install` answer false, which stops the
-   startup sequence before the renderer claims to have started, and prints one
-   line naming both. The vertex upload and the texture/descriptor path are the
-   work that turns those false into true.
+3. **The D3D12 capture consumer (Slice 4A).** All of the shared `capture.cpp`
+   now builds on D3D12 as well as Vulkan; its six real Capture entry points
+   replace the old backend stubs. `Upscaler::Extent` / `RenderSize(width,height)`
+   are API-neutral; Vulkan forwards to the unchanged `RenderExtent` API, D3D12
+   uses 1:1 dimensions pending FSR. A 120 MiB (five 24 MiB slots) CPU-mapped,
+   GPU-readable, read-only Scene Arena is attached during Surface creation with
+   an encoded `{arena,offset}` address, **not** a raw GPU VA. The presenter polls
+   `TryTake(seen,packet)` without waiting for a game frame, counts packets in
+   Blackbox milestones, and immediately releases them because Slice 4A submits
+   **no GPU reads** of their data. Slice 4B must hold consumed slots through GPU
+   fence completion when it adds actual UI draws.
+
+   `local_precheck.sh` compiles shared capture on both API paths, checks twenty
+   actual Capture/backend symbol definitions with a relocatable link (no duplicate
+   Capture definitions), and runs the production SceneRing in normal and
+   ASan/UBSan/leak-detection builds. Tests cover empty non-blocking polls, encoded
+   addresses/payload roundtrips, newest and kept-frame ordering, seen watermarks,
+   slot reservation/release, reattach and 20,000 concurrent kept packets. Attach
+   and teardown require capture producer/GPU quiescence, as documented by the ring.
+   Linux D3D12 syntax checks use SDK stubs; Windows/UWP compilation and packaging
+   are checked by Actions, not by those stubs.
+
+   Mesh/texture uploads and `ui_d3d12.cpp` are explicitly **deferred to Slice 4B**.
+   Mesh/texture installs still return false and stop game renderer startup;
+   prefetch is a no-op, cube lookup returns zero, and deformers return an empty
+   copy. `Photo::Read` remains false. No captured game scene/UI, eboot progress or
+   physical Xbox execution is claimed by Slice 4A. 3D world/character, deferred,
+   fog and particle pass execution remains later work.
 
 4. **ImGuiRelay.** ~~Resolved~~ — `backend_surface.cpp` and `imgui_relay.cpp`
    supply the frontend-facing entry points without naming a graphics API, so the

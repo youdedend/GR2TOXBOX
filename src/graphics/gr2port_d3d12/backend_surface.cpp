@@ -21,6 +21,8 @@
 #include "graphics/gr2port/backend.h"
 #include "graphics/gr2port/frame_stats.h"
 #include "graphics/gr2port/window.h"
+#include "graphics/gr2port/scene_ring.h"
+#include "graphics/gr2port_d3d12/arena.h"
 #include "graphics/gr2port_d3d12/presenter.h"
 #include "graphics/gr2port_d3d12/uwp/uwp_main.h"
 #include "graphics/gr2port_d3d12/imgui_gpu.h"
@@ -58,6 +60,25 @@ struct Surface {
     D3D12::RootSignature root;
     D3D12::BindlessHeap heap;
     D3D12::ImGuiGpu imgui;
+    // Destroy resources before their allocator (members destruct in reverse order).
+    D3D12::Allocator allocator;
+    D3D12::ArenaSet arenas;
+    bool attached = false;
+    u64 seen = 0;
+    u64 captured_packets = 0;
+    bool AttachScene() {
+        const D3D12::ArenaDesc desc{D3D12::ArenaKind::Scene,
+            SceneRing::Slots * SceneRing::SlotBytes(), false, true};
+        if (!allocator.Create(device) || !arenas.Create(device, allocator, heap, {&desc, 1}))
+            return false;
+        const auto storage = arenas.Allocate(desc.kind, desc.capacity);
+        if (!storage.cpu || storage.size != desc.capacity) return false;
+        // Serialized scene addresses are offset-low / arena-high, not GPU VAs.
+        const u64 address = (u64(storage.ref.arena) << 32) | storage.ref.offset;
+        SceneRing::Attach(storage.cpu, address);
+        attached = true;
+        return true;
+    }
     D3D12::ComPtr<ID3D12DescriptorHeap> rtvs;
     std::array<D3D12::ComPtr<ID3D12Resource>,D3D12::FramesInFlight> buffers;
     u64 frames=0;
@@ -74,7 +95,10 @@ struct Surface {
     ~Surface() {
         if(device.graphics_queue && device.timeline_fence)
             D3D12::WaitForFence(device,D3D12::SignalFence(device));
-        imgui.Destroy(); ring.Destroy(); heap.Destroy();
+        // Shutdown must follow game/capture producer quiescence, as on Vulkan.
+        if (attached) SceneRing::Attach(nullptr, 0);
+        imgui.Destroy(); arenas.Destroy(); allocator.Destroy();
+        ring.Destroy(); heap.Destroy();
         if(device.timeline_event) CloseHandle(device.timeline_event);
     }
 };
@@ -99,7 +123,7 @@ bool Initialize(void* core_window) {
     if(FAILED(next->device.device->CreateDescriptorHeap(&rtvs,IID_PPV_ARGS(next->rtvs.GetAddressOf()))) ||
        !next->Targets() || !next->ring.Create(next->device) ||
        !D3D12::CreateRootSignature(next->device,next->root) || !next->heap.Create(next->device) ||
-       !next->imgui.Create(next->device,next->root,next->heap)) return false;
+       !next->imgui.Create(next->device,next->root,next->heap) || !next->AttachScene()) return false;
     next->ready=true; surface=std::move(next);
     Blackbox::Milestone("swapchain, backbuffer RTVs, command ring and ImGui PSO ready");
     return true;
@@ -127,6 +151,21 @@ bool Tick() {
         Blackbox::Milestone("swapchain resize completed after GPU idle");
     }
     auto list=s.ring.BeginFrame(); if(!list.IsValid()) {s.ready=false;return false;}
+    SceneRing::Packet packet{};
+    if (SceneRing::TryTake(s.seen, packet)) {
+        s.seen = packet.frame;
+        ++s.captured_packets;
+        if (s.captured_packets == 1 || s.captured_packets % 600 == 0) {
+            char note[160];
+            std::snprintf(note, sizeof(note), "scene packets captured=%llu latest=%llu (not rendered yet)",
+                          static_cast<unsigned long long>(s.captured_packets),
+                          static_cast<unsigned long long>(s.seen));
+            Blackbox::Milestone(note);
+        }
+        // Slice 4A submits no GPU reads of this packet. It is safe to release now;
+        // Slice 4B must retain the slot until its scene submission fence completes.
+        SceneRing::Release(packet.slot);
+    }
     const auto index=d.swapchain->GetCurrentBackBufferIndex();
     auto rtv=s.rtvs->GetCPUDescriptorHandleForHeapStart(); rtv.ptr+=size_t(index)*d.rtv_descriptor_size;
     list.ToRenderTarget(s.buffers[index].Get(),D3D12_RESOURCE_STATE_PRESENT);

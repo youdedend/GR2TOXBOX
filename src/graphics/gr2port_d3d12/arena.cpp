@@ -53,11 +53,13 @@ constexpr const wchar_t* ArenaName(ArenaKind kind) {
 
 } // namespace
 
-bool ArenaSet::Create(Device& device, Allocator& allocator, BindlessHeap& descriptors) {
+bool ArenaSet::Create(Device& device, Allocator& allocator, BindlessHeap& descriptors,
+                      std::span<const ArenaDesc> descriptions) {
     device_ = &device;
     allocator_ = &allocator;
 
-    for (const ArenaDesc& desc : DefaultArenas) {
+    const auto arenas = descriptions.empty() ? std::span<const ArenaDesc>{DefaultArenas} : descriptions;
+    for (const ArenaDesc& desc : arenas) {
         const u32 index = KindIndex(desc.kind);
 
         // The arena is a single committed ByteAddressBuffer. On Xbox the UMA

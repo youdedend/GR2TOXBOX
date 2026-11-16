@@ -613,7 +613,10 @@ D3D12_UNITS=(
     "src/graphics/gr2port_d3d12/command.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/backend_surface.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/imgui_gpu.cpp|-D_WIN32"
-    "src/graphics/gr2port_d3d12/backend_capture.cpp|"
+    "src/graphics/gr2port_d3d12/backend_capture.cpp|-DGR2_RENDERER_D3D12=1"
+    "src/graphics/gr2port/capture.cpp|-DGR2_RENDERER_D3D12=1"
+    "src/graphics/gr2port/scene_ring.cpp|"
+    "src/graphics/gr2port_d3d12/arena.cpp|-D_WIN32"
     "src/graphics/gr2port_d3d12/imgui_relay.cpp|"
 )
 for entry in "${D3D12_UNITS[@]}"; do
@@ -628,7 +631,7 @@ for entry in "${D3D12_UNITS[@]}"; do
     # modules do (meshes.h -> device.h -> vulkan.hpp). Vulkan::Headers is linked on
     # every build, D3D12 included, so this matches the real compile.
     if ! "$CXX" "${CXXFLAGS[@]}" -Itools/ci/d3d12_stub -I"$DEPS_ROOT/sdl3/include" \
-            -I"$DEPS_ROOT/imgui" -I"$DEPS_ROOT/vulkan-headers/include" '-DIMGUI_USER_CONFIG="imgui/imgui_config.h"' $extra \
+            -I"$DEPS_ROOT/imgui" -I"$DEPS_ROOT/ext-boost" -I"$DEPS_ROOT/vulkan-headers/include" '-DIMGUI_USER_CONFIG="imgui/imgui_config.h"' $extra \
             -fsyntax-only "$file" 2>"$OUT/err"; then
         # Only the diagnostics that are not inside the vendored header count.
         grep -E 'error' "$OUT/err" | grep -v 'd3d12ma/' >"$OUT/ours" || true
@@ -670,31 +673,55 @@ D3D12_SYMBOLS=(
     "Gr2Port::Textures::Get(unsigned long)"
     "Gr2Port::Textures::GetBySharp(unsigned int const*, bool&)"
     "Gr2Port::Textures::Install(unsigned long, Xbyak::CodeGenerator&, unsigned long)"
+    "Gr2Port::Meshes::Prefetch(unsigned long)"
+    "Gr2Port::Textures::GetCube(unsigned long)"
+    "Gr2Port::Textures::Prefetch(unsigned long const*, unsigned int)"
+    "Gr2Port::Textures::PrefetchRecords(unsigned long const*, unsigned int)"
+    "Gr2Port::Upscaler::RenderSize(unsigned int, unsigned int)"
+    "Gr2Port::Deformers::Get(unsigned long, unsigned long, Gr2Port::Meshes::Mesh const&, unsigned long, unsigned long)"
     "Gr2Port::WaitForPipelineBuilds()"
     "Gr2Port::PipelineBuildProgress()"
 )
-if command -v nm >/dev/null 2>&1 &&
-        "$CXX" "${CXXFLAGS[@]}" -c -o "$OUT/backend_capture.o" \
-            -Itools/ci/d3d12_stub -I"$DEPS_ROOT/sdl3/include" -I"$DEPS_ROOT/imgui" \
-            -I"$DEPS_ROOT/vulkan-headers/include" \
-            src/graphics/gr2port_d3d12/backend_capture.cpp 2>"$OUT/err"; then
-    nm -C "$OUT/backend_capture.o" >"$OUT/syms"
-    missing_syms=0
-    for sym in "${D3D12_SYMBOLS[@]}"; do
-        if ! grep -qF " $sym" "$OUT/syms"; then
-            echo "  MISSING $sym"
-            missing_syms=$((missing_syms + 1))
+# Audit the real capture object plus its backend adapters, not removed stubs.
+# -r also rejects duplicate definitions. A failed object compile MUST fail here.
+if command -v nm >/dev/null 2>&1; then
+    objects_ok=1
+    for source in src/graphics/gr2port/capture.cpp src/graphics/gr2port_d3d12/backend_capture.cpp; do
+        object="$OUT/$(basename "$source" .cpp).o"
+        if ! "$CXX" "${CXXFLAGS[@]}" -DGR2_RENDERER_D3D12=1 -c -o "$object" \
+                -I"$DEPS_ROOT/ext-boost" -I"$DEPS_ROOT/vulkan-headers/include" "$source" 2>"$OUT/err"; then
+            echo "  FAIL capture link-contract object $source"; cat "$OUT/err"
+            failures=$((failures + 1)); objects_ok=0
         fi
     done
-    if [ "$missing_syms" -ne 0 ]; then
-        echo "  FAIL D3D12 backend symbols (${missing_syms} of ${#D3D12_SYMBOLS[@]} not defined)"
-        printf '%s\n' "the D3D12 backend does not define these at the linkage their declarations use:" \
-            "$(printf '  %s' "${D3D12_SYMBOLS[@]}")" >"$OUT/ours"
-        annotate_log "src/graphics/gr2port_d3d12/backend_capture.cpp" "$OUT/ours"
-        failures=$((failures + 1))
-    else
-        echo "  ok   D3D12 backend symbols (${#D3D12_SYMBOLS[@]} defined)"
+    if [ "$objects_ok" -eq 1 ]; then
+        if ! "$CXX" -r "$OUT/capture.o" "$OUT/backend_capture.o" -o "$OUT/capture-contract.o" 2>"$OUT/err"; then
+            echo "  FAIL duplicate capture definitions"; cat "$OUT/err"
+            failures=$((failures + 1))
+        else
+            nm -C --defined-only "$OUT/capture-contract.o" >"$OUT/syms"
+            missing_syms=0
+            for sym in "${D3D12_SYMBOLS[@]}"; do
+                if ! grep -qF " $sym" "$OUT/syms"; then
+                    echo "  MISSING $sym"; missing_syms=$((missing_syms + 1))
+                fi
+            done
+            if [ "$missing_syms" -ne 0 ]; then
+                echo "  FAIL capture link contract ($missing_syms missing)"
+                failures=$((failures + 1))
+            else
+                echo "  ok   shared capture/backend link contract (${#D3D12_SYMBOLS[@]} definitions; no duplicates)"
+            fi
+        fi
     fi
+fi
+# Preserve the Vulkan capture/header path as well (RenderExtent ABI unchanged).
+if ! "$CXX" "${CXXFLAGS[@]}" -I"$DEPS_ROOT/ext-boost" -I"$DEPS_ROOT/vulkan-headers/include" \
+        -fsyntax-only src/graphics/gr2port/capture.cpp 2>"$OUT/err"; then
+    echo "  FAIL Vulkan shared capture syntax"; cat "$OUT/err"
+    failures=$((failures + 1))
+else
+    echo "  ok   Vulkan shared capture syntax (unchanged RenderExtent API)"
 fi
 
 # The ported HLSL, structurally. This catches the mistakes that do not need a
@@ -707,7 +734,7 @@ if command -v python3 >/dev/null 2>&1; then
         annotate_log "src/graphics/gr2port_d3d12/shaders" "$OUT/err"
         failures=$((failures + 1))
     else
-        echo "  ok   HLSL structure ($(ls src/graphics/gr2port_d3d12/shaders/*.hlsl | wc -l) stages)"
+        echo "  ok   HLSL structure ($(find src/graphics/gr2port_d3d12/shaders -name '*.hlsl' | wc -l) stages)"
     fi
 fi
 
@@ -773,6 +800,30 @@ if [ -n "$DXC_BIN" ] && [ -x "$DXC_BIN" ] && [ -f src/graphics/gr2port_d3d12/sha
     fi
 else
     echo "  skip HLSL compile (no dxc; set DXC=/path/to/dxc to enable)"
+fi
+
+# An independent front-end, not a substitute for the real DXC gate above.
+# Explicit skip if not installed; local shader work must run this with --require.
+if ! python3 tools/shaders/check_hlsl_local.py; then
+    failures=$((failures + 1))
+fi
+
+if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then
+    for mode in host asan-ubsan; do
+        sanitize=()
+        if [ "$mode" = asan-ubsan ]; then
+            sanitize=(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fno-pie -no-pie)
+        fi
+        if "$CXX" "${CXXFLAGS[@]}" -O1 -g -pthread "${sanitize[@]}" \
+                src/tests/scene_ring_test.cpp src/graphics/gr2port/scene_ring.cpp \
+                -o "$OUT/scene-ring-$mode" 2>"$OUT/err" && \
+                ASAN_OPTIONS=detect_leaks=1 "$OUT/scene-ring-$mode"; then
+            echo "  ok   SceneRing $mode roundtrip/concurrent ordering test"
+        else
+            echo "  FAIL SceneRing $mode test"; cat "$OUT/err"
+            failures=$((failures + 1))
+        fi
+    done
 fi
 
 if [ "$syntax_only" -eq 0 ] && [ "$failures" -eq 0 ]; then

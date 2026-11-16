@@ -1,65 +1,20 @@
 // SPDX-FileCopyrightText: Copyright 2026 GR2toXBOX contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The scene-capture half of the D3D12 backend: the hook bodies the game's draw
-// thread calls, and the mesh/texture/particle handles it reads.
-//
-// The Vulkan versions of these live in capture.cpp, particles.cpp, meshes.cpp,
-// textures.cpp and pipeline.cpp, all of which name vk:: types throughout -- the
-// mesh capture copies into vk::Buffer, the texture capture reads GNF data into a
-// vk::Image, the pipeline capture builds vk::Pipeline. A D3D12 build therefore
-// compiles every API-agnostic module cleanly and then fails at *link* on these
-// names, which is exactly what it did.
-//
-// The declarations are not restated here. The modules that call these already
-// include capture.h / meshes.h / textures.h / particles.h / pipeline.h, so what is
-// missing is only a definition for each. That is what this file is.
-//
-// What is deliberately not done is pretending. These entry points are called from
-// the game's own draw thread every frame, and a stub that claimed to have captured
-// a scene would turn "not implemented yet" into a black screen with no line in the
-// log to explain it -- the failure mode this port keeps having to dig back out of.
-// So: the frame counter is real (it counts what actually reached the capture), the
-// capture is genuinely toggleable, and the handle lookups answer "nothing", which
-// is what makes the capture skip a draw rather than draw it wrong.
+// Honest link adapters for shared capture.cpp. Mesh/texture GPU storage and their
+// hooks remain unavailable until Slice 4B; the shared scene capture itself is real.
 
 #include <atomic>
 
 #include "common/logging/log.h"
-#include "graphics/gr2port/capture.h"
+#include "graphics/gr2port/deformers.h"
+#include "graphics/gr2port/upscaler.h"
 #include "graphics/gr2port/meshes.h"
 #include "graphics/gr2port/particles.h"
 #include "graphics/gr2port/pipeline.h"
 #include "graphics/gr2port/textures.h"
 
 namespace Gr2Port {
-
-namespace {
-
-/// The frames the game has started. Counted rather than inferred: it is the one
-/// number here that is a fact even when nothing is drawn, and the renderer reports
-/// it as the game's frame number.
-std::atomic<u64> g_frames{0};
-
-/// Whether the capture is on. ToggleCapture flips it, and the hook bodies respect
-/// it, so the game can run with the renderer's work stopped even here.
-std::atomic<bool> g_capture_enabled{true};
-
-/// Whether the one explanation of the empty capture has been written. These fire
-/// every frame on the draw thread; a log line each would bury everything else.
-std::atomic<bool> g_said_no_capture{false};
-
-void NoteEmptyCaptureOnce() {
-    if (g_said_no_capture.exchange(true, std::memory_order_relaxed)) {
-        return;
-    }
-    LOG_INFO(Graphics,
-             "GR2port/D3D12: the scene capture records nothing yet, so the game's frames are "
-             "drawn without a scene. The hooks are installed and firing; the scene ring and the "
-             "passes that consume it arrive with the draw path.");
-}
-
-} // namespace
 
 // ---------------------------------------------------------------------------
 // Pipeline builds
@@ -77,49 +32,13 @@ BuildProgress PipelineBuildProgress() {
     return BuildProgress{};
 }
 
-// ---------------------------------------------------------------------------
-// The scene capture
-// ---------------------------------------------------------------------------
+namespace Upscaler {
+Extent RenderSize(u32 width, u32 height) { return {width, height}; }
+} // namespace Upscaler
 
-namespace Capture {
-
-void OnFrame(VAddr frame_graph, VAddr view) {
-    (void)frame_graph;
-    (void)view;
-    g_frames.fetch_add(1, std::memory_order_relaxed);
-    if (g_capture_enabled.load(std::memory_order_relaxed)) {
-        NoteEmptyCaptureOnce();
-    }
-}
-
-void OnParticleSetup(VAddr fx) {
-    (void)fx;
-}
-
-void OnParticleList(VAddr fx) {
-    (void)fx;
-}
-
-void OnFrameEnd() {}
-
-u64 Frames() {
-    return g_frames.load(std::memory_order_relaxed);
-}
-
-void ToggleCapture() {
-    // atomic<bool> has no fetch_xor, so this is a load, a compare and a store. Only
-    // the UI thread calls it, so the non-atomic window does not matter.
-    const bool enabled = !g_capture_enabled.load(std::memory_order_relaxed);
-    g_capture_enabled.store(enabled, std::memory_order_relaxed);
-    LOG_INFO(Graphics, "GR2port/D3D12: the scene capture is now {}", enabled ? "on" : "off");
-    if (enabled) {
-        // Re-arm the note, so turning the capture back on says again that it is not
-        // recording rather than leaving the previous run's line to stand.
-        g_said_no_capture.store(false, std::memory_order_relaxed);
-    }
-}
-
-} // namespace Capture
+namespace Deformers {
+Copy Get(VAddr, VAddr, const Meshes::Mesh&, u64, u64) { return {}; }
+} // namespace Deformers
 
 // ---------------------------------------------------------------------------
 // Meshes
@@ -139,6 +58,8 @@ void ToggleCapture() {
 // fatal to the renderer's start and does not go on to claim it started.
 
 namespace Meshes {
+
+void Prefetch(VAddr) {}
 
 const Mesh* Get(VAddr shape) {
     // Nothing is captured, so no shape has a mesh. Nullptr is what the caller tests
@@ -172,6 +93,10 @@ bool Install(VAddr module_base, Xbyak::CodeGenerator& c, size_t capacity) {
 // ---------------------------------------------------------------------------
 
 namespace Textures {
+
+u32 GetCube(VAddr) { return 0; }
+void Prefetch(const VAddr*, u32) {}
+void PrefetchRecords(const VAddr*, u32) {}
 
 u32 Get(VAddr texture) {
     // 0 is the capture's "no texture" handle; a draw that names it is skipped

@@ -995,4 +995,9 @@ vk::ImageView OutputView() {
     return g_output.view;
 }
 
+Extent RenderSize(u32 width, u32 height) {
+    const auto extent = RenderExtent({width, height});
+    return {extent.width, extent.height};
+}
+
 } // namespace Gr2Port::Upscaler

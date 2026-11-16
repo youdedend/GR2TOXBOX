@@ -30,9 +30,9 @@ void main(triangle TextIO input[3], inout TriangleStream<TextIO> stream) {
     float2 anchor=0.5*(low+high);
     if(narrow&&(flags&2u)!=0u) {
         uint2 words=b.Load2(draw.offset+8u);
-        ArenaRef constants_ref=ArenaMake(words.x,words.y);
+        ArenaRef constants_ref=ArenaMake(words.y,words.x);
         float4 translation=ArenaLoadFloat4(ArenaAdd(constants_ref,48u),g_arena);
-        if(abs(translation.w)>1.0e-6) anchor=translation.xy/translation.w;
+        if(abs(translation.w)>1.0e-6) anchor=float2(translation.x,-translation.y)/translation.w;
     }
     for(uint emit_index=0;emit_index<3;++emit_index) {
         TextIO o=input[emit_index];

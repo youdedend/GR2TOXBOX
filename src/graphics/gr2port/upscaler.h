@@ -5,7 +5,10 @@
 
 #include <vector>
 
+#include "common/types.h"
+#if !defined(GR2_RENDERER_D3D12)
 #include "graphics/gr2port/device.h"
+#endif
 
 namespace Gr2Port {
 class Memory;
@@ -17,6 +20,14 @@ class Memory;
 // velocity into the picture at the output size.
 namespace Gr2Port::Upscaler {
 
+/// API-neutral render dimensions shared by both capture backends.
+struct Extent {
+    u32 width = 0;
+    u32 height = 0;
+};
+Extent RenderSize(u32 width, u32 height);
+
+#if !defined(GR2_RENDERER_D3D12)
 /// Sub-pixel offset of the frame's scene draws, in render pixels: +x right, +y down.
 struct Offset {
     float x = 0.0f;
@@ -87,5 +98,7 @@ vk::Viewport SceneViewport(vk::Extent2D extent, bool jittered = true);
 void Record(vk::CommandBuffer cmd);
 
 vk::ImageView OutputView();
+
+#endif // !GR2_RENDERER_D3D12
 
 } // namespace Gr2Port::Upscaler

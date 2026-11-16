@@ -64,6 +64,23 @@ class PortTools(unittest.TestCase):
             path.write_text('float4 main() : SV_Target { return float4(0.0, 0.0, 0.0, 0.0); }')
             self.assertEqual(checker.check_file(path), [])
 
+    def test_hlsl_transitive_root_blocks(self):
+        checker = module('hlsl_structure', ROOT / 'tools/shaders/check_hlsl_structure.py')
+        with tempfile.TemporaryDirectory(prefix='gr2-hlsl-') as tmp:
+            root = Path(tmp)
+            checker.SHADER_ROOT = root
+            (root / 'roots.hlsli').write_text(
+                'cbuffer ArenaConstants:register(b0) {uint table;};\n')
+            (root / 'layout.hlsli').write_text('#include "roots.hlsli"\n')
+            stage = root / 'stage.vert.hlsl'
+            stage.write_text('#include "layout.hlsli"\nArenaRef ref;\n')
+            self.assertEqual(checker.check_file(stage), [])
+            stage.write_text('#include "layout.hlsli"\nArenaRef ref;\n'
+                             'cbuffer Duplicate:register(b0) {uint other;};\n')
+            self.assertTrue(any('both bind b0' in p for p in checker.check_file(stage)))
+            stage.write_text('ArenaRef ref;\n')
+            self.assertTrue(any('no ArenaConstants' in p for p in checker.check_file(stage)))
+
     def test_map_aslr_and_other_modules(self):
         script = module('symbolicate', ROOT / 'tools/symbolicate_crash.py')
         text = '''Preferred load address is 0000000140000000
