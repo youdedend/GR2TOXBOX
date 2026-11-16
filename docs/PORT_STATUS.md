@@ -25,7 +25,7 @@ file is right.
 | HLSL SM 6.4 shader pipeline (`dxc`, fail-loud) | **Done** |
 | D3D12 command ring, root signature, PSO cache | **Done** |
 | Direct3D 12 frame graph (passes, submits, presenter) | **In progress** |
-| HLSL shader port | **In progress — 31 of 184 stages; 29 `dxc`-verified, 2 newly written** |
+| HLSL shader port | **In progress — 53 of 184 engine stages + 1/1 detile; 54 DXC/Slang-verified** |
 | UWP shell (`IFrameworkView`, launcher, gamepad) | **In progress** |
 | **UWP package builds at all** | **Yes — SDL3 replaced by an in-tree shim** |
 | Gamepad chord remapping | **Done, unit-tested** |
@@ -163,11 +163,14 @@ SDL calls GR2port makes, put on the include path **only** when `GR2_XBOX_UWP=ON`
 
 ## What does not work yet
 
-1. **184 − 24 shaders.** `python3 tools/shaders/check_shader_coverage.py`
-   prints the live number. Remaining stages are mostly the `pfx/` particle
-   family, the world-surface variants, the geometry shaders (`contour.geom`,
-   `ui_stroke.geom`, `ui_text.geom`), the tessellation pair
-   (`leaf.tesc`/`leaf.tese` → hull/domain) and the GCN detiling compute shader.
+1. **131 of 184 engine shaders remain.** `python3 tools/shaders/check_shader_coverage.py`
+   reports 53 engine counterparts plus the separate 1/1 GCN detile kernel.
+   The latest 14-stage batch adds world/alpha surfaces (including layered/gem),
+   character depth, movie screens, half-resolution particles, velocity,
+   motion-blur triangle/tile/neighbor, SSAO depth/history, active emitters and
+   both HUD text geometry variants. Compilation is not GPU/runtime parity proof.
+   See [the batch contract](SHADER_BATCH2.md), especially raw scratch outputs.
+
 2. **The frame graph.** `presenter.*` and `renderer.*` are not written: the pass
    order, render-target setup and the presenter's CoreWindow path are next.
    `command.*` and `pipeline.*` now exist, so this is sequencing rather than

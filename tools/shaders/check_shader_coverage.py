@@ -68,8 +68,12 @@ def main() -> int:
         expected = HLSL_DIR / expected_hlsl(name)
         (ported if expected.exists() else missing).append(name)
 
-    host_missing = [p.name for p in host_shaders()
-                    if not (HLSL_DIR / "host" / (p.stem + ".comp.hlsl")).exists()]
+    # tiling.comp is the GCN detiling program, deliberately named detile on D3D12.
+    def host_counterpart(path: Path) -> Path:
+        if path.name == "tiling.comp":
+            return HLSL_DIR / "detile.comp.hlsl"
+        return HLSL_DIR / "host" / (path.stem + ".comp.hlsl")
+    host_missing = [p.name for p in host_shaders() if not host_counterpart(p).exists()]
 
     total = len(upstream)
     print(f"upstream GLSL shaders: {total}")

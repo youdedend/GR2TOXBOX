@@ -99,8 +99,10 @@ struct Material {
 };
 
 // Material flags used by the world shaders (scene.glsl).
-static const uint MaterialGem = 1u << 0;
-static const uint MaterialAlpha = 1u << 1;
+static const uint MaterialLayered = 1u;
+static const uint MaterialGradation = 2u;
+static const uint MaterialLayers = 4u;
+static const uint MaterialGem = 8u;
 
 // sizeof(Draw) in bytes. A macro because HLSL has no sizeof usable in the
 // constant expression the arena arithmetic needs. Computed from the field list

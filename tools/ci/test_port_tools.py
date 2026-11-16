@@ -82,6 +82,28 @@ frame[02] rip=0x0000000100000000 JIT/guest-or-leaf
         self.assertNotIn('=>', resolved[3])
         with self.assertRaises(ValueError): script.load_map('empty')
 
+    def test_batch2_scene_and_stage_contracts(self):
+        shaders = ROOT / 'src/graphics/gr2port_d3d12/shaders'
+        common = (shaders / 'common/batch2_scene.hlsli').read_text()
+        # Scalar arrays are std430 packed, not cbuffer-spaced; maps begin at 320.
+        for fragment in ['v.normal_scale[0] = asfloat(buffer.Load(ref.offset + 192u))',
+                         'v.normal_scale[3] = asfloat(buffer.Load(ref.offset + 204u))',
+                         'v.color_map[0] = buffer.Load(ref.offset + 320u)',
+                         'v.normal_map[0] = buffer.Load(ref.offset + 336u)']:
+            self.assertIn(fragment, common)
+        scene = (shaders / 'common/scene.hlsli').read_text()
+        for name, value in [('Layered',1),('Gradation',2),('Layers',4),('Gem',8)]:
+            self.assertIn(f'Material{name} = {value}u;', scene)
+        # All world stages share byte-identical b1 roots and integer interpolation.
+        import re
+        vertex = (shaders / 'world.vert.hlsl').read_text()
+        pixel = (shaders / 'common/world_surface.hlsli').read_text()
+        root = r'cbuffer WorldRoot : register\(b1\) \{(.*?)\};'
+        self.assertEqual(re.search(root, vertex, re.S)[1], re.search(root, pixel, re.S)[1])
+        self.assertIn('nointerpolation uint draw_index : TEXCOORD5', vertex)
+        self.assertIn('nointerpolation uint draw_index : TEXCOORD5', pixel)
+        self.assertIn('GetDimensions(uint(mip), w, h, levels)', common)
+
     def test_detile_shader_address_functions_and_host_guards(self):
         # Compile the actual HLSL address arithmetic as portable C++, not a
         # second implementation of it. Test analytic microtile mappings and
@@ -107,6 +129,18 @@ uint firstbithigh(uint x) { return 31u - std::countl_zero(x); }
 DetileConstants p;
 ''' + defines + '\n' + code + '''
 int main() {
+    using namespace ShaderBatch;
+    for (uint width : {1u,15u,16u,17u,64u,1920u,16384u}) {
+        auto footprint=Rgba32Scratch({width,3});
+        assert(footprint.row_pitch%256==0);
+        assert(footprint.row_pitch>=width*16);
+        assert(footprint.bytes==std::uint64_t(footprint.row_pitch)*3);
+        assert(footprint.row_pitch-width*16<256);
+    }
+    assert(Rgba32Scratch({0,3}).bytes==0);
+    assert(Rgba32Scratch({1,0}).bytes==0);
+    assert(Rgba32Scratch({16385,1}).bytes==0);
+    assert(Rgba32Scratch({1,16385}).bytes==0);
     DetileTextures textures{1,2,0,0};
     for (uint bytes : {1u,2u,4u,8u,12u,16u}) {
         p = {16,16,1,256,bytes,1,1,1,2,0,1,1,2,256,1,0};

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 GR2toXBOX contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// world.vert -> world VS_6_6.
+// world.vert -> world VS_6_4.
 //
 // Direct port of src/graphics/gr2port/shaders/world.vert: the game's G2_BG_Main
 // vertex programs without their velocity — the view-space frame, the parallax
@@ -27,9 +27,16 @@ cbuffer ArenaConstants : register(b0) {
     ArenaTable g_arena;
 };
 
-cbuffer SceneRoot : register(b1) {
-    SceneConstants g_scene;
+cbuffer WorldRoot : register(b1) {
+    uint2 scene_draws_words;
+    uint2 scene_materials_words;
+    uint2 scene_layers_words;
+    uint base_instance; uint root_padding;
 };
+#define scene_draws ArenaMake(scene_draws_words.x, scene_draws_words.y)
+#define scene_materials ArenaMake(scene_materials_words.x, scene_materials_words.y)
+#define scene_layers ArenaMake(scene_layers_words.x, scene_layers_words.y)
+static SceneConstants g_scene;
 
 // Attributes, at the same locations as the GLSL so the pixel shaders port
 // without renumbering.
@@ -42,10 +49,13 @@ struct VsOutput {
     float4 texcoord : TEXCOORD2;
     float4 vertex_color : TEXCOORD3;
     float3 gradation : TEXCOORD4;
-    uint draw_index : TEXCOORD5;
+    nointerpolation uint draw_index : TEXCOORD5;
 };
 
 VsOutput main(uint vertex_index : SV_VertexID) {
+    g_scene.draws = scene_draws;
+    g_scene.materials = scene_materials;
+    g_scene.base_instance = base_instance;
     VsOutput output;
 
     // gl_BaseInstance: the draw index for this instance.
