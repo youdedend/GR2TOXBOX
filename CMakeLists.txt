@@ -1312,21 +1312,44 @@ endif()
 
 if(NOT ENABLE_TESTS)
 
-add_executable(gr2port
-    ${AUDIO_CORE}
-    ${IMGUI}
-    ${INPUT}
-    ${COMMON}
-    ${CORE}
-    ${GRAPHICS}
-    ${EMULATOR}
-    ${SHADNET}
-    src/main.cpp
-    src/GR2port.cpp
-    src/GR2port.h
-    src/sdl_window.h
-    src/sdl_window.cpp
-)
+# The desktop shell owns main(); a packaged UWP app is started by the app model
+# through wWinMainCRTStartup and the framework-view entry point in uwp_main.cpp.
+# Keep the .def on the executable so the app model can resolve its activation
+# factory when the manifest names GR2port.App.
+if (GR2_XBOX_UWP)
+    set(GR2PORT_STARTUP_SOURCE src/graphics/gr2port_d3d12/uwp/gr2port.def)
+    add_executable(gr2port WIN32
+        ${AUDIO_CORE}
+        ${IMGUI}
+        ${INPUT}
+        ${COMMON}
+        ${CORE}
+        ${GRAPHICS}
+        ${EMULATOR}
+        ${SHADNET}
+        ${GR2PORT_STARTUP_SOURCE}
+        src/GR2port.cpp
+        src/GR2port.h
+        src/sdl_window.h
+        src/sdl_window.cpp
+    )
+else()
+    add_executable(gr2port
+        ${AUDIO_CORE}
+        ${IMGUI}
+        ${INPUT}
+        ${COMMON}
+        ${CORE}
+        ${GRAPHICS}
+        ${EMULATOR}
+        ${SHADNET}
+        src/main.cpp
+        src/GR2port.cpp
+        src/GR2port.h
+        src/sdl_window.h
+        src/sdl_window.cpp
+    )
+endif()
 
 create_target_directory_groups(gr2port)
 

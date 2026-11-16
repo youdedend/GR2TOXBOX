@@ -424,6 +424,29 @@ jobs:
             exit 1
           }
 
+      - name: Verify UWP activation export and WINDOWS subsystem
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem build-uwp -Filter 'GR2port.exe' -File -Recurse |
+            Select-Object -First 1
+          if (-not $exe) { throw 'The UWP executable was not produced.' }
+          $dumpbin = (Get-Command dumpbin.exe -ErrorAction Stop).Source
+
+          $exports = & $dumpbin /nologo /exports $exe.FullName 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "dumpbin /exports failed:`n$exports" }
+          if ($exports -notmatch '(?im)\bDllGetActivationFactory\b') {
+            throw "GR2port.App activation export DllGetActivationFactory is missing:`n$exports"
+          }
+          Write-Host 'Verified exported DllGetActivationFactory for GR2port.App.'
+
+          $headers = & $dumpbin /nologo /headers $exe.FullName 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "dumpbin /headers failed:`n$headers" }
+          if ($headers -notmatch '(?im)^\s*2\s+subsystem\s+\(Windows GUI\)\s*$') {
+            throw "GR2port.exe must use the WINDOWS (GUI) subsystem:`n$headers"
+          }
+          Write-Host 'Verified GR2port.exe uses the WINDOWS (GUI) subsystem.'
+
       - name: Upload UWP build log
         if: always()
         uses: actions/upload-artifact@v4

@@ -2,6 +2,11 @@
 // SPDX-FileCopyrightText: Copyright 2026 GR2port
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+// This is the desktop-only shell. UWP has no C/C++ main entry point; keeping the
+// guard around the entire translation unit prevents its command-line startup
+// path (including GameCheck) from being compiled into an Xbox target.
+#if !defined(GR2_XBOX_UWP)
+
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
@@ -265,3 +270,5 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
+
+#endif // !GR2_XBOX_UWP

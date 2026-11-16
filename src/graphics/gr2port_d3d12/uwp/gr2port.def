@@ -1,0 +1,7 @@
+; SPDX-FileCopyrightText: Copyright 2026 GR2toXBOX contributors
+; SPDX-License-Identifier: GPL-2.0-or-later
+;
+; The UWP app manifest activates the runtime class GR2port.App. Export the
+; framework activation entry point from the executable for the app model.
+EXPORTS
+    DllGetActivationFactory
