@@ -27,6 +27,7 @@
 #include "graphics/gr2port_d3d12/uwp/uwp_main.h"
 
 #include <string>
+#include <string_view>
 
 #if defined(GR2_XBOX_UWP)
 
@@ -118,7 +119,34 @@ struct GameViewSource : winrt::implements<GameViewSource,
     }
 };
 
+// The app-model entry point in Package.appxmanifest is GR2port.App. Its
+// activation factory returns the same framework-view source used by wWinMain.
+struct AppActivationFactory : winrt::implements<
+                                 AppActivationFactory,
+                                 winrt::Windows::Foundation::IActivationFactory> {
+    winrt::Windows::Foundation::IInspectable ActivateInstance() {
+        return winrt::make<GameViewSource>();
+    }
+};
+
 } // namespace
+
+// This name is aliased by gr2port.def to the app-model export. Keep the runtime
+// class check explicit so unrelated activations are not claimed by this module.
+extern "C" std::int32_t __stdcall WINRT_GetActivationFactory(void* classId,
+                                                              void** factory) noexcept try {
+    if (!factory)
+        return static_cast<std::int32_t>(0x80004003L); // E_POINTER
+    *factory = nullptr;
+    const std::wstring_view name{*reinterpret_cast<winrt::hstring*>(&classId)};
+    if (name != L"GR2port.App")
+        return winrt::hresult_class_not_available(name).to_abi();
+    auto activation = winrt::make<AppActivationFactory>();
+    *factory = winrt::detach_abi(activation);
+    return 0;
+} catch (...) {
+    return winrt::to_hresult();
+}
 
 /// The application's entry point. On a UWP app the linker resolves /ENTRY to the
 /// app model's stub, which calls this.
