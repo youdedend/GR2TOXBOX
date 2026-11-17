@@ -567,8 +567,15 @@ s32 MemoryManager::PoolCommit(VAddr virtual_addr, u64 size, MemoryProt prot, s32
     }
 
     if (pool_budget <= size) {
-        // If there isn't enough pooled memory to perform the mapping, return ENOMEM
-        LOG_ERROR(Kernel_Vmm, "Not enough pooled memory to perform mapping");
+        // The existing page-in path is not wired to guest demand faults, so
+        // evicting a live mapping here would turn its next access into an
+        // unrecoverable fault. Stop explicitly rather than silently skipping
+        // the pager or claiming that eviction succeeded.
+        LOG_ERROR(Kernel_Vmm,
+                  "Guest pager eviction stopped at PoolCommit: demand-fault page-in is not wired, "
+                  "so an evicted guest mapping could not be restored; refusing commit of {} bytes "
+                  "with {} pooled bytes available",
+                  size, pool_budget);
         return ORBIS_KERNEL_ERROR_ENOMEM;
     } else {
         // Track how much pooled memory this commit will take
