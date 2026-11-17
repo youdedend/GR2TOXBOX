@@ -566,6 +566,26 @@ s32 MemoryManager::PoolCommit(VAddr virtual_addr, u64 size, MemoryProt prot, s32
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
 
+#if defined(GR2_XBOX_UWP)
+    // Keep a small reserve for the renderer, runtime, and kernel bookkeeping.
+    // Refuse a pool commit before the mapping reaches the hard commitment-limit
+    // failure path, and report the requested and currently available memory.
+    constexpr u64 kCommitHeadroomFloor = 128_MB;
+    const u64 app_limit = Core::Xbox::AppMemoryUsageLimit();
+    if (app_limit != 0) {
+        const u64 app_usage = Core::Xbox::AppMemoryUsage();
+        const u64 available = app_limit > app_usage ? app_limit - app_usage : 0;
+        if (available < size || available - size < kCommitHeadroomFloor) {
+            LOG_ERROR(Kernel_Vmm,
+                      "There is not enough Xbox memory headroom for this commit: {} MiB required "
+                      "including the 128 MiB safety reserve, {} MiB available; refusing commit",
+                      (size + kCommitHeadroomFloor + 1_MB - 1) / 1_MB,
+                      available / 1_MB);
+            return ORBIS_KERNEL_ERROR_ENOMEM;
+        }
+    }
+#endif
+
     if (pool_budget <= size) {
         // The existing page-in path is not wired to guest demand faults, so
         // evicting a live mapping here would turn its next access into an
