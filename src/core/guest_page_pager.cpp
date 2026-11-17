@@ -2,10 +2,34 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "core/guest_page_pager.h"
 
+#include <map>
 #include <utility>
 
 namespace Core::Xbox {
 namespace {
+
+// Adapted from Cosmo/gow3_xbox xbox/platform/guest_swap.inc and its KytyPS5
+// page records. Keep virtual-page state separate from physical-page state so
+// aliases share residency, protection, pinning, and integrity metadata.
+struct GuestPageRecord {
+    std::uint64_t address{};
+    std::uint64_t physical_offset{};
+    std::uint64_t last_touch{};
+    std::uint32_t protection{};
+    bool mapped{};
+    bool executable{};
+    bool locked{};
+    bool evicted{};
+};
+
+struct PhysicalPageRecord {
+    std::uint64_t owner_address{};
+    std::uint64_t hash{};
+    std::uint32_t references{};
+    bool pinned{};
+    bool hash_valid{};
+    bool on_disk{};
+};
 
 class UwpGuestPagePager final : public GuestPagePager {
 public:
@@ -35,6 +59,11 @@ private:
     // alias, created and mapped by AddressSpace exactly as before.
     std::uintptr_t section_{};
     void* alias_{};
+    // The page and physical records mirror the upstream separation; later steps
+    // connect their transitions to the existing AddressSpace mappings.
+    std::map<std::uint64_t, GuestPageRecord> pages_;
+    std::map<std::uint64_t, PhysicalPageRecord> physical_pages_;
+    std::uint64_t age_clock_{};
 };
 
 } // namespace
