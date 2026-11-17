@@ -295,6 +295,10 @@ struct AddressSpace::Impl {
             WinCompat::MapViewOfFile3Compat(backing_handle, process, backing_base, 0, BackingSize,
                                   MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0);
         ASSERT_MSG(ret == backing_base, "{}", Common::GetLastErrorMsg());
+#if defined(GR2_XBOX_UWP)
+        guest_page_pager = Core::Xbox::CreateUwpGuestPagePager(
+            reinterpret_cast<std::uintptr_t>(backing_handle), backing_base);
+#endif
     }
 
     ~Impl() {
@@ -798,6 +802,9 @@ struct AddressSpace::Impl {
     std::mutex mutex;
     HANDLE process{};
     HANDLE backing_handle{};
+#if defined(GR2_XBOX_UWP)
+    std::unique_ptr<Core::Xbox::GuestPagePager> guest_page_pager;
+#endif
     u8* backing_base{};
     u8* virtual_base{};
     u8* system_managed_base{};
@@ -1146,6 +1153,12 @@ void AddressSpace::Protect(VAddr virtual_addr, u64 size, MemoryPermission perms)
         Core::Wx::FlushInstructionCacheRange(reinterpret_cast<void*>(virtual_addr), size);
     }
 }
+
+#if defined(GR2_XBOX_UWP)
+Core::Xbox::GuestPagePager& AddressSpace::GuestPager() noexcept {
+    return *impl->guest_page_pager;
+}
+#endif
 
 bool AddressSpace::IsGuestCodeMapping(VAddr virtual_addr, u64 size) {
 #if defined(_WIN32) && defined(GR2_XBOX_UWP)

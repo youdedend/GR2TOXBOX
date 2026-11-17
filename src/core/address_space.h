@@ -10,6 +10,9 @@
 #include "common/enum.h"
 #include "common/multi_level_page_table.h"
 #include "common/types.h"
+#if defined(GR2_XBOX_UWP)
+#include "core/guest_page_pager.h"
+#endif
 
 namespace Core {
 
@@ -97,6 +100,13 @@ public:
 
     /// Protects requested region.
     void Protect(VAddr virtual_addr, u64 size, MemoryPermission perms);
+
+#if defined(GR2_XBOX_UWP)
+    /// Explicit pager-operation boundary for the mapped sparse LocalState section.
+    /// The current implementation refuses eviction, page-in, and pager protection;
+    /// normal AddressSpace mappings/protection continue through the existing path.
+    [[nodiscard]] Xbox::GuestPagePager& GuestPager() noexcept;
+#endif
 
     /// True when the complete range is a mapped guest-code region whose backing
     /// alias is managed by the strict-W^X transition path.

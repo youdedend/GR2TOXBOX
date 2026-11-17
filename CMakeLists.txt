@@ -1190,6 +1190,8 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/tls.h
          src/core/uwp_wx.cpp
          src/core/uwp_wx.h
+         src/core/guest_page_pager.cpp
+         src/core/guest_page_pager.h
          src/core/uwp_memory.cpp
          src/core/uwp_memory.h
          src/core/uwp_guest_arena.cpp
@@ -1687,6 +1689,14 @@ target_include_directories(xbox_uwp_guest_memory_selftest PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+add_executable(xbox_guest_page_pager_selftest
+    src/tests/guest_page_pager_test.cpp
+    src/core/guest_page_pager.cpp
+)
+target_include_directories(xbox_guest_page_pager_selftest PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
 add_executable(xbox_chords_selftest
     src/tests/xbox_chords_test.cpp
     src/tests/selftest_log.cpp
@@ -1704,5 +1714,6 @@ include(CTest)
 if (BUILD_TESTING)
     add_test(NAME xbox_memory_budget COMMAND xbox_memory_budget_selftest)
     add_test(NAME xbox_uwp_guest_memory COMMAND xbox_uwp_guest_memory_selftest)
+    add_test(NAME xbox_guest_page_pager COMMAND xbox_guest_page_pager_selftest)
     add_test(NAME xbox_chords COMMAND xbox_chords_selftest)
 endif()
