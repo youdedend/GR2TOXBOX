@@ -93,6 +93,9 @@ inline constexpr u64 SeriesSCeilingBytes = 4600_MB;
 /// The section's maximum permits RW and RX views; callers must never map a view
 /// writable and executable, and must close the returned section handle.
 [[nodiscard]] std::uintptr_t CreateGuestBackingSection(u64 size) noexcept;
+/// Creates a sparse LocalState file used for guest-page swap slots. The caller
+/// transfers the returned handle to the pager, which closes it on destruction.
+[[nodiscard]] std::uintptr_t CreateGuestSwapFile() noexcept;
 
 /// Effective guest memory ceiling: GuestMemoryCeilingBytes on a console, and
 /// the upstream PS4 Pro devkit figure on desktop (so PC behaviour is

@@ -201,6 +201,33 @@ std::uintptr_t CreateGuestBackingSection(u64 size) noexcept {
 #endif
 }
 
+std::uintptr_t CreateGuestSwapFile() noexcept {
+#if defined(GR2_XBOX_UWP) && GR2_HAS_WINRT_STORAGE
+    try {
+        const auto local = winrt::Windows::Storage::ApplicationData::Current().LocalFolder().Path();
+        std::wstring path{local.c_str()};
+        path += L"\\gr2-guest-swap.bin";
+        CREATEFILE2_EXTENDED_PARAMETERS params{};
+        params.dwSize = sizeof(params);
+        params.dwFileAttributes = FILE_ATTRIBUTE_TEMPORARY;
+        params.dwFileFlags = FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_RANDOM_ACCESS;
+        HANDLE file = CreateFile2FromAppW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                                          CREATE_ALWAYS, &params);
+        if (file == INVALID_HANDLE_VALUE) return 0;
+        DWORD returned = 0;
+        if (!DeviceIoControl(file, FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &returned, nullptr)) {
+            CloseHandle(file);
+            return 0;
+        }
+        return reinterpret_cast<std::uintptr_t>(file);
+    } catch (...) {
+        return 0;
+    }
+#else
+    return 0;
+#endif
+}
+
 u64 EffectiveGuestMemoryCeiling() noexcept {
     if (IsXboxUwpBuild()) {
         return GuestMemoryCeilingBytes;

@@ -131,9 +131,23 @@ GuestPagePagerResult GuestPagePagerEngine::PageIn(std::uint64_t address) {
 }
 
 GuestPagePagerResult GuestPagePagerEngine::ProtectPage(std::uint64_t address, std::uint32_t mode) {
-    (void)address;
-    (void)mode;
-    return GuestPagePagerResult::Refused("pager protection is not implemented yet");
+    std::scoped_lock lock(mutex_);
+    auto it = pages_.find(address);
+    if (it == pages_.end()) {
+        std::ostringstream message;
+        message << "protection requested for an unknown guest page at 0x" << std::hex << address;
+        return GuestPagePagerResult::Refused(message.str());
+    }
+    if (!backing_ || !backing_->ProtectPage(address, mode)) {
+        std::ostringstream message;
+        message << "could not change protection for guest page at 0x" << std::hex << address;
+        return GuestPagePagerResult::Refused(message.str());
+    }
+    it->second.protection = mode;
+    it->second.executable = (mode & GuestPageExecute) != 0;
+    it->second.mid_write = (mode & GuestPageWrite) != 0;
+    it->second.age = ++age_clock_;
+    return {true, {}};
 }
 
 #if defined(GR2_XBOX_UWP)
@@ -145,31 +159,46 @@ public:
         : section_(reinterpret_cast<HANDLE>(section)), alias_(static_cast<unsigned char*>(alias)),
           file_(reinterpret_cast<HANDLE>(file)), host_ops_(host_ops) {}
 
-    bool WriteSlot(std::uint64_t slot, std::uint64_t address, std::uint32_t,
+    ~UwpSparsePageBacking() override {
+        if (file_ && file_ != INVALID_HANDLE_VALUE) CloseHandle(file_);
+    }
+
+    bool WriteSlot(std::uint64_t slot, std::uint64_t address, std::uint32_t protection,
                    std::uint64_t size, std::uint64_t& hash) override {
-        OVERLAPPED offset{};
-        offset.Offset = static_cast<DWORD>(slot);
-        offset.OffsetHigh = static_cast<DWORD>(slot >> 32);
         DWORD written{};
+        LARGE_INTEGER offset{};
+        offset.QuadPart = static_cast<LONGLONG>(slot);
         const auto* bytes = reinterpret_cast<const unsigned char*>(address);
         hash = Fnv1a(bytes, size);
-        return file_ && file_ != INVALID_HANDLE_VALUE &&
-               WriteFile(file_, bytes, static_cast<DWORD>(size), &written, &offset) && written == size;
+        if (!file_ || file_ == INVALID_HANDLE_VALUE || !SetFilePointerEx(file_, offset, nullptr, FILE_BEGIN) ||
+            !WriteFile(file_, bytes, static_cast<DWORD>(size), &written, nullptr) || written != size)
+            return false;
+        saved_protection_[address] = protection;
+        return true;
     }
 
     bool ReadSlot(std::uint64_t slot, std::uint64_t address, std::uint64_t size) override {
-        OVERLAPPED offset{};
-        offset.Offset = static_cast<DWORD>(slot);
-        offset.OffsetHigh = static_cast<DWORD>(slot >> 32);
+        const auto it = saved_protection_.find(address);
+        if (it == saved_protection_.end() || !ProtectPage(address, GuestPageRead | GuestPageWrite))
+            return false;
+        LARGE_INTEGER offset{};
+        offset.QuadPart = static_cast<LONGLONG>(slot);
         DWORD read{};
-        return file_ && file_ != INVALID_HANDLE_VALUE &&
-               ReadFile(file_, reinterpret_cast<void*>(address), static_cast<DWORD>(size),
-                        &read, &offset) && read == size;
+        const bool read_ok = file_ && file_ != INVALID_HANDLE_VALUE &&
+                             SetFilePointerEx(file_, offset, nullptr, FILE_BEGIN) &&
+                             ReadFile(file_, reinterpret_cast<void*>(address), static_cast<DWORD>(size),
+                                      &read, nullptr) && read == size;
+        const bool restored = ProtectPage(address, it->second);
+        return read_ok && restored;
     }
 
     bool HashPage(std::uint64_t address, std::uint64_t size, std::uint64_t& hash) override {
         hash = Fnv1a(reinterpret_cast<const unsigned char*>(address), size);
         return true;
+    }
+
+    bool ProtectPage(std::uint64_t address, std::uint32_t mode) override {
+        return host_ops_.protect_page && host_ops_.protect_page(host_ops_.user, address, mode);
     }
 
     void MarkSlotIn(std::uint64_t) override {}
@@ -183,6 +212,7 @@ private:
     unsigned char* alias_{};
     HANDLE file_{};
     GuestPagePagerHostOps host_ops_{};
+    std::map<std::uint64_t, std::uint32_t> saved_protection_;
 };
 } // namespace
 #endif
@@ -191,6 +221,9 @@ std::unique_ptr<GuestPagePagerEngine> CreateUwpGuestPagePager(
     std::uintptr_t sparse_section, void* section_alias, std::uintptr_t swap_file,
     GuestPagePagerHostOps host_ops) {
 #if defined(GR2_XBOX_UWP)
+    if (sparse_section == 0 || section_alias == nullptr || swap_file == 0 ||
+        host_ops.unmap_page == nullptr || host_ops.protect_page == nullptr)
+        return {};
     return std::make_unique<GuestPagePagerEngine>(std::make_unique<UwpSparsePageBacking>(
         sparse_section, section_alias, swap_file, host_ops));
 #else

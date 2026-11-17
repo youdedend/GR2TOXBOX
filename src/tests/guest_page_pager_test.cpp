@@ -56,6 +56,8 @@ public:
         return true;
     }
 
+    bool ProtectPage(std::uint64_t, std::uint32_t) override { return true; }
+
     void MarkSlotIn(std::uint64_t slot) override { slot_out_[slot] = false; }
 
     bool UnmapPage(std::uint64_t address) override {

@@ -296,10 +296,62 @@ struct AddressSpace::Impl {
                                   MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0);
         ASSERT_MSG(ret == backing_base, "{}", Common::GetLastErrorMsg());
 #if defined(GR2_XBOX_UWP)
+        const HANDLE pager_swap_file = reinterpret_cast<HANDLE>(Core::Xbox::CreateGuestSwapFile());
+        ASSERT_MSG(pager_swap_file && pager_swap_file != INVALID_HANDLE_VALUE,
+                   "Unable to create the sparse LocalState guest swap file: {}",
+                   Common::GetLastErrorMsg());
         guest_page_pager = Core::Xbox::CreateUwpGuestPagePager(
-            reinterpret_cast<std::uintptr_t>(backing_handle), backing_base);
+            reinterpret_cast<std::uintptr_t>(backing_handle), backing_base,
+            reinterpret_cast<std::uintptr_t>(pager_swap_file),
+            {this, &Impl::PagerUnmapPage, &Impl::PagerProtectPage});
+        ASSERT_MSG(guest_page_pager,
+                   "Unable to initialize the UWP guest pager with real backing and host operations");
 #endif
     }
+
+#if defined(GR2_XBOX_UWP)
+    static bool PagerUnmapPage(void* user, std::uint64_t address) {
+        auto& self = *static_cast<Impl*>(user);
+        const bool ok = VirtualFreeEx(self.process, reinterpret_cast<void*>(address),
+                                      Core::Xbox::GuestPagerPageSize, MEM_DECOMMIT) != FALSE;
+        if (ok) {
+            LOG_INFO(Core, "Guest pager unmap hook at {:#x}: MEM_DECOMMIT succeeded", address);
+        } else {
+            LOG_ERROR(Core, "Guest pager unmap hook at {:#x}: MEM_DECOMMIT failed ({})",
+                      address, Common::GetLastErrorMsg());
+        }
+        return ok;
+    }
+
+    static bool PagerProtectPage(void* user, std::uint64_t address, std::uint32_t mode) {
+        auto& self = *static_cast<Impl*>(user);
+        DWORD protection = PAGE_NOACCESS;
+        if ((mode & Core::Xbox::GuestPageExecute) != 0) {
+            if ((mode & Core::Xbox::GuestPageWrite) != 0) {
+                LOG_ERROR(Core, "Guest pager protect hook refused W+X at {:#x}", address);
+                return false;
+            }
+            protection = (mode & Core::Xbox::GuestPageRead) ? PAGE_EXECUTE_READ : PAGE_EXECUTE;
+        } else if ((mode & Core::Xbox::GuestPageWrite) != 0) {
+            protection = PAGE_READWRITE;
+        } else if ((mode & Core::Xbox::GuestPageRead) != 0) {
+            protection = PAGE_READONLY;
+        }
+        DWORD old_protection{};
+        const bool ok = WinCompat::VirtualProtectCompat(reinterpret_cast<void*>(address),
+                                                         Core::Xbox::GuestPagerPageSize,
+                                                         protection, &old_protection);
+        if (ok) {
+            LOG_INFO(Core, "Guest pager protect hook at {:#x}: protection {:#x} succeeded",
+                     address, protection);
+        } else {
+            LOG_ERROR(Core, "Guest pager protect hook at {:#x}: protection {:#x} failed ({})",
+                      address, protection, Common::GetLastErrorMsg());
+        }
+        (void)self;
+        return ok;
+    }
+#endif
 
     ~Impl() {
         if (virtual_base) {

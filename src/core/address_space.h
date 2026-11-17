@@ -102,9 +102,8 @@ public:
     void Protect(VAddr virtual_addr, u64 size, MemoryPermission perms);
 
 #if defined(GR2_XBOX_UWP)
-    /// Explicit pager-operation boundary for the mapped sparse LocalState section.
-    /// The current implementation refuses eviction, page-in, and pager protection;
-    /// normal AddressSpace mappings/protection continue through the existing path.
+    /// Pager operations for the sparse LocalState backing. Host failures are
+    /// explicit and must not be treated as successful residency transitions.
     [[nodiscard]] Xbox::GuestPagePager& GuestPager() noexcept;
 #endif
 

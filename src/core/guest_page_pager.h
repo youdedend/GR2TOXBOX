@@ -50,6 +50,7 @@ public:
                           std::uint64_t size) = 0;
     virtual bool HashPage(std::uint64_t address, std::uint64_t size,
                           std::uint64_t& hash) = 0;
+    virtual bool ProtectPage(std::uint64_t address, std::uint32_t mode) = 0;
     virtual void MarkSlotIn(std::uint64_t slot) = 0;
     virtual bool UnmapPage(std::uint64_t address) = 0;
 };
@@ -94,9 +95,10 @@ protected:
 struct GuestPagePagerHostOps {
     void* user{};
     bool (*unmap_page)(void* user, std::uint64_t address){};
+    bool (*protect_page)(void* user, std::uint64_t address, std::uint32_t mode){};
 };
 [[nodiscard]] std::unique_ptr<GuestPagePagerEngine> CreateUwpGuestPagePager(
-    std::uintptr_t sparse_section, void* section_alias, std::uintptr_t swap_file = 0,
-    GuestPagePagerHostOps host_ops = {});
+    std::uintptr_t sparse_section, void* section_alias, std::uintptr_t swap_file,
+    GuestPagePagerHostOps host_ops);
 
 } // namespace Core::Xbox
