@@ -5,56 +5,77 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
-#include <string>
-#include <vector>
+#include <map>
+#include <set>
 
 namespace {
-class TempFilePager final : public Core::Xbox::GuestPagePager {
+class TempFileBacking final : public Core::Xbox::GuestPagePagerBacking {
 public:
-    TempFilePager() : file_(std::tmpfile()) {}
-    ~TempFilePager() override { if (file_) std::fclose(file_); }
+    TempFileBacking() : file_(std::tmpfile()) {}
+    ~TempFileBacking() override { if (file_) std::fclose(file_); }
 
-    Core::Xbox::GuestPagePagerResult EvictPage(std::uint64_t address) override {
-        (void)address;
-        calls_.push_back("evict");
-        if (!file_) return Core::Xbox::GuestPagePagerResult::Refused("temp-file write failed");
-        const std::array<unsigned char, 1> byte{0x5a};
-        if (std::fwrite(byte.data(), 1, byte.size(), file_) != byte.size() || std::fflush(file_) != 0)
-            return Core::Xbox::GuestPagePagerResult::Refused("temp-file write failed");
-        return {true, {}};
+    void AddPage(std::uint64_t address, std::array<unsigned char, Core::Xbox::GuestPagerPageSize> bytes) {
+        resident_[address] = bytes;
     }
 
-    Core::Xbox::GuestPagePagerResult PageIn(std::uint64_t address) override {
-        (void)address;
-        calls_.push_back("page-in");
-        if (!file_) return Core::Xbox::GuestPagePagerResult::Refused("temp-file read failed");
-        std::rewind(file_);
-        unsigned char byte{};
-        if (std::fread(&byte, 1, 1, file_) != 1 || byte != 0x5a)
-            return Core::Xbox::GuestPagePagerResult::Refused("temp-file read failed");
-        return {true, {}};
+    bool WriteSlot(std::uint64_t slot, std::uint64_t address, std::uint32_t protection,
+                   std::uint64_t size) override {
+        auto page = resident_.find(address);
+        if (!file_ || page == resident_.end() || size != page->second.size() ||
+            std::fseek(file_, static_cast<long>(slot), SEEK_SET) != 0 ||
+            std::fwrite(page->second.data(), 1, page->second.size(), file_) != page->second.size() ||
+            std::fflush(file_) != 0)
+            return false;
+        slot_out_[slot] = true;
+        saved_protection_[address] = protection;
+        return true;
     }
 
-    Core::Xbox::GuestPagePagerResult ProtectPage(std::uint64_t, std::uint32_t) override {
-        calls_.push_back("protect");
-        return Core::Xbox::GuestPagePagerResult::Refused("fake protection not part of this sequence");
+    bool UnmapPage(std::uint64_t address) override {
+        return unmapped_.insert(address).second;
     }
 
-    [[nodiscard]] const std::vector<std::string>& Calls() const { return calls_; }
+    [[nodiscard]] bool SlotOut(std::uint64_t slot) const {
+        auto it = slot_out_.find(slot);
+        return it != slot_out_.end() && it->second;
+    }
+    [[nodiscard]] bool Unmapped(std::uint64_t address) const { return unmapped_.contains(address); }
+    [[nodiscard]] std::uint32_t SavedProtection(std::uint64_t address) const {
+        auto it = saved_protection_.find(address);
+        return it == saved_protection_.end() ? 0 : it->second;
+    }
 
 private:
     std::FILE* file_{};
-    std::vector<std::string> calls_;
+    std::map<std::uint64_t, std::array<unsigned char, Core::Xbox::GuestPagerPageSize>> resident_;
+    std::map<std::uint64_t, bool> slot_out_;
+    std::map<std::uint64_t, std::uint32_t> saved_protection_;
+    std::set<std::uint64_t> unmapped_;
 };
 }
 
 int main() {
-    TempFilePager fake;
-    Core::Xbox::GuestPagePager& pager = fake;
-    const auto evicted = pager.EvictPage(0);
-    const auto paged_in = pager.PageIn(0);
-    const bool ok = evicted.accepted && paged_in.accepted &&
-                    fake.Calls() == std::vector<std::string>{"evict", "page-in"};
-    std::printf("guest page pager interface test: %s\n", ok ? "passed" : "failed");
+    using namespace Core::Xbox;
+    auto backing = std::make_unique<TempFileBacking>();
+    auto* store = backing.get();
+    backing->AddPage(0x10000, {});
+    backing->AddPage(0x20000, {});
+    backing->AddPage(0x30000, {});
+    backing->AddPage(0x40000, {});
+    GuestPagePagerEngine pager(std::move(backing));
+
+    pager.TrackPage(0x10000, 0x50000, GuestPageRead | GuestPageExecute, true, false);
+    pager.TrackPage(0x20000, 0x60000, GuestPageRead, false, true);
+    pager.TrackPage(0x30000, 0x70000, GuestPageRead, false, false);
+    pager.TrackPage(0x40000, 0x80000, GuestPageRead, false, false);
+    const auto result = pager.EvictPage(0);
+
+    const bool ok = result.accepted && pager.IsEvicted(0x30000) &&
+                    store->SlotOut(0x70000) && store->Unmapped(0x30000) &&
+                    store->SavedProtection(0x30000) == GuestPageRead &&
+                    !pager.IsEvicted(0x10000) && !store->Unmapped(0x10000) &&
+                    !pager.IsEvicted(0x20000) && !store->Unmapped(0x20000) &&
+                    !pager.IsEvicted(0x40000) && !store->Unmapped(0x40000);
+    std::printf("guest page pager eviction test: %s\n", ok ? "passed" : "failed");
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
