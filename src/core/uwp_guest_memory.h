@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -12,11 +13,16 @@ namespace Core::Xbox {
 inline constexpr std::uint64_t GuestAddressLimit = std::uint64_t{1} << 40;
 [[nodiscard]] bool IsValidGuestRange(std::uint64_t address, std::uint64_t size) noexcept;
 
-// Dependency-free host model for address-space and pager invariants. The UWP
-// AddressSpace currently consumes the range validator below; the modeled backing
-// and pager are intentionally separate until their Windows section/LocalState
-// adapter is wired in. This lets CI test the state machine without a console or
-// Windows SDK without claiming that the model is the production pager.
+// Shared guest-page residency state machine. The WindowsStore adapter owns the
+// section views and the host tests inject a temporary-file backing store through
+// the same pager interface.
+class GuestSwapStore {
+public:
+    virtual ~GuestSwapStore() = default;
+    virtual bool WritePage(std::uint64_t slot, const void* data, std::uint64_t size) = 0;
+    virtual bool ReadPage(std::uint64_t slot, void* data, std::uint64_t size) = 0;
+};
+
 class GuestMemoryModel {
 public:
     static constexpr std::uint64_t PageSize = 4096;
@@ -26,11 +32,14 @@ public:
         std::uint64_t evicted_bytes{};
         std::uint64_t pages_out{};
         std::uint64_t pages_in{};
+        std::uint64_t hash_errors{};
         std::uint64_t ceiling_bytes{};
+        std::uint64_t free_headroom_bytes{};
     };
 
     explicit GuestMemoryModel(std::uint64_t begin, std::uint64_t end,
-                              std::uint64_t ceiling_bytes);
+                              std::uint64_t ceiling_bytes,
+                              std::unique_ptr<GuestSwapStore> swap_store = {});
     ~GuestMemoryModel();
     GuestMemoryModel(GuestMemoryModel&&) noexcept;
     GuestMemoryModel& operator=(GuestMemoryModel&&) noexcept;
@@ -48,6 +57,8 @@ public:
                std::string& error);
     bool Read(std::uint64_t address, void* bytes, std::uint64_t size,
               std::string& error);
+    bool SetPinned(std::uint64_t address, std::uint64_t size, bool pinned,
+                   std::string& error);
     std::uint64_t EvictCold(std::uint64_t maximum_bytes);
     [[nodiscard]] Stats GetStats() const noexcept;
     [[nodiscard]] std::string TelemetryLine() const;

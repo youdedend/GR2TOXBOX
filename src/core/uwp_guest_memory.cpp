@@ -30,6 +30,20 @@ bool SeekSwap(std::FILE* file, std::uint64_t offset) {
     return fseeko(file, static_cast<off_t>(offset), SEEK_SET) == 0;
 #endif
 }
+class TemporaryFileSwapStore final : public GuestSwapStore {
+public:
+    TemporaryFileSwapStore() : file_(std::tmpfile()) {}
+    ~TemporaryFileSwapStore() override { if (file_) std::fclose(file_); }
+    bool WritePage(std::uint64_t slot, const void* data, std::uint64_t size) override {
+        return file_ && SeekSwap(file_, slot) && std::fwrite(data, 1, size, file_) == size &&
+               std::fflush(file_) == 0;
+    }
+    bool ReadPage(std::uint64_t slot, void* data, std::uint64_t size) override {
+        return file_ && SeekSwap(file_, slot) && std::fread(data, 1, size, file_) == size;
+    }
+private:
+    std::FILE* file_{};
+};
 } // namespace
 
 bool IsValidGuestRange(std::uint64_t address, std::uint64_t size) noexcept {
@@ -42,23 +56,27 @@ struct GuestMemoryModel::Impl {
         std::vector<std::uint8_t> resident;
         std::uint64_t swap_offset{};
         std::uint64_t hash{};
+        std::uint64_t last_touch{};
         unsigned protection{};
         bool committed{};
         bool evicted{};
         bool hash_valid{};
+        bool pinned{};
     };
     struct Region { std::uint64_t size{}; std::vector<Page> pages; };
-    std::uint64_t begin{}, end{}, ceiling{}, committed{}, evicted{}, out{}, in{};
+    std::uint64_t begin{}, end{}, ceiling{}, committed{}, evicted{}, out{}, in{}, hash_errors{}, clock{}, next_swap_slot{};
     std::map<std::uint64_t, Region> regions;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> free_ranges;
-    std::FILE* swap{};
+    std::unique_ptr<GuestSwapStore> swap;
 
-    Impl(std::uint64_t b, std::uint64_t e, std::uint64_t c)
-        : begin(b), end(e), ceiling(std::min(c, std::uint64_t{5119} * 1024 * 1024)) {
+    Impl(std::uint64_t b, std::uint64_t e, std::uint64_t c,
+         std::unique_ptr<GuestSwapStore> store)
+        : begin(b), end(e), ceiling(std::min(c, std::uint64_t{5119} * 1024 * 1024)),
+          swap(store ? std::move(store) : std::make_unique<TemporaryFileSwapStore>()) {
         if (b < e && b % PageSize == 0 && e % PageSize == 0 && IsValidGuestRange(b, e - b))
             free_ranges.emplace_back(b, e);
     }
-    ~Impl() { if (swap) std::fclose(swap); }
+    ~Impl() = default;
 
     auto Find(std::uint64_t address) { return regions.upper_bound(address) == regions.begin() ? regions.end() : std::prev(regions.upper_bound(address)); }
     bool Covered(std::uint64_t a, std::uint64_t n) {
@@ -68,24 +86,29 @@ struct GuestMemoryModel::Impl {
         const auto region_end = it->first + it->second.size;
         return a < region_end && n <= region_end - a;
     }
-    bool PageIn(Page& p, std::string& error) {
+    bool PageIn(Page& p, std::uint64_t guest_address, std::string& error) {
         if (!p.evicted) return true;
         if (!swap) { error = "Guest paging backing store is unavailable"; return false; }
         p.resident.resize(PageSize);
-        if (!SeekSwap(swap, p.swap_offset) || std::fread(p.resident.data(), 1, PageSize, swap) != PageSize) {
+        if (!swap->ReadPage(p.swap_offset, p.resident.data(), PageSize)) {
             error = "Could not page in a guest memory page"; p.resident.clear(); return false;
         }
         ++in;
         if (p.hash_valid && HashPage(p.resident.data()) != p.hash) {
-            error = "Guest memory swap integrity check failed"; p.resident.clear(); return false;
+            ++hash_errors;
+            std::ostringstream s;
+            s << "Guest memory swap integrity check failed at address 0x" << std::hex
+              << guest_address;
+            error = s.str(); p.resident.clear(); return false;
         }
         p.evicted = false; p.hash_valid = false; evicted -= PageSize; committed += PageSize;
         return true;
     }
 };
 
-GuestMemoryModel::GuestMemoryModel(std::uint64_t begin, std::uint64_t end, std::uint64_t ceiling)
-    : impl_(new Impl(begin, end, ceiling)) {}
+GuestMemoryModel::GuestMemoryModel(std::uint64_t begin, std::uint64_t end, std::uint64_t ceiling,
+                                   std::unique_ptr<GuestSwapStore> swap_store)
+    : impl_(new Impl(begin, end, ceiling, std::move(swap_store))) {}
 GuestMemoryModel::~GuestMemoryModel() { delete impl_; }
 GuestMemoryModel::GuestMemoryModel(GuestMemoryModel&& other) noexcept : impl_(std::exchange(other.impl_, nullptr)) {}
 GuestMemoryModel& GuestMemoryModel::operator=(GuestMemoryModel&& other) noexcept {
@@ -154,7 +177,7 @@ bool GuestMemoryModel::Commit(std::uint64_t address, std::uint64_t size, unsigne
         auto& p = it->second.pages[i];
         if (!p.committed) {
             p.resident.assign(PageSize, 0); p.committed = true; impl_->committed += PageSize;
-        } else if (p.evicted && !impl_->PageIn(p, error)) return false;
+        } else if (p.evicted && !impl_->PageIn(p, it->first + i * PageSize, error)) return false;
         p.protection = protection;
     }
     return true;
@@ -168,7 +191,7 @@ bool GuestMemoryModel::Protect(std::uint64_t address, std::uint64_t size, unsign
     auto it = impl_->Find(address); auto first = (address - it->first) / PageSize; auto count = size / PageSize;
     for (std::uint64_t i = first; i < first + count; ++i) {
         auto& p = it->second.pages[i];
-        if (p.protection && p.evicted && !impl_->PageIn(p, error)) return false;
+        if (p.protection && p.evicted && !impl_->PageIn(p, it->first + i * PageSize, error)) return false;
         p.protection = protection;
     }
     return true;
@@ -181,8 +204,8 @@ bool GuestMemoryModel::Write(std::uint64_t address, const void* bytes, std::uint
     while (done < size) {
         const auto off = address + done - it->first, pi = off / PageSize, within = off % PageSize, n = std::min(size - done, PageSize - within);
         auto& p = it->second.pages[pi]; if (!p.committed || !(p.protection & WriteAccess) || (p.protection & ExecuteAccess)) { error = "Guest write refused by page protection"; return false; }
-        if (p.evicted && !impl_->PageIn(p, error)) return false;
-        std::memcpy(p.resident.data() + within, src + done, n); done += n;
+        if (p.evicted && !impl_->PageIn(p, it->first + pi * PageSize, error)) return false;
+        std::memcpy(p.resident.data() + within, src + done, n); p.last_touch = ++impl_->clock; done += n;
     }
     return true;
 }
@@ -194,39 +217,58 @@ bool GuestMemoryModel::Read(std::uint64_t address, void* bytes, std::uint64_t si
     while (done < size) {
         const auto off = address + done - it->first, pi = off / PageSize, within = off % PageSize, n = std::min(size - done, PageSize - within);
         auto& p = it->second.pages[pi]; if (!p.committed || (!(p.protection & ReadAccess) && !(p.protection & ExecuteAccess))) { error = "Guest read refused by page protection"; return false; }
-        if (p.evicted && !impl_->PageIn(p, error)) return false;
-        std::memcpy(dst + done, p.resident.data() + within, n); done += n;
+        if (p.evicted && !impl_->PageIn(p, it->first + pi * PageSize, error)) return false;
+        std::memcpy(dst + done, p.resident.data() + within, n); p.last_touch = ++impl_->clock; done += n;
     }
+    return true;
+}
+
+bool GuestMemoryModel::SetPinned(std::uint64_t address, std::uint64_t size, bool pinned,
+                                 std::string& error) {
+    if (!impl_ || !impl_->Covered(address, size)) { error = "Invalid guest pin range"; return false; }
+    auto it = impl_->Find(address);
+    const auto first = (address - it->first) / PageSize;
+    for (std::uint64_t i = first; i < first + size / PageSize; ++i) it->second.pages[i].pinned = pinned;
     return true;
 }
 
 std::uint64_t GuestMemoryModel::EvictCold(std::uint64_t maximum_bytes) {
     if (!impl_ || maximum_bytes < PageSize) return 0;
-    if (!impl_->swap) impl_->swap = std::tmpfile(); // unlinked/delete-on-close host backing
-    if (!impl_->swap) return 0;
-    std::uint64_t released = 0, slot = 0;
+    struct Candidate { std::uint64_t age, address; Impl::Page* page; };
+    std::vector<Candidate> candidates;
     for (auto& [base, region] : impl_->regions) {
-        (void)base;
-        for (auto& p : region.pages) {
-            if (released >= maximum_bytes) return released;
-            if (!p.committed || p.evicted || !(p.protection & ReadAccess) || (p.protection & ExecuteAccess)) continue;
-            if (!SeekSwap(impl_->swap, slot) || std::fwrite(p.resident.data(), 1, PageSize, impl_->swap) != PageSize || std::fflush(impl_->swap) != 0) continue;
-            p.swap_offset = slot; slot += PageSize; p.hash = HashPage(p.resident.data()); p.hash_valid = true;
-            p.resident.clear(); p.resident.shrink_to_fit(); p.evicted = true;
-            impl_->committed -= PageSize; impl_->evicted += PageSize; ++impl_->out; released += PageSize;
+        for (std::size_t i = 0; i < region.pages.size(); ++i) {
+            auto& p = region.pages[i];
+            if (p.committed && !p.evicted && !p.pinned && (p.protection & ReadAccess) &&
+                !(p.protection & ExecuteAccess))
+                candidates.push_back({p.last_touch, base + i * PageSize, &p});
         }
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
+        return a.age < b.age;
+    });
+    std::uint64_t released = 0;
+    for (auto& candidate : candidates) {
+        if (released >= maximum_bytes) break;
+        auto& p = *candidate.page;
+        const auto slot = impl_->next_swap_slot;
+        if (!impl_->swap->WritePage(slot, p.resident.data(), PageSize)) continue;
+        impl_->next_swap_slot += PageSize;
+        p.swap_offset = slot; p.hash = HashPage(p.resident.data()); p.hash_valid = true;
+        p.resident.clear(); p.resident.shrink_to_fit(); p.evicted = true;
+        impl_->committed -= PageSize; impl_->evicted += PageSize; ++impl_->out; released += PageSize;
     }
     return released;
 }
 
 GuestMemoryModel::Stats GuestMemoryModel::GetStats() const noexcept {
     if (!impl_) return {};
-    return {impl_->committed, impl_->evicted, impl_->out, impl_->in, impl_->ceiling};
+    return {impl_->committed, impl_->evicted, impl_->out, impl_->in, impl_->hash_errors, impl_->ceiling, impl_->ceiling - std::min(impl_->ceiling, impl_->committed)};
 }
 std::string GuestMemoryModel::TelemetryLine() const {
     const auto s = GetStats(); std::ostringstream out;
     out << "Guest memory: committed=" << (s.committed_bytes >> 20) << " MiB, evicted=" << (s.evicted_bytes >> 20)
-        << " MiB, pages out=" << s.pages_out << ", pages in=" << s.pages_in << ", ceiling=" << (s.ceiling_bytes >> 20) << " MiB";
+        << " MiB, pages out=" << s.pages_out << ", pages in=" << s.pages_in << ", hash errors=" << s.hash_errors << ", ceiling=" << (s.ceiling_bytes >> 20) << " MiB, free headroom=" << (s.free_headroom_bytes >> 20) << " MiB";
     return out.str();
 }
 
