@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <iomanip>
+#include <sstream>
 #include <utility>
 
 #if defined(GR2_XBOX_UWP)
@@ -15,6 +17,17 @@
 #endif
 
 namespace Core::Xbox {
+#if defined(GR2_XBOX_UWP)
+namespace {
+std::uint64_t Fnv1a(const unsigned char* bytes, std::uint64_t size) {
+    std::uint64_t hash = 14695981039346656037ull;
+    for (std::uint64_t i = 0; i < size; ++i) {
+        hash = (hash ^ bytes[i]) * 1099511628211ull;
+    }
+    return hash;
+}
+} // namespace
+#endif
 
 GuestPagePagerEngine::GuestPagePagerEngine(std::unique_ptr<GuestPagePagerBacking> backing)
     : backing_(std::move(backing)) {}
@@ -73,21 +86,48 @@ GuestPagePagerResult GuestPagePagerEngine::EvictPage(std::uint64_t address) {
     assert(!victim->executable);
     assert(!victim->locked);
     assert(!victim->mid_write);
+    std::uint64_t hash{};
     if (!backing_ || !backing_->WriteSlot(victim->slot, victim->address,
-                                          victim->protection, GuestPagerPageSize)) {
+                                          victim->protection, GuestPagerPageSize, hash)) {
         return GuestPagePagerResult::Refused("sparse LocalState page write failed");
     }
     if (!backing_->UnmapPage(victim->address)) {
         return GuestPagePagerResult::Refused("guest page unmap failed after sparse write");
     }
     // Record the slot and exact guest protection before publishing it as out.
+    victim->hash = hash;
+    victim->hash_valid = true;
     victim->evicted = true;
     victim->age = ++age_clock_;
     return {true, {}};
 }
 
-GuestPagePagerResult GuestPagePagerEngine::PageIn(std::uint64_t) {
-    return GuestPagePagerResult::Refused("page-in is not implemented yet");
+GuestPagePagerResult GuestPagePagerEngine::PageIn(std::uint64_t address) {
+    std::scoped_lock lock(mutex_);
+    auto it = pages_.find(address);
+    if (it == pages_.end() || !it->second.evicted) {
+        std::ostringstream message;
+        message << "page-in requested for a resident or unknown address 0x" << std::hex << address;
+        return GuestPagePagerResult::Refused(message.str());
+    }
+    auto& page = it->second;
+    if (!backing_ || !backing_->ReadSlot(page.slot, address, GuestPagerPageSize)) {
+        std::ostringstream message;
+        message << "could not restore guest page at address 0x" << std::hex << address;
+        return GuestPagePagerResult::Refused(message.str());
+    }
+    std::uint64_t actual_hash{};
+    if (!page.hash_valid || !backing_->HashPage(address, GuestPagerPageSize, actual_hash) ||
+        actual_hash != page.hash) {
+        std::ostringstream message;
+        message << "guest page FNV-1a hash mismatch at address 0x" << std::hex << address;
+        return GuestPagePagerResult::Refused(message.str());
+    }
+    backing_->MarkSlotIn(page.slot);
+    page.evicted = false;
+    page.hash_valid = false;
+    page.age = ++age_clock_;
+    return {true, {}};
 }
 
 GuestPagePagerResult GuestPagePagerEngine::ProtectPage(std::uint64_t address, std::uint32_t mode) {
@@ -106,15 +146,33 @@ public:
           file_(reinterpret_cast<HANDLE>(file)), host_ops_(host_ops) {}
 
     bool WriteSlot(std::uint64_t slot, std::uint64_t address, std::uint32_t,
-                   std::uint64_t size) override {
+                   std::uint64_t size, std::uint64_t& hash) override {
         OVERLAPPED offset{};
         offset.Offset = static_cast<DWORD>(slot);
         offset.OffsetHigh = static_cast<DWORD>(slot >> 32);
         DWORD written{};
+        const auto* bytes = reinterpret_cast<const unsigned char*>(address);
+        hash = Fnv1a(bytes, size);
         return file_ && file_ != INVALID_HANDLE_VALUE &&
-               WriteFile(file_, reinterpret_cast<const void*>(address), static_cast<DWORD>(size),
-                         &written, &offset) && written == size;
+               WriteFile(file_, bytes, static_cast<DWORD>(size), &written, &offset) && written == size;
     }
+
+    bool ReadSlot(std::uint64_t slot, std::uint64_t address, std::uint64_t size) override {
+        OVERLAPPED offset{};
+        offset.Offset = static_cast<DWORD>(slot);
+        offset.OffsetHigh = static_cast<DWORD>(slot >> 32);
+        DWORD read{};
+        return file_ && file_ != INVALID_HANDLE_VALUE &&
+               ReadFile(file_, reinterpret_cast<void*>(address), static_cast<DWORD>(size),
+                        &read, &offset) && read == size;
+    }
+
+    bool HashPage(std::uint64_t address, std::uint64_t size, std::uint64_t& hash) override {
+        hash = Fnv1a(reinterpret_cast<const unsigned char*>(address), size);
+        return true;
+    }
+
+    void MarkSlotIn(std::uint64_t) override {}
 
     bool UnmapPage(std::uint64_t address) override {
         return host_ops_.unmap_page && host_ops_.unmap_page(host_ops_.user, address);

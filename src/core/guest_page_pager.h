@@ -44,7 +44,13 @@ class GuestPagePagerBacking {
 public:
     virtual ~GuestPagePagerBacking() = default;
     virtual bool WriteSlot(std::uint64_t slot, std::uint64_t address,
-                           std::uint32_t protection, std::uint64_t size) = 0;
+                           std::uint32_t protection, std::uint64_t size,
+                           std::uint64_t& hash) = 0;
+    virtual bool ReadSlot(std::uint64_t slot, std::uint64_t address,
+                          std::uint64_t size) = 0;
+    virtual bool HashPage(std::uint64_t address, std::uint64_t size,
+                          std::uint64_t& hash) = 0;
+    virtual void MarkSlotIn(std::uint64_t slot) = 0;
     virtual bool UnmapPage(std::uint64_t address) = 0;
 };
 
@@ -74,6 +80,8 @@ protected:
         bool locked{};
         bool mid_write{};
         bool evicted{};
+        bool hash_valid{};
+        std::uint64_t hash{};
     };
     std::unique_ptr<GuestPagePagerBacking> backing_;
     mutable std::mutex mutex_;
